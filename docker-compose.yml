@@ -1,0 +1,130 @@
+services:
+  # Express.js API Server
+  api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.api
+    container_name: devops-platform-api
+    restart: unless-stopped
+    working_dir: /app
+    volumes:
+      - ./backend:/app
+      - /app/node_modules
+    networks:
+      - devops-network
+    depends_on:
+      database:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    environment:
+      - DATABASE_URL=postgresql://devops_user:secret_password@database:5432/devops_platform?schema=public
+      - REDIS_URL=redis://redis:6379
+      - JWT_SECRET=devops-central-jwt-secret-key-change-in-production
+      - JWT_EXPIRES_IN=7d
+      - PORT=3000
+      - NODE_ENV=development
+      - GRAFANA_URL=https://grafana.map2u.com.my
+      - GRAFANA_FRONTEND_URL=https://grafana.map2u.com.my
+      - GRAFANA_API_KEY=
+      - GRAFANA_DASHBOARDS=overview:Overview;infrastructure:Infrastructure;deployments:Deployments
+      - SMTP_HOST=smtp-mail.outlook.com
+      - SMTP_PORT=587
+      - SMTP_SECURE=false
+      - SMTP_USERNAME=noreply@map2u.com.my
+      - SMTP_PASSWORD=L$579648507426ob
+      - SMTP_FROM_ADDRESS=noreply@map2u.com.my
+      - SMTP_FROM_NAME=DevOps Platform
+      - APP_URL=http://localhost:8080
+
+  # React Frontend
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.frontend
+    container_name: devops-platform-frontend
+    restart: unless-stopped
+    working_dir: /app
+    volumes:
+      - ./frontend/src:/app/src
+      - ./frontend/index.html:/app/index.html
+      - ./frontend/vite.config.ts:/app/vite.config.ts
+      - ./frontend/tsconfig.json:/app/tsconfig.json
+      - ./frontend/tsconfig.node.json:/app/tsconfig.node.json
+      - ./frontend/tailwind.config.js:/app/tailwind.config.js
+      - ./frontend/postcss.config.js:/app/postcss.config.js
+      - ./frontend/package.json:/app/package.json
+    networks:
+      - devops-network
+    environment:
+      - VITE_API_URL=http://localhost:8080/api
+
+  # Nginx Reverse Proxy
+  nginx:
+    image: nginx:alpine
+    container_name: devops-platform-nginx
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    volumes:
+      - ./docker/nginx/conf.d/app.conf:/etc/nginx/conf.d/default.conf
+      - ./frontend/dist:/usr/share/nginx/html
+    networks:
+      - devops-network
+    depends_on:
+      - api
+      - frontend
+
+  # PostgreSQL Database
+  database:
+    image: postgres:15-alpine
+    container_name: devops-platform-database
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_DB=devops_platform
+      - POSTGRES_USER=devops_user
+      - POSTGRES_PASSWORD=secret_password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - devops-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U devops_user -d devops_platform"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: devops-platform-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - devops-network
+
+  # Mailhog (Email Testing)
+  mailhog:
+    image: mailhog/mailhog:latest
+    container_name: devops-platform-mailhog
+    restart: unless-stopped
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+    networks:
+      - devops-network
+
+networks:
+  devops-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local

@@ -1,0 +1,52 @@
+{
+  "env": {
+    "ANTHROPIC_BASE_URL": "https://ai-hub.aicampus.my",
+    "ANTHROPIC_API_KEY": "sk-hub-4hDb1oHG4N6LUPtt6Rva9osqezYf_jmk9kJN-QorKfs",
+    "CLAUDE_CODE_USE_OAUTH": "false",
+    "ANTHROPIC_MODEL": "mimo-v2.5",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "mimo-v2.5",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "mimo-v2.5",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "mimo-v2.5"
+  },
+  "permissions": {
+    "allow": [
+      "PowerShell(docker compose logs frontend --tail 10 2>&1)",
+      "PowerShell(docker exec devops-platform-frontend wget -q -O - \"http://localhost:5173/src/App.tsx\" 2>&1)",
+      "PowerShell(docker exec devops-platform-frontend curl -s \"http://localhost:5173/src/App.tsx\" 2>&1)",
+      "PowerShell(docker exec devops-platform-nginx wget -q -O - \"http://frontend:5173/src/index.css\" 2>&1)",
+      "PowerShell(docker exec devops-platform-nginx nginx -s reload 2>&1)",
+      "PowerShell(docker compose restart api 2>&1)",
+      "PowerShell(docker compose restart api 2>&1; Start-Sleep -Seconds 5; $body = @{ email = \"admin@devops-platform.local\"; password = \"password\" } | ConvertTo-Json; $loginResp = Invoke-RestMethod -Uri \"http://localhost:8080/api/auth/login\" -Method POST -Body $body -ContentType \"application/json\" -ErrorAction SilentlyContinue; $token = $loginResp.data.accessToken; $headers = @{ Authorization = \"Bearer $token\" }; $dashboard = Invoke-RestMethod -Uri \"http://localhost:8080/api/dashboard/stats\" -Headers $headers -ErrorAction SilentlyContinue; Write-Host \"Dashboard success: $\\($dashboard.success\\)\"; Write-Host \"totalProjects: $\\($dashboard.data.totalProjects\\)\"; Write-Host \"totalInfrastructureNodes: $\\($dashboard.data.totalInfrastructureNodes\\)\"; Write-Host \"resourceHealth: $\\($dashboard.data.resourceHealth | ConvertTo-Json -Compress\\)\"; Write-Host \"recentActivities count: $\\($dashboard.data.recentActivities.Count\\)\")",
+      "PowerShell(docker exec devops-platform-api npx tsx prisma/seed.ts 2>&1)",
+      "PowerShell(docker compose -f \"c:\\\\Users\\\\ASUS\\\\OneDrive - MAP2U SDN BHD\\\\Desktop\\\\Devops_test\\\\docker-compose.yml\" ps 2>&1)",
+      "PowerShell(Invoke-WebRequest -Uri \"http://localhost:8080\" -UseBasicParsing -TimeoutSec 10 | Select-Object StatusCode, @{N='ContentLength';E={$_.Content.Length}})",
+      "PowerShell(Invoke-WebRequest -Uri \"http://localhost:8080/api/dashboard/stats\" -UseBasicParsing -TimeoutSec 10 | Select-Object StatusCode, @{N='Content';E={$_.Content.Substring\\(0, [Math]::Min\\(200, $_.Content.Length\\)\\)}})",
+      "PowerShell(docker restart devops-platform-api 2>&1)",
+      "PowerShell(docker restart devops-platform-api)",
+      "PowerShell(Invoke-WebRequest -Uri \"http://localhost:8080\" -UseBasicParsing -TimeoutSec 10)",
+      "PowerShell(Invoke-WebRequest -Uri \"http://localhost:8080/api/infrastructure\" -UseBasicParsing -TimeoutSec 10 -Headers @{Authorization=\"Bearer test\"} 2>&1 | Select-Object StatusCode, @{N='Content';E={$_.Content.Substring\\(0, [Math]::Min\\(200, $_.Content.Length\\)\\)}})",
+      "PowerShell(docker exec devops-platform-frontend node -e \"const l = require\\('lucide-react'\\); console.log\\('Pencil:', !!l.Pencil\\); console.log\\('Trash2:', !!l.Trash2\\); console.log\\('PencilIcon:', !!l.PencilIcon\\); console.log\\('Edit:', !!l.Edit\\);\" 2>&1)",
+      "PowerShell($r = Invoke-WebRequest -Uri \"http://localhost:8080/infrastructure\" -UseBasicParsing -TimeoutSec 10; $r.Content.Substring\\(0, 500\\))",
+      "PowerShell($login = Invoke-WebRequest -Uri \"http://localhost:8080/api/auth/login\" -Method POST -ContentType \"application/json\" -Body '{\"email\":\"admin@devops-platform.local\",\"password\":\"password\"}' -UseBasicParsing -SessionVariable session; $login.Content.Substring\\(0, 300\\))",
+      "PowerShell($token = \"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOjUsImlhdCI6MTc4ODI1NDk2NywiZXhwIjoxNzg4ODU5NzY3fQ.H6Ryn4axTaHcS9Mo9OwZKil4dZ-VD8WesR-AWp2_jv8\"; Invoke-WebRequest -Uri \"http://localhost:8080/api/infrastructure\" -Headers @{Authorization=\"Bearer $token\"} -UseBasicParsing | Select-Object StatusCode, @{N='Content';E={$_.Content.Substring\\(0, [Math]::Min\\(300, $_.Content.Length\\)\\)}})",
+      "PowerShell(docker restart devops_test-frontend-1 2>&1)",
+      "PowerShell($login = Invoke-RestMethod -Uri \"http://localhost/api/auth/login\" -Method POST -ContentType \"application/json\" -Body '{\"email\":\"admin@devops-platform.local\",\"password\":\"password\"}'; $token = $login.data.accessToken; $headers = @{Authorization = \"Bearer $token\"}; Invoke-RestMethod -Uri \"http://localhost/api/grafana/config\" -Headers $headers | ConvertTo-Json -Depth 5)",
+      "PowerShell($login = Invoke-RestMethod -Uri \"http://localhost:8080/api/auth/login\" -Method POST -ContentType \"application/json\" -Body '{\"email\":\"admin@devops-platform.local\",\"password\":\"password\"}'; $token = $login.data.accessToken; $headers = @{Authorization = \"Bearer $token\"}; $config = Invoke-RestMethod -Uri \"http://localhost:8080/api/grafana/config\" -Headers $headers; Write-Output \"Config response:\"; $config | ConvertTo-Json -Depth 5)",
+      "PowerShell($login = Invoke-RestMethod -Uri \"http://localhost:8080/api/auth/login\" -Method POST -ContentType \"application/json\" -Body '{\"email\":\"admin@devops-platform.local\",\"password\":\"password\"}'; $token = $login.data.accessToken; $headers = @{Authorization = \"Bearer $token\"}; try { $dash = Invoke-RestMethod -Uri \"http://localhost:8080/api/grafana/dashboards\" -Headers $headers; $dash | ConvertTo-Json -Depth 5 } catch { Write-Output \"Error: $\\($_.Exception.Message\\)\"; if \\($_.Exception.Response\\) { $reader = New-Object System.IO.StreamReader\\($_.Exception.Response.GetResponseStream\\(\\)\\); Write-Output \"Body: $\\($reader.ReadToEnd\\(\\)\\)\" } })",
+      "PowerShell($login = Invoke-RestMethod -Uri \"http://localhost:8080/api/auth/login\" -Method POST -ContentType \"application/json\" -Body '{\"email\":\"admin@devops-platform.local\",\"password\":\"password\"}'; $token = $login.data.accessToken; $headers = @{Authorization = \"Bearer $token\"; \"Content-Type\" = \"application/json\"}; # Fix the Grafana URL - strip to just the base URL; $body = @{url = \"https://grafana.map2u.com.my\"; apiKey = \"\"; dashboards = @\\(@{uid = \"overview\"; name = \"Overview\"}, @{uid = \"infrastructure\"; name = \"Infrastructure\"}, @{uid = \"deployments\"; name = \"Deployments\"}\\)} | ConvertTo-Json -Depth 3; Invoke-RestMethod -Uri \"http://localhost:8080/api/grafana/config\" -Method PUT -Headers $headers -Body $body | ConvertTo-Json -Depth 5)",
+      "PowerShell($login = Invoke-RestMethod -Uri \"http://localhost:8080/api/auth/login\" -Method POST -ContentType \"application/json\" -Body '{\"email\":\"admin@devops-platform.local\",\"password\":\"password\"}'; $token = $login.data.accessToken; $headers = @{Authorization = \"Bearer $token\"}; $config = Invoke-RestMethod -Uri \"http://localhost:8080/api/grafana/config\" -Headers $headers; Write-Output \"URL: $\\($config.data.url\\)\"; Write-Output \"isConfigured: $\\($config.data.isConfigured\\)\")",
+      "PowerShell($login = Invoke-RestMethod -Uri \"http://localhost:8080/api/auth/login\" -Method POST -ContentType \"application/json\" -Body '{\"email\":\"admin@devops-platform.local\",\"password\":\"password\"}'; $token = $login.data.accessToken; $headers = @{Authorization = \"Bearer $token\"; \"Content-Type\" = \"application/json\"}; $body = '{\"url\":\"https://grafana.map2u.com.my\"}'; try { $result = Invoke-WebRequest -Uri \"http://localhost:8080/api/grafana/config\" -Method PUT -Headers $headers -Body $body; Write-Output \"Status: $\\($result.StatusCode\\)\"; Write-Output \"Body: $\\($result.Content\\)\" } catch { Write-Output \"Error: $\\($_.Exception.Message\\)\"; if \\($_.Exception.Response\\) { $reader = New-Object System.IO.StreamReader\\($_.Exception.Response.GetResponseStream\\(\\)\\); Write-Output \"Response: $\\($reader.ReadToEnd\\(\\)\\)\" } })",
+      "PowerShell(docker exec devops-platform-database psql -U devops_user -d devops_platform -c \"UPDATE settings SET value = '\\\\\"https://grafana.map2u.com.my\\\\\"' WHERE key = 'grafana_url'\" 2>&1)",
+      "PowerShell(docker exec devops-platform-database psql -U devops_user -d devops_platform -c \"UPDATE settings SET value = to_json\\('https://grafana.map2u.com.my'::text\\) WHERE key = 'grafana_url';\" 2>&1)",
+      "PowerShell(docker exec devops-platform-database psql -U devops_user -d devops_platform -c \"UPDATE settings SET value = '[{\\\\\"uid\\\\\":\\\\\"overview\\\\\",\\\\\"name\\\\\":\\\\\"Overview\\\\\"},{\\\\\"uid\\\\\":\\\\\"infrastructure\\\\\",\\\\\"name\\\\\":\\\\\"Infrastructure\\\\\"},{\\\\\"uid\\\\\":\\\\\"deployments\\\\\",\\\\\"name\\\\\":\\\\\"Deployments\\\\\"}]'::json WHERE key = 'grafana_dashboards';\" 2>&1)",
+      "PowerShell(docker cp \"c:\\\\Users\\\\ASUS\\\\OneDrive - MAP2U SDN BHD\\\\Desktop\\\\Devops_test\\\\fix_grafana_url.sql\" devops-platform-database:/tmp/fix.sql)",
+      "PowerShell(docker exec devops-platform-database psql -U devops_user -d devops_platform -f /tmp/fix.sql 2>&1)",
+      "PowerShell($login = Invoke-RestMethod -Uri \"http://localhost:8080/api/auth/login\" -Method POST -ContentType \"application/json\" -Body '{\"email\":\"admin@devops-platform.local\",\"password\":\"password\"}'; $token = $login.data.accessToken; $headers = @{Authorization = \"Bearer $token\"}; try { $result = Invoke-RestMethod -Uri \"http://localhost:8080/api/grafana/dashboards\" -Headers $headers; Write-Output \"Success: $\\($result.success\\)\"; Write-Output \"Dashboards count: $\\($result.data.Count\\)\"; if \\($result.data.Count -gt 0\\) { $result.data | Select-Object -First 3 | ForEach-Object { Write-Output \"  - $\\($_.title\\) \\($\\($_.uid\\)\\)\" } } } catch { Write-Output \"Error: $\\($_.Exception.Message\\)\"; if \\($_.Exception.Response\\) { $reader = New-Object System.IO.StreamReader\\($_.Exception.Response.GetResponseStream\\(\\)\\); Write-Output \"Body: $\\($reader.ReadToEnd\\(\\)\\)\" } })",
+      "PowerShell(docker exec devops-platform-api curl -s -o /dev/null -w \"%{http_code}\" \"https://grafana.map2u.com.my/api/search?type=dash-db&limit=100\" 2>&1)",
+      "WebFetch(domain:grafana.map2u.com.my)",
+      "PowerShell(docker restart devops-platform-frontend 2>&1)"
+    ]
+  },
+  "autoUpdatesChannel": "latest",
+  "theme": "dark"
+}

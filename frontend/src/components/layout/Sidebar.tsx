@@ -1,0 +1,193 @@
+import React, { useState } from 'react';
+import { Link, useLocation } from 'react-router-dom';
+import {
+  LayoutDashboard,
+  FolderKanban,
+  Settings,
+  User,
+  ChevronLeft,
+  ChevronRight,
+  Server,
+  AlertTriangle,
+  Rocket,
+  Activity,
+  Users,
+  BarChart3,
+  Shield,
+  Globe,
+  Bell,
+  DollarSign,
+  FileText,
+  ClipboardCheck,
+  Headphones,
+} from 'lucide-react';
+import { cn } from '@/lib/utils';
+import { Button } from '@/components/ui/button';
+import { useAuth } from '@/hooks/useAuth';
+
+interface SidebarProps {
+  isCollapsed: boolean;
+  onToggle: () => void;
+}
+
+interface NavItem {
+  name: string;
+  href: string;
+  icon: React.ElementType;
+}
+
+interface NavGroup {
+  label: string;
+  items: NavItem[];
+}
+
+const navigation: NavGroup[] = [
+  {
+    label: 'Overview',
+    items: [
+      { name: 'Dashboard', href: '/', icon: LayoutDashboard },
+    ],
+  },
+  {
+    label: 'Core',
+    items: [
+      { name: 'Projects', href: '/projects', icon: FolderKanban },
+      { name: 'Infrastructure', href: '/infrastructure', icon: Server },
+      { name: 'Deployments', href: '/deployments', icon: Rocket },
+    ],
+  },
+  {
+    label: 'Network & Security',
+    items: [
+      { name: 'SSL Certificates', href: '/ssl', icon: Shield },
+      { name: 'Domains', href: '/domains', icon: Globe },
+    ],
+  },
+  {
+    label: 'Finance',
+    items: [
+      { name: 'Budget Control', href: '/budget', icon: DollarSign },
+      { name: 'Requisitions', href: '/requisitions', icon: FileText },
+      { name: 'Requisition Manage', href: '/requisitions/manage', icon: ClipboardCheck },
+    ],
+  },
+  {
+    label: 'Helpdesk',
+    items: [
+      { name: 'Tickets', href: '/helpdesk', icon: Headphones },
+      { name: 'Manage', href: '/helpdesk/manage', icon: Settings },
+      { name: 'Reports', href: '/helpdesk/reports', icon: BarChart3 },
+    ],
+  },
+  {
+    label: 'Operations',
+    items: [
+      { name: 'Incidents', href: '/incidents', icon: AlertTriangle },
+      { name: 'Grafana', href: '/grafana', icon: BarChart3 },
+      { name: 'Activity Log', href: '/activity-log', icon: Activity },
+    ],
+  },
+  {
+    label: 'Account',
+    items: [
+      { name: 'Notifications', href: '/notifications', icon: Bell },
+      { name: 'Users', href: '/admin/users', icon: Users },
+      { name: 'Profile', href: '/profile', icon: User },
+      { name: 'Settings', href: '/settings', icon: Settings },
+    ],
+  },
+];
+
+export function Sidebar({ isCollapsed, onToggle }: SidebarProps) {
+  const location = useLocation();
+  const { user } = useAuth();
+  const isAdmin = user?.roles?.some((r: any) => ['super-admin', 'devops-admin'].includes(r.name));
+
+  return (
+    <aside
+      className={cn(
+        'relative flex flex-col border-r bg-card transition-all duration-300',
+        isCollapsed ? 'w-16' : 'w-64'
+      )}
+    >
+      {/* Logo */}
+      <div className="flex h-14 items-center border-b px-4">
+        {!isCollapsed && (
+          <div className="flex items-center gap-2">
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground font-bold text-sm">
+              DC
+            </div>
+            <span className="font-semibold text-lg">DevOps Central</span>
+          </div>
+        )}
+        {isCollapsed && (
+          <div className="mx-auto flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground font-bold text-sm">
+            DC
+          </div>
+        )}
+      </div>
+
+      {/* Navigation */}
+      <nav className="flex-1 space-y-4 overflow-y-auto p-2">
+        {navigation.map((group) => (
+          <div key={group.label}>
+            {!isCollapsed && (
+              <div className="px-3 py-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground/60">
+                {group.label}
+              </div>
+            )}
+            <div className="space-y-0.5">
+              {group.items
+                .filter((item) => {
+                  // Hide admin-only items from non-admin users
+                  if ((item.name === 'Manage' || item.name === 'Users') && !isAdmin) return false;
+                  return true;
+                })
+                .map((item) => {
+                const isActive = location.pathname === item.href ||
+                  (item.href !== '/' && location.pathname.startsWith(item.href));
+                return (
+                  <Link
+                    key={item.name}
+                    to={item.href}
+                    className={cn(
+                      'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
+                      isActive
+                        ? 'bg-primary/10 text-primary'
+                        : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground',
+                      isCollapsed && 'justify-center px-2'
+                    )}
+                    title={isCollapsed ? item.name : undefined}
+                  >
+                    <item.icon className="h-5 w-5 shrink-0" />
+                    {!isCollapsed && <span>{item.name}</span>}
+                  </Link>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </nav>
+
+      {/* Collapse Toggle */}
+      <div className="border-t p-2">
+        <Button
+          variant="ghost"
+          size="sm"
+          className={cn('w-full', isCollapsed && 'px-2')}
+          onClick={onToggle}
+          aria-label={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+        >
+          {isCollapsed ? (
+            <ChevronRight className="h-4 w-4" />
+          ) : (
+            <>
+              <ChevronLeft className="h-4 w-4 mr-2" />
+              <span>Collapse</span>
+            </>
+          )}
+        </Button>
+      </div>
+    </aside>
+  );
+}
