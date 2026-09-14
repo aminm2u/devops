@@ -17,25 +17,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_started
-    environment:
-      - DATABASE_URL=postgresql://devops_user:secret_password@database:5432/devops_platform?schema=public
-      - REDIS_URL=redis://redis:6379
-      - JWT_SECRET=devops-central-jwt-secret-key-change-in-production
-      - JWT_EXPIRES_IN=7d
-      - PORT=3000
-      - NODE_ENV=development
-      - GRAFANA_URL=https://grafana.map2u.com.my
-      - GRAFANA_FRONTEND_URL=https://grafana.map2u.com.my
-      - GRAFANA_API_KEY=
-      - GRAFANA_DASHBOARDS=overview:Overview;infrastructure:Infrastructure;deployments:Deployments
-      - SMTP_HOST=smtp-mail.outlook.com
-      - SMTP_PORT=587
-      - SMTP_SECURE=false
-      - SMTP_USERNAME=noreply@map2u.com.my
-      - SMTP_PASSWORD=L$579648507426ob
-      - SMTP_FROM_ADDRESS=noreply@map2u.com.my
-      - SMTP_FROM_NAME=DevOps Platform
-      - APP_URL=http://localhost:8080
+    env_file:
+      - .env
 
   # React Frontend
   frontend:
@@ -56,8 +39,10 @@ services:
       - ./frontend/package.json:/app/package.json
     networks:
       - devops-network
+    env_file:
+      - .env
     environment:
-      - VITE_API_URL=http://localhost:8080/api
+      - VITE_PROXY_TARGET=http://api:3000
 
   # Nginx Reverse Proxy
   nginx:
@@ -82,16 +67,14 @@ services:
     restart: unless-stopped
     ports:
       - "5432:5432"
-    environment:
-      - POSTGRES_DB=devops_platform
-      - POSTGRES_USER=devops_user
-      - POSTGRES_PASSWORD=secret_password
+    env_file:
+      - .env
     volumes:
       - postgres_data:/var/lib/postgresql/data
     networks:
       - devops-network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U devops_user -d devops_platform"]
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 5s
       timeout: 5s
       retries: 5

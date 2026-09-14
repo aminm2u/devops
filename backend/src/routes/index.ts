@@ -21,6 +21,8 @@ import notificationRoutes from "./notification.routes.js";
 import budgetRoutes from "./budget.routes.js";
 import requisitionRoutes from "./requisition.routes.js";
 import helpdeskRoutes from "./helpdesk.routes.js";
+import taskRoutes from "./task.routes.js";
+import referenceRoutes from "./reference.routes.js";
 
 const router = Router();
 
@@ -46,5 +48,7 @@ router.use("/notifications", notificationRoutes);
 router.use("/budget", budgetRoutes);
 router.use("/requisitions", requisitionRoutes);
 router.use("/helpdesk", helpdeskRoutes);
+router.use("/tasks", taskRoutes);
+router.use("/references", referenceRoutes);
 
 export default router;

@@ -7,6 +7,10 @@ async function main() {
   console.log("Seeding database...");
 
   // Clean existing data (order matters for foreign keys)
+  await prisma.projectTask.deleteMany();
+  await prisma.taskColumn.deleteMany();
+  await prisma.requisitionItem.deleteMany();
+  await prisma.requisitionForm.deleteMany();
   await prisma.document.deleteMany();
   await prisma.securityFinding.deleteMany();
   await prisma.disasterRecoveryPlan.deleteMany();
@@ -29,6 +33,31 @@ async function main() {
   await prisma.permission.deleteMany();
   await prisma.role.deleteMany();
   await prisma.user.deleteMany();
+  await prisma.department.deleteMany();
+  await prisma.position.deleteMany();
+  await prisma.employmentType.deleteMany();
+  await prisma.projectType.deleteMany();
+  await prisma.projectRole.deleteMany();
+
+  // ==================== Reference Data ====================
+  console.log("Creating reference data...");
+  const deptIT = await prisma.department.create({ data: { code: 'IT', name: 'Information Technology' } });
+  const deptHR = await prisma.department.create({ data: { code: 'HR', name: 'Human Resources' } });
+  const deptFIN = await prisma.department.create({ data: { code: 'FIN', name: 'Finance' } });
+
+  const posDev = await prisma.position.create({ data: { name: 'Software Engineer', gradeLevel: 3 } });
+  const posDevOps = await prisma.position.create({ data: { name: 'DevOps Engineer', gradeLevel: 4 } });
+  const posManager = await prisma.position.create({ data: { name: 'IT Manager', gradeLevel: 6 } });
+
+  const empPerm = await prisma.employmentType.create({ data: { name: 'Permanent' } });
+  const empContract = await prisma.employmentType.create({ data: { name: 'Contract' } });
+
+  const ptInternal = await prisma.projectType.create({ data: { name: 'Internal Tool' } });
+  const ptExternal = await prisma.projectType.create({ data: { name: 'Client Project' } });
+
+  const prManager = await prisma.projectRole.create({ data: { name: 'Project Manager' } });
+  const prLead = await prisma.projectRole.create({ data: { name: 'Team Lead' } });
+  const prDeveloper = await prisma.projectRole.create({ data: { name: 'Developer' } });
 
   // ==================== Create Roles ====================
   console.log("Creating roles...");
@@ -314,6 +343,11 @@ async function main() {
       password: hashedPassword,
       isActive: true,
       emailVerifiedAt: new Date(),
+      employeeId: "EMP-001",
+      departmentId: deptIT.id,
+      positionId: posManager.id,
+      employmentTypeId: empPerm.id,
+      joinDate: new Date("2020-01-15"),
     },
   });
 
@@ -332,6 +366,11 @@ async function main() {
       password: hashedPassword,
       isActive: true,
       emailVerifiedAt: new Date(),
+      employeeId: "EMP-002",
+      departmentId: deptIT.id,
+      positionId: posDevOps.id,
+      employmentTypeId: empPerm.id,
+      joinDate: new Date("2021-03-10"),
     },
   });
 
@@ -350,6 +389,11 @@ async function main() {
       password: hashedPassword,
       isActive: true,
       emailVerifiedAt: new Date(),
+      employeeId: "EMP-003",
+      departmentId: deptIT.id,
+      positionId: posDev.id,
+      employmentTypeId: empContract.id,
+      joinDate: new Date("2022-06-01"),
     },
   });
 
@@ -368,6 +412,9 @@ async function main() {
       password: hashedPassword,
       isActive: true,
       emailVerifiedAt: new Date(),
+      employeeId: "EMP-004",
+      departmentId: deptHR.id,
+      joinDate: new Date("2019-11-20"),
     },
   });
 
@@ -393,6 +440,10 @@ async function main() {
       repositoryUrl: "https://github.com/company/ecommerce",
       documentationUrl: "https://docs.company.com/ecommerce",
       isActive: true,
+      projectTypeId: ptExternal.id,
+      startDate: new Date("2023-01-01"),
+      expectedEndDate: new Date("2024-12-31"),
+      healthStatus: "On Track",
     },
   });
 
@@ -406,6 +457,12 @@ async function main() {
       ownerId: devopsAdmin.id,
       repositoryUrl: "https://github.com/company/mobile-banking",
       isActive: true,
+      projectTypeId: ptExternal.id,
+      startDate: new Date("2023-06-01"),
+      expectedEndDate: new Date("2024-05-30"),
+      healthStatus: "Delayed",
+      delayReason: "Waiting on external API vendor",
+      recommendation: "Assign more developers to the vendor integration team.",
     },
   });
 
@@ -418,6 +475,10 @@ async function main() {
       priority: "medium",
       ownerId: engineer.id,
       isActive: true,
+      projectTypeId: ptInternal.id,
+      startDate: new Date("2024-01-01"),
+      expectedEndDate: new Date("2025-01-01"),
+      healthStatus: "Planning",
     },
   });
 
@@ -489,7 +550,7 @@ async function main() {
     data: {
       projectId: project1.id,
       userId: admin.id,
-      role: "lead",
+      projectRoleId: prManager.id,
     },
   });
 
@@ -497,7 +558,7 @@ async function main() {
     data: {
       projectId: project1.id,
       userId: engineer.id,
-      role: "engineer",
+      projectRoleId: prDeveloper.id,
     },
   });
 
@@ -505,7 +566,7 @@ async function main() {
     data: {
       projectId: project2.id,
       userId: devopsAdmin.id,
-      role: "lead",
+      projectRoleId: prLead.id,
     },
   });
 
@@ -513,7 +574,7 @@ async function main() {
     data: {
       projectId: project2.id,
       userId: engineer.id,
-      role: "engineer",
+      projectRoleId: prDeveloper.id,
     },
   });
 
@@ -522,8 +583,40 @@ async function main() {
     data: {
       projectId: project1.id,
       userId: viewer.id,
-      role: "viewer",
+      projectRoleId: prDeveloper.id,
     },
+  });
+
+  // ==================== Kanban Setup ====================
+  console.log("Creating Kanban boards...");
+
+  const colTodo = await prisma.taskColumn.create({ data: { projectId: project1.id, name: "To Do", position: 1 } });
+  const colInProgress = await prisma.taskColumn.create({ data: { projectId: project1.id, name: "In Progress", position: 2 } });
+  const colReview = await prisma.taskColumn.create({ data: { projectId: project1.id, name: "Review", position: 3 } });
+  const colDone = await prisma.taskColumn.create({ data: { projectId: project1.id, name: "Done", position: 4 } });
+
+  await prisma.projectTask.create({
+    data: {
+      projectId: project1.id,
+      columnId: colTodo.id,
+      title: "Setup CI/CD Pipeline",
+      description: "Configure GitHub Actions for deployment",
+      assignees: [devopsAdmin.id],
+      priority: "high",
+      dueDate: new Date("2024-10-01"),
+    }
+  });
+
+  await prisma.projectTask.create({
+    data: {
+      projectId: project1.id,
+      columnId: colInProgress.id,
+      title: "Design Database Schema",
+      description: "ERD design for the new microservice",
+      assignees: [engineer.id],
+      priority: "medium",
+      dueDate: new Date("2024-09-15"),
+    }
   });
 
   // ==================== Create Infrastructure Nodes ====================

@@ -7,6 +7,52 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// ==================== REFERENCE TABLES ====================
+
+model Department {
+  id        Int      @id @default(autoincrement())
+  code      String   @unique
+  name      String
+  managerId Int?     @map("manager_id")
+  employees User[]
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("departments")
+}
+
+model Position {
+  id         Int    @id @default(autoincrement())
+  name       String
+  gradeLevel Int?   @map("grade_level")
+  employees  User[]
+
+  @@map("positions")
+}
+
+model EmploymentType {
+  id        Int    @id @default(autoincrement())
+  name      String
+  employees User[]
+
+  @@map("employment_types")
+}
+
+model ProjectType {
+  id       Int       @id @default(autoincrement())
+  name     String
+  projects Project[]
+
+  @@map("project_types")
+}
+
+model ProjectRole {
+  id          Int              @id @default(autoincrement())
+  name        String
+  assignments TeamAssignment[]
+
+  @@map("project_roles")
+}
+
 // ==================== Auth & Session Tables ====================
 
 model User {
@@ -17,34 +63,51 @@ model User {
   password        String
   isActive        Boolean   @default(true) @map("is_active")
   rememberToken   String?   @map("remember_token")
-  createdAt       DateTime  @default(now()) @map("created_at")
-  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  // New Employee Fields
+  employeeId       String?   @unique @map("employee_id")
+  joinDate         DateTime? @map("join_date")
+  departmentId     Int?      @map("department_id")
+  positionId       Int?      @map("position_id")
+  employmentTypeId Int?      @map("employment_type_id")
+  directManagerId  Int?      @map("direct_manager_id")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
   // Relations
-  ownedProjects               Project[]
-  teamAssignments             TeamAssignment[]
-  assignedIncidents           Incident[]          @relation("IncidentAssignedTo")
-  reportedIncidents           Incident[]          @relation("IncidentReportedBy")
-  deployedDeployments         Deployment[]        @relation("DeploymentDeployedBy")
-  infrastructureNodesCreated  InfrastructureNode[] @relation("InfrastructureNodeCreatedBy")
-  requestedChanges         ChangeManagement[]   @relation("ChangeRequestedBy")
-  approvedChanges          ChangeManagement[]   @relation("ChangeApprovedBy")
-  implementedChanges       ChangeManagement[]   @relation("ChangeImplementedBy")
-  assignedSecurityFindings SecurityFinding[]   @relation("SecurityAssignedTo")
-  reportedSecurityFindings SecurityFinding[]   @relation("SecurityReportedBy")
-  authoredDocuments        Document[]
-  activities               ActivityLog[]
-  notifications            Notification[]
-  helpdeskAssignedTickets  HelpdeskTicket[] @relation("HelpdeskAssignedTo")
-  helpdeskReportedTickets  HelpdeskTicket[] @relation("HelpdeskReportedBy")
-  helpdeskComments         HelpdeskComment[]
-  helpdeskAttachments      HelpdeskAttachment[]
+  department     Department?     @relation(fields: [departmentId], references: [id])
+  position       Position?       @relation(fields: [positionId], references: [id])
+  employmentType EmploymentType? @relation(fields: [employmentTypeId], references: [id])
+  directManager  User?           @relation("ManagerToEmployee", fields: [directManagerId], references: [id])
+  subordinates   User[]          @relation("ManagerToEmployee")
+
+  ownedProjects              Project[]
+  teamAssignments            TeamAssignment[]
+  assignedIncidents          Incident[]           @relation("IncidentAssignedTo")
+  reportedIncidents          Incident[]           @relation("IncidentReportedBy")
+  deployedDeployments        Deployment[]         @relation("DeploymentDeployedBy")
+  infrastructureNodesCreated InfrastructureNode[] @relation("InfrastructureNodeCreatedBy")
+  requestedChanges           ChangeManagement[]   @relation("ChangeRequestedBy")
+  approvedChanges            ChangeManagement[]   @relation("ChangeApprovedBy")
+  implementedChanges         ChangeManagement[]   @relation("ChangeImplementedBy")
+  assignedSecurityFindings   SecurityFinding[]    @relation("SecurityAssignedTo")
+  reportedSecurityFindings   SecurityFinding[]    @relation("SecurityReportedBy")
+  authoredDocuments          Document[]
+  activities                 ActivityLog[]
+  notifications              Notification[]
+  helpdeskAssignedTickets    HelpdeskTicket[]     @relation("HelpdeskAssignedTo")
+  helpdeskReportedTickets    HelpdeskTicket[]     @relation("HelpdeskReportedBy")
+  helpdeskComments           HelpdeskComment[]
+  helpdeskAttachments        HelpdeskAttachment[]
+  taskComments               TaskComment[]
+  taskActivities             TaskActivity[]
 
   @@map("users")
 }
 
 model PasswordResetToken {
-  email     String   @id
+  email     String    @id
   token     String
   createdAt DateTime? @map("created_at")
 
@@ -80,12 +143,12 @@ model Notification {
 }
 
 model Session {
-  id            String   @id
-  userId        Int?     @map("user_id")
-  ipAddress     String?  @map("ip_address") @db.VarChar(45)
-  userAgent     String?  @map("user_agent") @db.Text
-  payload       String   @db.Text
-  lastActivity  Int      @map("last_activity")
+  id           String  @id
+  userId       Int?    @map("user_id")
+  ipAddress    String? @map("ip_address") @db.VarChar(45)
+  userAgent    String? @map("user_agent") @db.Text
+  payload      String  @db.Text
+  lastActivity Int     @map("last_activity")
 
   @@index([userId])
   @@index([lastActivity])
@@ -111,29 +174,29 @@ model CacheLock {
 }
 
 model Job {
-  id           Int     @id @default(autoincrement())
-  queue        String
-  payload      String  @db.Text
-  attempts     Int     @db.SmallInt
-  reservedAt   Int?    @map("reserved_at")
-  availableAt  Int     @map("available_at")
-  createdAt    Int     @map("created_at")
+  id          Int    @id @default(autoincrement())
+  queue       String
+  payload     String @db.Text
+  attempts    Int    @db.SmallInt
+  reservedAt  Int?   @map("reserved_at")
+  availableAt Int    @map("available_at")
+  createdAt   Int    @map("created_at")
 
   @@index([queue])
   @@map("jobs")
 }
 
 model JobBatch {
-  id             String  @id
-  name           String
-  totalJobs      Int     @map("total_jobs")
-  pendingJobs    Int     @map("pending_jobs")
-  failedJobs     Int     @map("failed_jobs")
-  failedJobIds   String  @map("failed_job_ids") @db.Text
-  options        String? @db.Text
-  cancelledAt    Int?    @map("cancelled_at")
-  createdAt      Int     @map("created_at")
-  finishedAt     Int?    @map("finished_at")
+  id           String  @id
+  name         String
+  totalJobs    Int     @map("total_jobs")
+  pendingJobs  Int     @map("pending_jobs")
+  failedJobs   Int     @map("failed_jobs")
+  failedJobIds String  @map("failed_job_ids") @db.Text
+  options      String? @db.Text
+  cancelledAt  Int?    @map("cancelled_at")
+  createdAt    Int     @map("created_at")
+  finishedAt   Int?    @map("finished_at")
 
   @@map("job_batches")
 }
@@ -160,8 +223,8 @@ model Role {
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
-  permissions          RoleHasPermission[]
-  modelHasRoles        ModelHasRole[]
+  permissions   RoleHasPermission[]
+  modelHasRoles ModelHasRole[]
 
   @@map("roles")
 }
@@ -242,22 +305,33 @@ model ActivityLog {
 // ==================== Domain Tables ====================
 
 model Project {
-  id              Int      @id @default(autoincrement())
-  name            String
-  slug            String   @unique
-  description     String?  @db.Text
-  status          String   @default("active")
-  priority        String   @default("medium")
-  ownerId         Int      @map("owner_id")
-  repositoryUrl   String?  @map("repository_url")
+  id               Int     @id @default(autoincrement())
+  name             String
+  slug             String  @unique
+  description      String? @db.Text
+  status           String  @default("active")
+  priority         String  @default("medium")
+  ownerId          Int     @map("owner_id")
+  repositoryUrl    String? @map("repository_url")
   documentationUrl String? @map("documentation_url")
-  isActive        Boolean  @default(true) @map("is_active")
-  createdAt       DateTime @default(now()) @map("created_at")
-  updatedAt       DateTime @updatedAt @map("updated_at")
-  deletedAt       DateTime? @map("deleted_at")
+
+  // New Fields
+  projectTypeId   Int?      @map("project_type_id")
+  startDate       DateTime? @map("start_date")
+  expectedEndDate DateTime? @map("expected_end_date")
+  actualEndDate   DateTime? @map("actual_end_date")
+  healthStatus    String    @default("On Track") @map("health_status")
+  delayReason     String?   @map("delay_reason") @db.Text
+  recommendation  String?   @db.Text
+
+  isActive  Boolean   @default(true) @map("is_active")
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
 
   // Relations
-  owner                 User                 @relation(fields: [ownerId], references: [id])
+  owner                 User                   @relation(fields: [ownerId], references: [id])
+  projectType           ProjectType?           @relation(fields: [projectTypeId], references: [id])
   environments          Environment[]
   teamAssignments       TeamAssignment[]
   infrastructureNodes   InfrastructureNode[]
@@ -274,7 +348,10 @@ model Project {
   documents             Document[]
   credentials           Credential[]
   budgetItems           BudgetItem[]
+  requisitionForms      RequisitionForm[]
   helpdeskTickets       HelpdeskTicket[]
+  tasks                 ProjectTask[] // Kanban tasks
+  taskColumns           TaskColumn[] // Kanban columns
 
   @@index([status])
   @@index([isActive])
@@ -282,27 +359,27 @@ model Project {
 }
 
 model Environment {
-  id          Int      @id @default(autoincrement())
-  projectId   Int      @map("project_id")
+  id          Int       @id @default(autoincrement())
+  projectId   Int       @map("project_id")
   name        String
   slug        String
   type        String
-  description String?  @db.Text
+  description String?   @db.Text
   url         String?
-  isActive    Boolean  @default(true) @map("is_active")
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
+  isActive    Boolean   @default(true) @map("is_active")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
   deletedAt   DateTime? @map("deleted_at")
 
   // Relations
-  project            Project              @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project             Project              @relation(fields: [projectId], references: [id], onDelete: Cascade)
   infrastructureNodes InfrastructureNode[]
-  services           Service[]
-  applications       Application[]
-  deployments        Deployment[]
-  incidents          Incident[]
-  changeManagements  ChangeManagement[]
-  backupJobs         BackupJob[]
+  services            Service[]
+  applications        Application[]
+  deployments         Deployment[]
+  incidents           Incident[]
+  changeManagements   ChangeManagement[]
+  backupJobs          BackupJob[]
 
   @@unique([projectId, slug])
   @@index([type])
@@ -311,49 +388,116 @@ model Environment {
 }
 
 model TeamAssignment {
-  id         Int       @id @default(autoincrement())
-  projectId  Int       @map("project_id")
-  userId     Int       @map("user_id")
-  role       String    @default("developer")
-  assignedAt DateTime? @map("assigned_at")
-  isActive   Boolean   @default(true) @map("is_active")
-  createdAt  DateTime  @default(now()) @map("created_at")
-  updatedAt  DateTime  @updatedAt @map("updated_at")
+  id            Int       @id @default(autoincrement())
+  projectId     Int       @map("project_id")
+  userId        Int       @map("user_id")
+  projectRoleId Int       @map("project_role_id")
+  assignedAt    DateTime? @map("assigned_at")
+  isActive      Boolean   @default(true) @map("is_active")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
 
   // Relations
-  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project     Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  projectRole ProjectRole @relation(fields: [projectRoleId], references: [id], onDelete: Restrict)
 
   @@unique([projectId, userId])
-  @@index([role])
+  @@index([projectRoleId])
   @@index([isActive])
   @@map("team_assignments")
 }
 
+// ==================== Kanban & Tasks ====================
+
+model TaskColumn {
+  id        Int      @id @default(autoincrement())
+  projectId Int      @map("project_id")
+  name      String
+  position  Int      @default(0) // order on the board
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  project Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  tasks   ProjectTask[]
+
+  @@map("task_columns")
+}
+
+model ProjectTask {
+  id          Int       @id @default(autoincrement())
+  projectId   Int       @map("project_id")
+  columnId    Int       @map("column_id")
+  title       String
+  description String?   @db.Text
+  assignees   Json?     // Storing as JSON array of user IDs
+  priority    String    @default("medium") // low, medium, high, urgent
+  position    Int       @default(0) // order within column
+  dueDate     DateTime? @map("due_date")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  project   Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  column    TaskColumn     @relation(fields: [columnId], references: [id], onDelete: Cascade)
+  comments  TaskComment[]
+  activities TaskActivity[]
+
+  @@map("project_tasks")
+}
+
+model TaskComment {
+  id        Int      @id @default(autoincrement())
+  taskId     Int      @map("task_id")
+  userId     Int      @map("user_id")
+  content    String   @db.Text
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  task ProjectTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  user User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([taskId])
+  @@map("task_comments")
+}
+
+model TaskActivity {
+  id        Int      @id @default(autoincrement())
+  taskId     Int      @map("task_id")
+  userId     Int      @map("user_id")
+  action     String   // created, moved, commented, assigned, unassigned, updated, deleted
+  details    Json?    // extra context like { from: "To Do", to: "In Progress", assignee: "John" }
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  task ProjectTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  user User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([taskId])
+  @@map("task_activities")
+}
+
 model InfrastructureNode {
-  id                   Int      @id @default(autoincrement())
-  projectId            Int      @map("project_id")
-  environmentId        Int?     @map("environment_id")
-  name                 String
-  hostname             String?
-  ipAddress            String?  @map("ip_address")
-  type                 String
-  status               String   @default("unknown")
-  operatingSystem      String?  @map("operating_system")
-  cpuCores             Int?     @map("cpu_cores")
-  memoryGb             Int?     @map("memory_gb")
-  storageGb            Int?     @map("storage_gb")
-  provider             String?
-  providerRegion       String?  @map("provider_region")
-  providerInstanceId   String?  @map("provider_instance_id")
-  username             String?
-  password             String?
-  isActive             Boolean  @default(true) @map("is_active")
-  metadata             Json?
-  createdBy            Int?     @map("created_by")
-  createdAt            DateTime @default(now()) @map("created_at")
-  updatedAt            DateTime @updatedAt @map("updated_at")
-  deletedAt            DateTime? @map("deleted_at")
+  id                 Int       @id @default(autoincrement())
+  projectId          Int       @map("project_id")
+  environmentId      Int?      @map("environment_id")
+  name               String
+  hostname           String?
+  ipAddress          String?   @map("ip_address")
+  type               String
+  status             String    @default("unknown")
+  operatingSystem    String?   @map("operating_system")
+  cpuCores           Int?      @map("cpu_cores")
+  memoryGb           Int?      @map("memory_gb")
+  storageGb          Int?      @map("storage_gb")
+  provider           String?
+  providerRegion     String?   @map("provider_region")
+  providerInstanceId String?   @map("provider_instance_id")
+  username           String?
+  password           String?
+  isActive           Boolean   @default(true) @map("is_active")
+  metadata           Json?
+  createdBy          Int?      @map("created_by")
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
+  deletedAt          DateTime? @map("deleted_at")
 
   // Relations
   project       Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
@@ -368,29 +512,29 @@ model InfrastructureNode {
 }
 
 model Service {
-  id                  Int      @id @default(autoincrement())
-  projectId           Int      @map("project_id")
-  environmentId       Int?     @map("environment_id")
-  infrastructureNodeId Int?    @map("infrastructure_node_id")
-  name                String
-  slug                String
-  type                String
-  status              String   @default("unknown")
-  version             String?
-  port                Int?
-  healthCheckUrl      String?  @map("health_check_url")
-  description         String?  @db.Text
-  isActive            Boolean  @default(true) @map("is_active")
-  metadata            Json?
-  createdAt           DateTime @default(now()) @map("created_at")
-  updatedAt           DateTime @updatedAt @map("updated_at")
-  deletedAt           DateTime? @map("deleted_at")
+  id                   Int       @id @default(autoincrement())
+  projectId            Int       @map("project_id")
+  environmentId        Int?      @map("environment_id")
+  infrastructureNodeId Int?      @map("infrastructure_node_id")
+  name                 String
+  slug                 String
+  type                 String
+  status               String    @default("unknown")
+  version              String?
+  port                 Int?
+  healthCheckUrl       String?   @map("health_check_url")
+  description          String?   @db.Text
+  isActive             Boolean   @default(true) @map("is_active")
+  metadata             Json?
+  createdAt            DateTime  @default(now()) @map("created_at")
+  updatedAt            DateTime  @updatedAt @map("updated_at")
+  deletedAt            DateTime? @map("deleted_at")
 
   // Relations
-  project             Project              @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  environment         Environment?         @relation(fields: [environmentId], references: [id], onDelete: SetNull)
-  infrastructureNode  InfrastructureNode?  @relation(fields: [infrastructureNodeId], references: [id], onDelete: SetNull)
-  domains             Domain[]
+  project            Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  environment        Environment?        @relation(fields: [environmentId], references: [id], onDelete: SetNull)
+  infrastructureNode InfrastructureNode? @relation(fields: [infrastructureNodeId], references: [id], onDelete: SetNull)
+  domains            Domain[]
 
   @@unique([projectId, slug])
   @@index([type])
@@ -400,27 +544,27 @@ model Service {
 }
 
 model Application {
-  id              Int      @id @default(autoincrement())
-  projectId       Int      @map("project_id")
-  environmentId   Int?     @map("environment_id")
-  name            String
-  slug            String
-  type            String
-  status          String   @default("unknown")
-  version         String?
-  repositoryUrl   String?  @map("repository_url")
-  deploymentUrl   String?  @map("deployment_url")
-  healthCheckUrl  String?  @map("health_check_url")
-  description     String?  @db.Text
-  isActive        Boolean  @default(true) @map("is_active")
-  metadata        Json?
-  createdAt       DateTime @default(now()) @map("created_at")
-  updatedAt       DateTime @updatedAt @map("updated_at")
-  deletedAt       DateTime? @map("deleted_at")
+  id             Int       @id @default(autoincrement())
+  projectId      Int       @map("project_id")
+  environmentId  Int?      @map("environment_id")
+  name           String
+  slug           String
+  type           String
+  status         String    @default("unknown")
+  version        String?
+  repositoryUrl  String?   @map("repository_url")
+  deploymentUrl  String?   @map("deployment_url")
+  healthCheckUrl String?   @map("health_check_url")
+  description    String?   @db.Text
+  isActive       Boolean   @default(true) @map("is_active")
+  metadata       Json?
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+  deletedAt      DateTime? @map("deleted_at")
 
   // Relations
-  project          Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  environment      Environment?       @relation(fields: [environmentId], references: [id], onDelete: SetNull)
+  project          Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  environment      Environment?      @relation(fields: [environmentId], references: [id], onDelete: SetNull)
   domains          Domain[]
   deployments      Deployment[]
   securityFindings SecurityFinding[]
@@ -451,9 +595,9 @@ model Domain {
   deletedAt      DateTime? @map("deleted_at")
 
   // Relations
-  project        Project?           @relation(fields: [projectId], references: [id], onDelete: SetNull)
-  service        Service?           @relation(fields: [serviceId], references: [id], onDelete: SetNull)
-  application    Application?       @relation(fields: [applicationId], references: [id], onDelete: SetNull)
+  project         Project?         @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  service         Service?         @relation(fields: [serviceId], references: [id], onDelete: SetNull)
+  application     Application?     @relation(fields: [applicationId], references: [id], onDelete: SetNull)
   sslCertificates SslCertificate[]
 
   @@unique([projectId, name])
@@ -465,26 +609,26 @@ model Domain {
 }
 
 model SslCertificate {
-  id               Int       @id @default(autoincrement())
-  domainId         Int?      @map("domain_id")
-  projectId        Int       @map("project_id")
-  name             String
-  type             String    @default("letsencrypt")
-  status           String    @default("pending")
-  issuer           String?
-  subject          String?
-  serialNumber     String?   @map("serial_number")
-  fingerprint      String?
-  notBefore        DateTime? @map("not_before")
-  notAfter         DateTime? @map("not_after")
-  autoRenew        Boolean   @default(true) @map("auto_renew")
-  certificatePath  String?   @map("certificate_path")
-  privateKeyPath   String?   @map("private_key_path")
-  isActive         Boolean   @default(true) @map("is_active")
-  metadata         Json?
-  createdAt        DateTime  @default(now()) @map("created_at")
-  updatedAt        DateTime  @updatedAt @map("updated_at")
-  deletedAt        DateTime? @map("deleted_at")
+  id              Int       @id @default(autoincrement())
+  domainId        Int?      @map("domain_id")
+  projectId       Int       @map("project_id")
+  name            String
+  type            String    @default("letsencrypt")
+  status          String    @default("pending")
+  issuer          String?
+  subject         String?
+  serialNumber    String?   @map("serial_number")
+  fingerprint     String?
+  notBefore       DateTime? @map("not_before")
+  notAfter        DateTime? @map("not_after")
+  autoRenew       Boolean   @default(true) @map("auto_renew")
+  certificatePath String?   @map("certificate_path")
+  privateKeyPath  String?   @map("private_key_path")
+  isActive        Boolean   @default(true) @map("is_active")
+  metadata        Json?
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+  deletedAt       DateTime? @map("deleted_at")
 
   // Relations
   domain  Domain? @relation(fields: [domainId], references: [id], onDelete: Cascade)
@@ -519,12 +663,12 @@ model Deployment {
   updatedAt       DateTime  @updatedAt @map("updated_at")
 
   // Relations
-  project          Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  environment      Environment? @relation(fields: [environmentId], references: [id], onDelete: SetNull)
-  application      Application? @relation(fields: [applicationId], references: [id], onDelete: SetNull)
-  deployedByUser   User?        @relation("DeploymentDeployedBy", fields: [deployedBy], references: [id], onDelete: SetNull)
-  rollbackFrom     Deployment?  @relation("DeploymentRollback", fields: [rollbackFromId], references: [id], onDelete: SetNull)
-  rollbacks        Deployment[] @relation("DeploymentRollback")
+  project        Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  environment    Environment? @relation(fields: [environmentId], references: [id], onDelete: SetNull)
+  application    Application? @relation(fields: [applicationId], references: [id], onDelete: SetNull)
+  deployedByUser User?        @relation("DeploymentDeployedBy", fields: [deployedBy], references: [id], onDelete: SetNull)
+  rollbackFrom   Deployment?  @relation("DeploymentRollback", fields: [rollbackFromId], references: [id], onDelete: SetNull)
+  rollbacks      Deployment[] @relation("DeploymentRollback")
 
   @@index([status])
   @@index([deployedAt])
@@ -554,10 +698,10 @@ model Incident {
   deletedAt     DateTime? @map("deleted_at")
 
   // Relations
-  project     Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  environment Environment? @relation(fields: [environmentId], references: [id], onDelete: SetNull)
-  assignedUser User?       @relation("IncidentAssignedTo", fields: [assignedTo], references: [id], onDelete: SetNull)
-  reportedUser User?       @relation("IncidentReportedBy", fields: [reportedBy], references: [id], onDelete: SetNull)
+  project      Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  environment  Environment? @relation(fields: [environmentId], references: [id], onDelete: SetNull)
+  assignedUser User?        @relation("IncidentAssignedTo", fields: [assignedTo], references: [id], onDelete: SetNull)
+  reportedUser User?        @relation("IncidentReportedBy", fields: [reportedBy], references: [id], onDelete: SetNull)
 
   @@unique([projectId, slug])
   @@index([status])
@@ -568,29 +712,29 @@ model Incident {
 }
 
 model ChangeManagement {
-  id              Int       @id @default(autoincrement())
-  projectId       Int       @map("project_id")
-  environmentId   Int?      @map("environment_id")
-  title           String
-  slug            String
-  description     String?   @db.Text
-  type            String    @default("standard")
-  status          String    @default("draft")
-  riskLevel       String    @default("medium") @map("risk_level")
-  priority        String    @default("medium")
-  requestedBy     Int?      @map("requested_by")
-  approvedBy      Int?      @map("approved_by")
-  implementedBy   Int?      @map("implemented_by")
-  requestedAt     DateTime? @map("requested_at")
-  approvedAt      DateTime? @map("approved_at")
-  implementedAt   DateTime? @map("implemented_at")
-  rollbackPlan    String?   @map("rollback_plan") @db.Text
-  notes           String?   @db.Text
-  isActive        Boolean   @default(true) @map("is_active")
-  metadata        Json?
-  createdAt       DateTime  @default(now()) @map("created_at")
-  updatedAt       DateTime  @updatedAt @map("updated_at")
-  deletedAt       DateTime? @map("deleted_at")
+  id            Int       @id @default(autoincrement())
+  projectId     Int       @map("project_id")
+  environmentId Int?      @map("environment_id")
+  title         String
+  slug          String
+  description   String?   @db.Text
+  type          String    @default("standard")
+  status        String    @default("draft")
+  riskLevel     String    @default("medium") @map("risk_level")
+  priority      String    @default("medium")
+  requestedBy   Int?      @map("requested_by")
+  approvedBy    Int?      @map("approved_by")
+  implementedBy Int?      @map("implemented_by")
+  requestedAt   DateTime? @map("requested_at")
+  approvedAt    DateTime? @map("approved_at")
+  implementedAt DateTime? @map("implemented_at")
+  rollbackPlan  String?   @map("rollback_plan") @db.Text
+  notes         String?   @db.Text
+  isActive      Boolean   @default(true) @map("is_active")
+  metadata      Json?
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+  deletedAt     DateTime? @map("deleted_at")
 
   // Relations
   project         Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
@@ -609,27 +753,27 @@ model ChangeManagement {
 }
 
 model BackupJob {
-  id                 Int       @id @default(autoincrement())
-  projectId          Int       @map("project_id")
-  environmentId      Int?      @map("environment_id")
-  name               String
-  slug               String
-  type               String
-  status             String    @default("pending")
-  schedule           String?
-  retentionDays      Int       @default(30) @map("retention_days")
-  storageLocation    String?   @map("storage_location")
-  storagePath        String?   @map("storage_path")
-  lastRunAt          DateTime? @map("last_run_at")
-  nextRunAt          DateTime? @map("next_run_at")
-  lastSuccessAt      DateTime? @map("last_success_at")
-  lastFailureAt      DateTime? @map("last_failure_at")
-  lastBackupSizeBytes BigInt?  @map("last_backup_size_bytes")
-  isActive           Boolean   @default(true) @map("is_active")
-  metadata           Json?
-  createdAt          DateTime  @default(now()) @map("created_at")
-  updatedAt          DateTime  @updatedAt @map("updated_at")
-  deletedAt          DateTime? @map("deleted_at")
+  id                  Int       @id @default(autoincrement())
+  projectId           Int       @map("project_id")
+  environmentId       Int?      @map("environment_id")
+  name                String
+  slug                String
+  type                String
+  status              String    @default("pending")
+  schedule            String?
+  retentionDays       Int       @default(30) @map("retention_days")
+  storageLocation     String?   @map("storage_location")
+  storagePath         String?   @map("storage_path")
+  lastRunAt           DateTime? @map("last_run_at")
+  nextRunAt           DateTime? @map("next_run_at")
+  lastSuccessAt       DateTime? @map("last_success_at")
+  lastFailureAt       DateTime? @map("last_failure_at")
+  lastBackupSizeBytes BigInt?   @map("last_backup_size_bytes")
+  isActive            Boolean   @default(true) @map("is_active")
+  metadata            Json?
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
+  deletedAt           DateTime? @map("deleted_at")
 
   // Relations
   project     Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
@@ -642,26 +786,26 @@ model BackupJob {
 }
 
 model DisasterRecoveryPlan {
-  id            Int       @id @default(autoincrement())
-  projectId     Int       @map("project_id")
-  name          String
-  slug          String
-  description   String?   @db.Text
-  type          String    @default("standard")
-  status        String    @default("draft")
-  priority      String    @default("medium")
-  rpoHours      Int?      @map("rpo_hours")
-  rtoHours      Int?      @map("rto_hours")
-  lastTestedAt  DateTime? @map("last_tested_at")
-  nextTestAt    DateTime? @map("next_test_at")
-  testResults   Json?     @map("test_results")
-  procedures    Json?
-  contacts      Json?
-  isActive      Boolean   @default(true) @map("is_active")
-  metadata      Json?
-  createdAt     DateTime  @default(now()) @map("created_at")
-  updatedAt     DateTime  @updatedAt @map("updated_at")
-  deletedAt     DateTime? @map("deleted_at")
+  id           Int       @id @default(autoincrement())
+  projectId    Int       @map("project_id")
+  name         String
+  slug         String
+  description  String?   @db.Text
+  type         String    @default("standard")
+  status       String    @default("draft")
+  priority     String    @default("medium")
+  rpoHours     Int?      @map("rpo_hours")
+  rtoHours     Int?      @map("rto_hours")
+  lastTestedAt DateTime? @map("last_tested_at")
+  nextTestAt   DateTime? @map("next_test_at")
+  testResults  Json?     @map("test_results")
+  procedures   Json?
+  contacts     Json?
+  isActive     Boolean   @default(true) @map("is_active")
+  metadata     Json?
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+  deletedAt    DateTime? @map("deleted_at")
 
   // Relations
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
@@ -674,36 +818,36 @@ model DisasterRecoveryPlan {
 }
 
 model SecurityFinding {
-  id                 Int       @id @default(autoincrement())
-  projectId          Int       @map("project_id")
-  applicationId      Int?      @map("application_id")
-  title              String
-  slug               String
-  description        String?   @db.Text
-  status             String    @default("open")
-  severity           String    @default("medium")
-  priority           String    @default("medium")
-  type               String    @default("vulnerability")
-  source             String?
-  cveId              String?   @map("cve_id")
-  cvssScore          Float?    @map("cvss_score")
-  affectedComponent  String?   @map("affected_component")
-  remediation        String?   @db.Text
-  assignedTo         Int?      @map("assigned_to")
-  reportedBy         Int?      @map("reported_by")
-  foundAt            DateTime? @map("found_at")
-  resolvedAt         DateTime? @map("resolved_at")
-  isActive           Boolean   @default(true) @map("is_active")
-  metadata           Json?
-  createdAt          DateTime  @default(now()) @map("created_at")
-  updatedAt          DateTime  @updatedAt @map("updated_at")
-  deletedAt          DateTime? @map("deleted_at")
+  id                Int       @id @default(autoincrement())
+  projectId         Int       @map("project_id")
+  applicationId     Int?      @map("application_id")
+  title             String
+  slug              String
+  description       String?   @db.Text
+  status            String    @default("open")
+  severity          String    @default("medium")
+  priority          String    @default("medium")
+  type              String    @default("vulnerability")
+  source            String?
+  cveId             String?   @map("cve_id")
+  cvssScore         Float?    @map("cvss_score")
+  affectedComponent String?   @map("affected_component")
+  remediation       String?   @db.Text
+  assignedTo        Int?      @map("assigned_to")
+  reportedBy        Int?      @map("reported_by")
+  foundAt           DateTime? @map("found_at")
+  resolvedAt        DateTime? @map("resolved_at")
+  isActive          Boolean   @default(true) @map("is_active")
+  metadata          Json?
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+  deletedAt         DateTime? @map("deleted_at")
 
   // Relations
-  project     Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  application Application? @relation(fields: [applicationId], references: [id], onDelete: SetNull)
-  assignedUser User?       @relation("SecurityAssignedTo", fields: [assignedTo], references: [id], onDelete: SetNull)
-  reportedUser User?       @relation("SecurityReportedBy", fields: [reportedBy], references: [id], onDelete: SetNull)
+  project      Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  application  Application? @relation(fields: [applicationId], references: [id], onDelete: SetNull)
+  assignedUser User?        @relation("SecurityAssignedTo", fields: [assignedTo], references: [id], onDelete: SetNull)
+  reportedUser User?        @relation("SecurityReportedBy", fields: [reportedBy], references: [id], onDelete: SetNull)
 
   @@unique([projectId, slug])
   @@index([status])
@@ -715,24 +859,24 @@ model SecurityFinding {
 }
 
 model Document {
-  id        Int      @id @default(autoincrement())
-  projectId Int      @map("project_id")
+  id        Int       @id @default(autoincrement())
+  projectId Int       @map("project_id")
   title     String
   slug      String
-  content   String?  @db.Text
-  type      String   @default("other")
-  status    String   @default("draft")
-  authorId  Int?     @map("author_id")
-  version   String   @default("1.0")
-  isActive  Boolean  @default(true) @map("is_active")
+  content   String?   @db.Text
+  type      String    @default("other")
+  status    String    @default("draft")
+  authorId  Int?      @map("author_id")
+  version   String    @default("1.0")
+  isActive  Boolean   @default(true) @map("is_active")
   metadata  Json?
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
   deletedAt DateTime? @map("deleted_at")
 
   // Relations
-  project  Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  author   User?   @relation(fields: [authorId], references: [id], onDelete: SetNull)
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  author  User?   @relation(fields: [authorId], references: [id], onDelete: SetNull)
 
   @@unique([projectId, slug])
   @@index([type])
@@ -776,7 +920,7 @@ model BudgetItem {
   updatedAt       DateTime  @updatedAt @map("updated_at")
   deletedAt       DateTime? @map("deleted_at")
 
-  project      Project?             @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  project      Project?            @relation(fields: [projectId], references: [id], onDelete: SetNull)
   expenditures BudgetExpenditure[]
   requisitions RequisitionForm[]
 
@@ -830,6 +974,7 @@ model Credential {
 
 model RequisitionForm {
   id                 Int       @id @default(autoincrement())
+  projectId          Int?      @map("project_id")
   division           String
   processOwner       String?   @map("process_owner")
   budgetItemId       Int?      @map("budget_item_id")
@@ -849,8 +994,10 @@ model RequisitionForm {
 
   items      RequisitionItem[]
   budgetItem BudgetItem?       @relation(fields: [budgetItemId], references: [id], onDelete: SetNull)
+  project    Project?          @relation(fields: [projectId], references: [id], onDelete: SetNull)
 
   @@index([status])
+  @@index([projectId])
   @@index([division])
   @@index([budgetItemId])
   @@index([isActive])
@@ -858,16 +1005,16 @@ model RequisitionForm {
 }
 
 model RequisitionItem {
-  id                Int      @id @default(autoincrement())
-  requisitionFormId Int      @map("requisition_form_id")
+  id                Int       @id @default(autoincrement())
+  requisitionFormId Int       @map("requisition_form_id")
   description       String
-  qty               Int      @default(1)
-  unitPrice         Decimal  @default(0) @map("unit_price") @db.Decimal(12, 2)
-  uom               String?  @map("uom")
+  qty               Int       @default(1)
+  unitPrice         Decimal   @default(0) @map("unit_price") @db.Decimal(12, 2)
+  uom               String?   @map("uom")
   remark            String?
-  isActive          Boolean  @default(true) @map("is_active")
-  createdAt         DateTime @default(now()) @map("created_at")
-  updatedAt         DateTime @updatedAt @map("updated_at")
+  isActive          Boolean   @default(true) @map("is_active")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
   deletedAt         DateTime? @map("deleted_at")
 
   requisitionForm RequisitionForm @relation(fields: [requisitionFormId], references: [id], onDelete: Cascade)
@@ -879,13 +1026,13 @@ model RequisitionItem {
 // ==================== Helpdesk Module ====================
 
 model HelpdeskCategory {
-  id          Int    @id @default(autoincrement())
-  name        String @unique
+  id          Int      @id @default(autoincrement())
+  name        String   @unique
   description String?
   icon        String?
   color       String?
-  sortOrder   Int    @default(0) @map("sort_order")
-  isActive    Boolean @default(true) @map("is_active")
+  sortOrder   Int      @default(0) @map("sort_order")
+  isActive    Boolean  @default(true) @map("is_active")
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
@@ -922,12 +1069,12 @@ model HelpdeskTicket {
   updatedAt       DateTime  @updatedAt @map("updated_at")
   deletedAt       DateTime? @map("deleted_at")
 
-  project      Project?             @relation(fields: [projectId], references: [id], onDelete: SetNull)
-  category     HelpdeskCategory?    @relation(fields: [categoryId], references: [id], onDelete: SetNull)
-  assignee     User?                @relation("HelpdeskAssignedTo", fields: [assignedTo], references: [id], onDelete: SetNull)
-  reporter     User?                @relation("HelpdeskReportedBy", fields: [reportedBy], references: [id], onDelete: SetNull)
-  comments     HelpdeskComment[]
-  attachments  HelpdeskAttachment[]
+  project     Project?             @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  category    HelpdeskCategory?    @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  assignee    User?                @relation("HelpdeskAssignedTo", fields: [assignedTo], references: [id], onDelete: SetNull)
+  reporter    User?                @relation("HelpdeskReportedBy", fields: [reportedBy], references: [id], onDelete: SetNull)
+  comments    HelpdeskComment[]
+  attachments HelpdeskAttachment[]
 
   @@unique([projectId, slug])
   @@index([status])
@@ -940,14 +1087,14 @@ model HelpdeskTicket {
 }
 
 model HelpdeskComment {
-  id         Int      @id @default(autoincrement())
-  ticketId   Int      @map("ticket_id")
-  userId     Int?     @map("user_id")
-  content    String   @db.Text
-  isInternal Boolean  @default(false) @map("is_internal")
-  isActive   Boolean  @default(true) @map("is_active")
-  createdAt  DateTime @default(now()) @map("created_at")
-  updatedAt  DateTime @updatedAt @map("updated_at")
+  id         Int       @id @default(autoincrement())
+  ticketId   Int       @map("ticket_id")
+  userId     Int?      @map("user_id")
+  content    String    @db.Text
+  isInternal Boolean   @default(false) @map("is_internal")
+  isActive   Boolean   @default(true) @map("is_active")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
   deletedAt  DateTime? @map("deleted_at")
 
   ticket HelpdeskTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)

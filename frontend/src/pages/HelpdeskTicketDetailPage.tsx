@@ -61,6 +61,8 @@ import {
 import { formatDate, formatRelativeTime } from '@/lib/utils';
 import toast from 'react-hot-toast';
 import { useAuth } from '@/hooks/useAuth';
+import { useSocket } from '@/hooks/useSocket';
+import { useEffect } from 'react';
 
 // ── Role Helpers ─────────────────────────────────────────────────────────────
 
@@ -115,11 +117,37 @@ export function HelpdeskTicketDetailPage() {
   const queryClient = useQueryClient();
   const { user } = useAuth();
   const userRole = getUserRole(user);
+  const { socket, isConnected } = useSocket();
 
   const [newComment, setNewComment] = useState('');
   const [isInternal, setIsInternal] = useState(false);
   const [showAssignDialog, setShowAssignDialog] = useState(false);
   const [showSatisfactionDialog, setShowSatisfactionDialog] = useState(false);
+
+  useEffect(() => {
+    if (socket && isConnected && id) {
+      socket.emit('join-ticket', id);
+
+      socket.on('new-comment', (data) => {
+        if (data.ticketId === parseInt(id)) {
+          // invalidate or update cache
+          queryClient.invalidateQueries({ queryKey: ['helpdesk-ticket', id] });
+        }
+      });
+
+      socket.on('ticket-updated', (data) => {
+        if (data.ticket?.id === parseInt(id)) {
+          queryClient.invalidateQueries({ queryKey: ['helpdesk-ticket', id] });
+        }
+      });
+
+      return () => {
+        socket.emit('leave-ticket', id);
+        socket.off('new-comment');
+        socket.off('ticket-updated');
+      };
+    }
+  }, [socket, isConnected, id, queryClient]);
 
   // Fetch ticket
   const { data: ticketData, isLoading } = useQuery({

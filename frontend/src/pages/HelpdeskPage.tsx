@@ -48,6 +48,8 @@ import {
 import { Skeleton } from '@/components/ui/skeleton';
 import apiClient from '@/api/client';
 import { useAuth } from '@/hooks/useAuth';
+import { useSocket } from '@/hooks/useSocket';
+import { useEffect } from 'react';
 import {
   HelpdeskTicket,
   HelpdeskTicketStatus,
@@ -136,6 +138,19 @@ export function HelpdeskPage() {
   const queryClient = useQueryClient();
   const { user } = useAuth();
   const userRole = getUserRole(user);
+  const { socket, isConnected } = useSocket();
+
+  useEffect(() => {
+    if (socket && isConnected) {
+      socket.on('new-ticket', () => {
+        queryClient.invalidateQueries({ queryKey: ['helpdesk-tickets'] });
+        queryClient.invalidateQueries({ queryKey: ['helpdesk-stats'] });
+      });
+      return () => {
+        socket.off('new-ticket');
+      };
+    }
+  }, [socket, isConnected, queryClient]);
 
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');

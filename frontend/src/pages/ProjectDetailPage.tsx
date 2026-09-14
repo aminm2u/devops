@@ -21,6 +21,9 @@ import {
   Eye,
   EyeOff,
 } from 'lucide-react';
+import { KanbanTab } from './project-tabs/KanbanTab';
+import { TeamTab } from './project-tabs/TeamTab';
+import { FinanceTab } from './project-tabs/FinanceTab';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -447,8 +450,11 @@ export function ProjectDetailPage() {
 
       {/* Tabs */}
       <Tabs defaultValue="overview" className="space-y-4">
-        <TabsList>
+        <TabsList className="overflow-x-auto flex flex-nowrap w-full justify-start h-auto p-1">
           <TabsTrigger value="overview">Overview</TabsTrigger>
+          <TabsTrigger value="kanban">Kanban</TabsTrigger>
+          <TabsTrigger value="team">Team</TabsTrigger>
+          <TabsTrigger value="finances">Finances & Requisitions</TabsTrigger>
           <TabsTrigger value="environments">Environments</TabsTrigger>
           <TabsTrigger value="infrastructure">Infrastructure</TabsTrigger>
           <TabsTrigger value="credentials">Credentials</TabsTrigger>
@@ -480,6 +486,22 @@ export function ProjectDetailPage() {
                   </Badge>
                 </div>
                 <Separator />
+                <div className="flex justify-between">
+                  <span className="text-sm text-muted-foreground">Health Status</span>
+                  <span className="text-sm font-semibold">{projectData.healthStatus || 'N/A'}</span>
+                </div>
+                <Separator />
+                {projectData.startDate && (
+                  <>
+                    <div className="flex justify-between">
+                      <span className="text-sm text-muted-foreground">Timeline</span>
+                      <span className="text-sm">
+                        {new Date(projectData.startDate).toLocaleDateString()} - {projectData.expectedEndDate ? new Date(projectData.expectedEndDate).toLocaleDateString() : 'TBD'}
+                      </span>
+                    </div>
+                    <Separator />
+                  </>
+                )}
                 {projectData.owner && (
                   <>
                     <div className="flex justify-between">
@@ -500,6 +522,23 @@ export function ProjectDetailPage() {
                 </div>
               </CardContent>
             </Card>
+
+            {projectData.delayReason && (
+              <Card className="border-red-200 bg-red-50">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-base text-red-700 flex items-center gap-2">
+                    <AlertTriangle className="h-4 w-4" />
+                    Project Delay Alert
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-sm text-red-900 mb-2"><strong>Reason:</strong> {projectData.delayReason}</p>
+                  {projectData.recommendation && (
+                    <p className="text-sm text-red-800"><strong>Recommendation:</strong> {projectData.recommendation}</p>
+                  )}
+                </CardContent>
+              </Card>
+            )}
 
             <Card>
               <CardHeader>
@@ -553,6 +592,18 @@ export function ProjectDetailPage() {
               </CardContent>
             </Card>
           )}
+        </TabsContent>
+
+        <TabsContent value="kanban" className="space-y-6">
+          <KanbanTab project={projectData} refetch={() => queryClient.invalidateQueries({ queryKey: ['project', projectId] })} />
+        </TabsContent>
+
+        <TabsContent value="team" className="space-y-6">
+          <TeamTab project={projectData} refetch={() => queryClient.invalidateQueries({ queryKey: ['project', projectId] })} />
+        </TabsContent>
+
+        <TabsContent value="finances" className="space-y-6">
+          <FinanceTab project={projectData} refetch={() => queryClient.invalidateQueries({ queryKey: ['project', projectId] })} />
         </TabsContent>
 
         {/* Environments Tab */}

@@ -14,22 +14,31 @@ const router = Router();
 const createProjectSchema = z.object({
   name: z.string().min(2).max(255),
   description: z.string().optional().nullable(),
-  status: z.enum(["active", "planning", "on_hold", "completed", "archived", "inactive"]).optional(),
+  status: z.string().optional(),
   priority: z.enum(["low", "medium", "high", "urgent", "critical"]).optional(),
   ownerId: z.number().int().positive().optional(),
   repositoryUrl: z.string().url().optional().nullable(),
   documentationUrl: z.string().url().optional().nullable(),
+  projectTypeId: z.number().int().positive().optional().nullable(),
+  startDate: z.string().datetime().optional().nullable(),
+  expectedEndDate: z.string().datetime().optional().nullable(),
 });
 
 const updateProjectSchema = z.object({
   name: z.string().min(2).max(255).optional(),
   description: z.string().optional().nullable(),
-  status: z.enum(["active", "planning", "on_hold", "completed", "archived", "inactive"]).optional(),
+  status: z.string().optional(),
   priority: z.enum(["low", "medium", "high", "urgent", "critical"]).optional(),
   ownerId: z.number().int().positive().optional(),
   repositoryUrl: z.string().url().optional().nullable(),
   documentationUrl: z.string().url().optional().nullable(),
   isActive: z.boolean().optional(),
+  projectTypeId: z.number().int().positive().optional().nullable(),
+  startDate: z.string().datetime().optional().nullable(),
+  expectedEndDate: z.string().datetime().optional().nullable(),
+  actualEndDate: z.string().datetime().optional().nullable(),
+  healthStatus: z.string().optional(),
+  delayReason: z.string().optional().nullable(),
 });
 
 // GET /api/projects - List projects
@@ -193,6 +202,7 @@ router.get(
           owner: {
             select: { id: true, name: true, email: true },
           },
+          projectType: true,
           environments: {
             where: { deletedAt: null },
             include: {
@@ -210,7 +220,20 @@ router.get(
               user: {
                 select: { id: true, name: true, email: true },
               },
+              projectRole: true,
             },
+          },
+          budgetItems: {
+            include: {
+              expenditures: true,
+            },
+          },
+          requisitionForms: true,
+          taskColumns: {
+            orderBy: { position: 'asc' }
+          },
+          tasks: {
+            orderBy: { position: 'asc' }
           },
           infrastructureNodes: {
             where: { deletedAt: null },
@@ -523,6 +546,52 @@ router.delete(
       });
 
       res.status(204).send();
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+// POST /api/projects/:id/members
+router.post(
+  "/:id/members",
+  authenticate,
+  async (req: RequestWithUser, res: Response, next: NextFunction) => {
+    try {
+      const { id } = req.params;
+      const { userId, projectRoleId } = req.body;
+
+      const project = await prisma.project.findUnique({
+        where: { id: parseInt(id, 10), deletedAt: null },
+      });
+      if (!project) throw new NotFoundError("Project not found");
+
+      const existing = await prisma.teamAssignment.findUnique({
+        where: {
+          projectId_userId: {
+            projectId: project.id,
+            userId: parseInt(userId, 10)
+          }
+        }
+      });
+
+      if (existing) {
+        return res.status(400).json({ error: "User is already a member of this project" });
+      }
+
+      const assignment = await prisma.teamAssignment.create({
+        data: {
+          projectId: project.id,
+          userId: parseInt(userId, 10),
+          projectRoleId: parseInt(projectRoleId, 10)
+        },
+        include: {
+          user: { select: { id: true, name: true, email: true } },
+          projectRole: true
+        }
+      });
+
+      res.status(201).json({ success: true, data: assignment });
     } catch (error) {
       next(error);
     }

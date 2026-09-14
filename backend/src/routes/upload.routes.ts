@@ -60,7 +60,6 @@ const upload = multer({
 router.post(
   "/",
   authenticate,
-  requireRole("super-admin", "devops-admin"),
   upload.array("files", 10), // Max 10 files at once
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {

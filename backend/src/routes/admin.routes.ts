@@ -35,6 +35,11 @@ const createUserSchema = z.object({
   email: z.string().email(),
   password: z.string().min(8).max(128),
   role: z.enum(["super-admin", "devops-admin", "devops-engineer", "viewer"]).optional(),
+  employeeId: z.string().optional().nullable(),
+  departmentId: z.number().int().positive().optional().nullable(),
+  positionId: z.number().int().positive().optional().nullable(),
+  employmentTypeId: z.number().int().positive().optional().nullable(),
+  joinDate: z.string().datetime().optional().nullable(),
 });
 
 const updateUserSchema = z.object({
@@ -43,6 +48,11 @@ const updateUserSchema = z.object({
   password: z.string().min(8).max(128).optional(),
   role: z.enum(["super-admin", "devops-admin", "devops-engineer", "viewer"]).optional(),
   is_active: z.boolean().optional(),
+  employeeId: z.string().optional().nullable(),
+  departmentId: z.number().int().positive().optional().nullable(),
+  positionId: z.number().int().positive().optional().nullable(),
+  employmentTypeId: z.number().int().positive().optional().nullable(),
+  joinDate: z.string().datetime().optional().nullable(),
 });
 
 // GET /api/admin/users - List all users
@@ -121,7 +131,7 @@ router.post(
   validate(createUserSchema),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
-      const { name, email, password, role } = req.body;
+      const { name, email, password, role, employeeId, departmentId, positionId, employmentTypeId, joinDate } = req.body;
 
       // Check if email exists
       const existing = await prisma.user.findUnique({ where: { email } });
@@ -136,6 +146,11 @@ router.post(
           name,
           email,
           password: hashedPassword,
+          employeeId,
+          departmentId,
+          positionId,
+          employmentTypeId,
+          joinDate: joinDate ? new Date(joinDate) : null,
         },
       });
 
@@ -271,6 +286,14 @@ router.put(
       if (email) updateData.email = email;
       if (is_active !== undefined) updateData.isActive = is_active;
       if (password) updateData.password = await bcrypt.hash(password, 12);
+
+      // New Employee fields
+      if (req.body.employeeId !== undefined) updateData.employeeId = req.body.employeeId;
+      if (req.body.departmentId !== undefined) updateData.departmentId = req.body.departmentId;
+      if (req.body.positionId !== undefined) updateData.positionId = req.body.positionId;
+      if (req.body.employmentTypeId !== undefined) updateData.employmentTypeId = req.body.employmentTypeId;
+      if (req.body.joinDate !== undefined) updateData.joinDate = req.body.joinDate ? new Date(req.body.joinDate) : null;
+
       updateData.updatedAt = new Date();
 
       const updatedUser = await prisma.user.update({

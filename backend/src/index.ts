@@ -3,9 +3,11 @@ import helmet from "helmet";
 import cors from "cors";
 import cookieParser from "cookie-parser";
 import rateLimit from "express-rate-limit";
+import { createServer } from "http";
 import routes from "./routes/index.js";
 import { connectRedis, disconnectRedis } from "./config/redis.js";
 import { AppError } from "./lib/errors.js";
+import { initSocket } from "./lib/socket.js";
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -18,7 +20,7 @@ app.use(helmet());
 app.use(cors({
   origin: process.env.NODE_ENV === "production"
     ? process.env.FRONTEND_URL
-    : "http://localhost:5173",
+    : "*", // allow all in dev
   credentials: true,
 }));
 
@@ -30,6 +32,7 @@ const limiter = rateLimit({
   legacyHeaders: false,
   message: { error: "Too many requests, please try again later" },
 });
+// skip rate limiter on /upload files for faster dev optionally
 app.use(limiter);
 
 // Body parsing
@@ -65,13 +68,17 @@ app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
   res.status(500).json({ error: "Internal server error" });
 });
 
+// Create HTTP Server for Socket.io integration
+const httpServer = createServer(app);
+initSocket(httpServer);
+
 // Start server
 async function start() {
   try {
     // Connect to Redis (graceful if unavailable)
     await connectRedis();
 
-    app.listen(PORT, () => {
+    httpServer.listen(PORT, () => {
       console.log(`[Server] Running on http://localhost:${PORT}`);
       console.log(`[Server] Environment: ${process.env.NODE_ENV || "development"}`);
     });

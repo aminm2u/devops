@@ -6,6 +6,7 @@ import { RequestWithUser } from "../types/index.js";
 import { logActivity } from "../middleware/activity.js";
 import { generateSlug } from "../lib/slug.js";
 import prisma from "../config/database.js";
+import { getIO } from "../lib/socket.js";
 
 const router = Router();
 
@@ -694,6 +695,14 @@ router.post(
         });
       }
 
+      // Emit socket event for new ticket to all helpdesk staff
+      try {
+        const io = getIO();
+        io.emit("new-ticket", { ticket });
+      } catch (err) {
+        console.error("Socket emit failed:", err);
+      }
+
       res.status(201).json({ data: ticket, message: "Ticket created" });
     } catch (error) {
       console.error("Error creating ticket:", error);
@@ -898,6 +907,13 @@ router.put(
             metadata: { ticketId: id },
           },
         });
+      }
+
+      try {
+        const io = getIO();
+        io.to(`ticket-${id}`).emit("ticket-updated", { ticket });
+      } catch (err) {
+        console.error("Socket emit failed:", err);
       }
 
       res.json({ data: ticket, message: "Status updated" });
@@ -1106,6 +1122,17 @@ router.post(
         action: "created",
         description: `Added comment to ticket: ${ticket.title}`,
       });
+
+      // Emit socket event to clients listening in the ticket room
+      try {
+        const io = getIO();
+        io.to(`ticket-${ticketId}`).emit("new-comment", {
+          ticketId,
+          comment
+        });
+      } catch (err) {
+        console.error("Socket emit failed:", err);
+      }
 
       res.status(201).json({ data: comment, message: "Comment added" });
     } catch (error) {
