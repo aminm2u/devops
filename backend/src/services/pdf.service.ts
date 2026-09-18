@@ -33,7 +33,7 @@ export async function gatherWeeklyReportData(userId?: number): Promise<WeeklyRep
   const thirtyDaysFromNow = new Date(now);
   thirtyDaysFromNow.setDate(thirtyDaysFromNow.getDate() + 30);
 
-  // Build project filter based on user
+  // Build project filter based on userhahah
   let projectFilter: any = { deletedAt: null };
   let incidentProjectFilter: any = {};
   let deploymentProjectFilter: any = {};
