@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
-  Search,
   Server,
   Database,
   HardDrive,
@@ -499,7 +498,7 @@ export function InfrastructurePage() {
                   <CardContent>
                     <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
                       {project.nodes.map((node) => (
-                        <Card key={node.id} className="transition-shadow hover:shadow-md border">
+                        <Card key={node.id} className="transition-shadow border border-gray-800">
                           <CardHeader className="pb-3">
                             <div className="flex items-start justify-between">
                               <div className="flex items-start gap-3 min-w-0">
@@ -564,7 +563,7 @@ export function InfrastructurePage() {
                               </div>
                             )}
                             {canManage && (
-                              <div className="flex gap-2 pt-2 border-t">
+                              <div className="flex gap-2 pt-2 border-t border-gray-800">
                                 <Button variant="ghost" size="sm" className="h-7 flex-1" onClick={() => openEditDialog(node)}>
                                   <Pencil className="mr-1 h-3 w-3" />
                                   Edit
@@ -614,7 +613,7 @@ export function InfrastructurePage() {
                         <TableHead>Created By</TableHead>
                         <TableHead>Username</TableHead>
                         <TableHead>Password</TableHead>
-                        {canManage && <TableHead className="w-24" />}
+                        {canManage && <TableHead className="text-right">Actions</TableHead>}
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -677,7 +676,7 @@ export function InfrastructurePage() {
                             )}
                           </TableCell>
                           {canManage && (
-                            <TableCell>
+                            <TableCell className='text-right'>
                               <div className="flex gap-1">
                                 <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEditDialog(node)}>
                                   <Pencil className="h-3.5 w-3.5" />
@@ -701,7 +700,7 @@ export function InfrastructurePage() {
 
       {/* Create / Edit Dialog */}
       <Dialog open={showFormDialog} onOpenChange={setShowFormDialog}>
-        <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
+        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto py-4 px-6">
           <DialogHeader>
             <DialogTitle>{editingNode ? 'Edit Node' : 'Add Node'}</DialogTitle>
             <DialogDescription>
@@ -813,14 +812,14 @@ export function InfrastructurePage() {
 
       {/* Delete Dialog */}
       <Dialog open={!!showDeleteDialog} onOpenChange={() => setShowDeleteDialog(null)}>
-        <DialogContent>
+        <DialogContent className='pt-12 pb-6 px-6'>
           <DialogHeader>
             <DialogTitle>Delete Node</DialogTitle>
             <DialogDescription>
               Are you sure you want to delete "{showDeleteDialog?.name}"? This action cannot be undone.
             </DialogDescription>
           </DialogHeader>
-          <DialogFooter>
+          <DialogFooter className='mt-4'>
             <Button variant="outline" onClick={() => setShowDeleteDialog(null)}>Cancel</Button>
             <Button
               variant="destructive"

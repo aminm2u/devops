@@ -257,7 +257,7 @@ export function BudgetPage() {
       <div className="flex justify-between items-center">
         <div>
           <h1 className="text-3xl font-bold">Budget Control</h1>
-          <p className="text-gray-500 mt-1">Track IT division budgets, allocations, and expenditures</p>
+          <p className="text-muted-foreground mt-1">Track IT division budgets, allocations, and expenditures</p>
         </div>
         <Button onClick={() => setShowCreateDialog(true)} className="bg-green-600 hover:bg-green-700">
           <Plus className="w-4 h-4 mr-2" />
@@ -272,7 +272,7 @@ export function BudgetPage() {
             <CardContent className="pt-6">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-gray-500">Total Allocated</p>
+                  <p className="text-sm text-muted-foreground">Total Allocated</p>
                   <p className="text-2xl font-bold text-blue-600">{formatCurrency(summary.totalAllocated)}</p>
                 </div>
                 <DollarSign className="h-10 w-10 text-blue-500" />
@@ -283,7 +283,7 @@ export function BudgetPage() {
             <CardContent className="pt-6">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-gray-500">Total Utilized</p>
+                  <p className="text-sm text-muted-foreground">Total Utilized</p>
                   <p className="text-2xl font-bold text-orange-600">{formatCurrency(summary.totalUtilized)}</p>
                 </div>
                 <TrendingUp className="h-10 w-10 text-orange-500" />
@@ -294,7 +294,7 @@ export function BudgetPage() {
             <CardContent className="pt-6">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-gray-500">Total Balance</p>
+                  <p className="text-sm text-muted-foreground">Total Balance</p>
                   <p className={`text-2xl font-bold ${getBalanceColor(summary.totalUtilized, summary.totalAllocated)}`}>
                     {formatCurrency(summary.totalBalance)}
                   </p>
@@ -307,9 +307,9 @@ export function BudgetPage() {
             <CardContent className="pt-6">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-gray-500">Utilization</p>
+                  <p className="text-sm text-muted-foreground">Utilization</p>
                   <p className="text-2xl font-bold">{summary.utilizationPercent}%</p>
-                  <div className="w-full bg-gray-200 rounded-full h-2 mt-2">
+                  <div className="w-full bg-muted rounded-full h-2 mt-2">
                     <div
                       className={`h-2 rounded-full ${getUtilizationBarColor(summary.totalUtilized, summary.totalAllocated)}`}
                       style={{ width: `${Math.min(summary.utilizationPercent, 100)}%` }}
@@ -339,7 +339,7 @@ export function BudgetPage() {
                       <span>{formatCurrency(cat.utilized)} / {formatCurrency(cat.allocated)}</span>
                       <span>{cat.utilizationPercent}%</span>
                     </div>
-                    <div className="w-full bg-gray-200 rounded-full h-2">
+                    <div className="w-full bg-muted rounded-full h-2">
                       <div
                         className={`h-2 rounded-full ${getUtilizationBarColor(cat.utilized, cat.allocated)}`}
                         style={{ width: `${Math.min(cat.utilizationPercent, 100)}%` }}
@@ -417,9 +417,9 @@ export function BudgetPage() {
             </div>
           ) : budgetItems.length === 0 ? (
             <div className="text-center py-12">
-              <DollarSign className="h-12 w-12 mx-auto text-gray-400 mb-4" />
-              <h3 className="text-lg font-medium text-gray-900">No budget items found</h3>
-              <p className="text-gray-500 mt-1">Create a new budget item to get started.</p>
+              <DollarSign className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
+              <h3 className="text-lg font-medium text-foreground">No budget items found</h3>
+              <p className="text-muted-foreground mt-1">Create a new budget item to get started.</p>
             </div>
           ) : (
             <div className="overflow-x-auto">
@@ -447,7 +447,7 @@ export function BudgetPage() {
                     return (
                       <Fragment key={item.id}>
                         <TableRow
-                          className="cursor-pointer hover:bg-gray-50"
+                          className="cursor-pointer hover:bg-muted/50"
                           onClick={() => setExpandedRow(expandedRow === item.id ? null : item.id)}
                         >
                           <TableCell>
@@ -496,7 +496,7 @@ export function BudgetPage() {
                               </div>
                             ) : (
                               <span
-                                className="cursor-pointer hover:bg-blue-50 px-1 rounded"
+                                className="cursor-pointer hover:bg-blue-500/10 px-1 rounded"
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   handleQuickEdit(item);
@@ -513,8 +513,8 @@ export function BudgetPage() {
                           </TableCell>
                           <TableCell>
                             <Badge className={
-                              item.status === 'approved' ? 'bg-green-100 text-green-800' :
-                              'bg-yellow-100 text-yellow-800'
+                              item.status === 'approved' ? 'bg-green-500/15 text-green-700 dark:text-green-400 border-green-500/20' :
+                              'bg-yellow-500/15 text-yellow-700 dark:text-yellow-400 border-yellow-500/20'
                             }>
                               {item.status === 'request' ? 'Request' : 'Approved'}
                             </Badge>
@@ -552,29 +552,29 @@ export function BudgetPage() {
                         </TableRow>
                         {expandedRow === item.id && (
                           <TableRow key={`${item.id}-details`}>
-                            <TableCell colSpan={10} className="bg-gray-50">
+                            <TableCell colSpan={10} className="bg-muted/30">
                               <div className="p-4 space-y-3">
                                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
                                   <div>
-                                    <span className="text-gray-500">Division:</span>
+                                    <span className="text-muted-foreground">Division:</span>
                                     <p className="font-medium">{item.division}</p>
                                   </div>
                                   <div>
-                                    <span className="text-gray-500">Currency:</span>
+                                    <span className="text-muted-foreground">Currency:</span>
                                     <p className="font-medium">{item.currency}</p>
                                   </div>
                                   <div>
-                                    <span className="text-gray-500">Fiscal Year:</span>
+                                    <span className="text-muted-foreground">Fiscal Year:</span>
                                     <p className="font-medium">{item.fiscalYear || '-'}</p>
                                   </div>
                                   <div>
-                                    <span className="text-gray-500">Utilization:</span>
+                                    <span className="text-muted-foreground">Utilization:</span>
                                     <p className="font-medium">{utilizationPercent.toFixed(1)}%</p>
                                   </div>
                                 </div>
                                 {item.details && (
                                   <div>
-                                    <span className="text-gray-500 text-sm">Details:</span>
+                                    <span className="text-muted-foreground text-sm">Details:</span>
                                     <p className="mt-1">{item.details}</p>
                                   </div>
                                 )}
@@ -600,7 +600,7 @@ export function BudgetPage() {
           {/* Pagination */}
           {budgetData?.meta && (
             <div className="flex justify-between items-center mt-4">
-              <span className="text-sm text-gray-500">
+              <span className="text-sm text-muted-foreground">
                 Page {budgetData.meta.currentPage} of {budgetData.meta.lastPage} ({budgetData.meta.total} items)
               </span>
               <div className="flex gap-2">
@@ -860,37 +860,37 @@ function BudgetItemDialog({
 
           {/* Dynamic Budget Breakdown by Category */}
           {form.category && currentCategoryBreakdown && (
-            <div className="bg-gray-50 rounded-lg p-4 border">
-              <h4 className="text-sm font-medium text-gray-700 mb-3">
+            <div className="bg-muted/30 rounded-lg p-4 border border-border/50">
+              <h4 className="text-sm font-medium text-foreground mb-3">
                 Budget Breakdown for {form.category}
               </h4>
               <div className="grid grid-cols-3 gap-4 text-sm">
                 <div>
-                  <p className="text-gray-500">Total Allocated</p>
+                  <p className="text-muted-foreground">Total Allocated</p>
                   <p className="font-bold text-blue-600">{formatCurrency(currentCategoryBreakdown.allocated)}</p>
                 </div>
                 <div>
-                  <p className="text-gray-500">Total Utilized</p>
+                  <p className="text-muted-foreground">Total Utilized</p>
                   <p className="font-bold text-orange-600">{formatCurrency(currentCategoryBreakdown.utilized)}</p>
                 </div>
                 <div>
-                  <p className="text-gray-500">Available Balance</p>
+                  <p className="text-muted-foreground">Available Balance</p>
                   <p className="font-bold text-green-600">{formatCurrency(currentCategoryBreakdown.balance)}</p>
                 </div>
               </div>
               <div className="mt-3">
-                <div className="flex items-center justify-between text-xs text-gray-500 mb-1">
+                <div className="flex items-center justify-between text-xs text-muted-foreground mb-1">
                   <span>Utilization: {currentCategoryBreakdown.utilizationPercent}%</span>
                   <span>{formatCurrency(currentCategoryBreakdown.balance)} remaining</span>
                 </div>
-                <div className="w-full bg-gray-200 rounded-full h-2">
+                <div className="w-full bg-muted rounded-full h-2">
                   <div
                     className={`h-2 rounded-full ${getUtilizationBarColor(currentCategoryBreakdown.utilized, currentCategoryBreakdown.allocated)}`}
                     style={{ width: `${Math.min(currentCategoryBreakdown.utilizationPercent, 100)}%` }}
                   />
                 </div>
               </div>
-              <p className="text-xs text-gray-500 mt-2">
+              <p className="text-xs text-muted-foreground mt-2">
                 Your new allocation will be: {formatCurrency(currentCategoryBreakdown.allocated + form.allocatedBudget)}
               </p>
             </div>
@@ -955,8 +955,8 @@ function ExpendituresDialog({
             </div>
           ) : expenditures.length === 0 ? (
             <div className="text-center py-8">
-              <Package className="h-10 w-10 mx-auto text-gray-400 mb-3" />
-              <p className="text-gray-500">No expenditures recorded yet</p>
+              <Package className="h-10 w-10 mx-auto text-muted-foreground mb-3" />
+              <p className="text-muted-foreground">No expenditures recorded yet</p>
             </div>
           ) : (
             <Table>
@@ -1001,8 +1001,8 @@ function ExpendituresDialog({
           )}
         </div>
         <div className="flex justify-between items-center pt-4 border-t">
-          <div className="text-sm text-gray-500">
-            Total: <span className="font-bold text-gray-900">{formatCurrency(totalSpent, item.currency)}</span>
+          <div className="text-sm text-muted-foreground">
+            Total: <span className="font-bold text-foreground">{formatCurrency(totalSpent, item.currency)}</span>
           </div>
           <div className="flex gap-2">
             <Button variant="outline" onClick={onClose}>Close</Button>

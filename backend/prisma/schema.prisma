@@ -446,11 +446,12 @@ model ProjectTask {
 }
 
 model TaskComment {
-  id        Int      @id @default(autoincrement())
-  taskId     Int      @map("task_id")
-  userId     Int      @map("user_id")
-  content    String   @db.Text
-  createdAt  DateTime @default(now()) @map("created_at")
+  id            Int      @id @default(autoincrement())
+  taskId        Int      @map("task_id")
+  userId        Int      @map("user_id")
+  content       String   @db.Text
+  workingHours  Decimal? @db.Decimal(5, 2) @map("working_hours")
+  createdAt     DateTime @default(now()) @map("created_at")
 
   task ProjectTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
   user User        @relation(fields: [userId], references: [id], onDelete: Cascade)

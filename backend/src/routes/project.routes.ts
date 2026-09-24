@@ -228,7 +228,11 @@ router.get(
               expenditures: true,
             },
           },
-          requisitionForms: true,
+          requisitionForms: {
+            include: {
+              budgetItem: { select: { id: true, category: true, description: true, allocatedBudget: true } },
+            },
+          },
           taskColumns: {
             orderBy: { position: 'asc' }
           },

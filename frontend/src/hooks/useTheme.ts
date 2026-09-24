@@ -20,10 +20,12 @@ function applyTheme(theme: Theme) {
   root.classList.add(effectiveTheme);
 }
 
+// Apply theme synchronously before first render so LoadingScreen picks it up
+const initialTheme = (localStorage.getItem('theme') as Theme) || 'system';
+applyTheme(initialTheme);
+
 export function useTheme() {
-  const [theme, setThemeState] = useState<Theme>(() => {
-    return (localStorage.getItem('theme') as Theme) || 'system';
-  });
+  const [theme, setThemeState] = useState<Theme>(initialTheme);
 
   useEffect(() => {
     applyTheme(theme);

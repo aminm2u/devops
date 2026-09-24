@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import {
@@ -40,10 +40,6 @@ import { Separator } from '@/components/ui/separator';
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
 } from '@/components/ui/dialog';
 import {
   AlertDialog,
@@ -1289,302 +1285,319 @@ export function ProjectDetailPage() {
 
       {/* Edit Dialog */}
       <Dialog open={showEditDialog} onOpenChange={setShowEditDialog}>
-        <DialogContent className="max-w-lg">
-          <ProjectForm
-            project={projectData}
-            onSubmit={async (data) => {
-              await updateMutation.mutateAsync(data);
-            }}
-            onCancel={() => setShowEditDialog(false)}
-            isLoading={updateMutation.isPending}
-          />
+        <DialogContent className="max-w-4xl p-0">
+          <Card className="pt-8 border-0 shadow-none">
+            <CardContent>
+              <ProjectForm
+                project={projectData}
+                onSubmit={async (data) => {
+                  await updateMutation.mutateAsync(data);
+                }}
+                onCancel={() => setShowEditDialog(false)}
+                isLoading={updateMutation.isPending}
+              />
+            </CardContent>
+          </Card>
         </DialogContent>
       </Dialog>
 
       {/* Delete Dialog */}
       <Dialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Delete Project</DialogTitle>
-            <DialogDescription>
-              Are you sure you want to delete "{projectData.name}"? This action cannot be undone.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowDeleteDialog(false)}>
-              Cancel
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={() => deleteMutation.mutate()}
-              disabled={deleteMutation.isPending}
-            >
-              {deleteMutation.isPending ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              ) : (
-                <Trash2 className="mr-2 h-4 w-4" />
-              )}
-              Delete
-            </Button>
-          </DialogFooter>
+        <DialogContent className="p-0">
+          <Card className="pt-8 border-0 shadow-none">
+            <CardHeader>
+              <CardTitle>Delete Project</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-sm text-muted-foreground mb-4">
+                Are you sure you want to delete "{projectData.name}"? This action cannot be undone.
+              </p>
+              <div className="flex justify-end gap-3">
+                <Button variant="outline" onClick={() => setShowDeleteDialog(false)}>
+                  Cancel
+                </Button>
+                <Button
+                  variant="destructive"
+                  onClick={() => deleteMutation.mutate()}
+                  disabled={deleteMutation.isPending}
+                >
+                  {deleteMutation.isPending ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Trash2 className="mr-2 h-4 w-4" />
+                  )}
+                  Delete
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
         </DialogContent>
       </Dialog>
 
       {/* Add Environment Dialog */}
       <Dialog open={showAddEnvDialog} onOpenChange={setShowAddEnvDialog}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Add Environment</DialogTitle>
-            <DialogDescription>Add a new environment to this project</DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label>Name *</Label>
-              <Input
-                value={newEnvName}
-                onChange={(e) => setNewEnvName(e.target.value)}
-                placeholder="e.g., Production"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Type</Label>
-              <Select value={newEnvType} onValueChange={setNewEnvType}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="development">Development</SelectItem>
-                  <SelectItem value="staging">Staging</SelectItem>
-                  <SelectItem value="production">Production</SelectItem>
-                  <SelectItem value="testing">Testing</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label>URL</Label>
-              <Input
-                value={newEnvUrl}
-                onChange={(e) => setNewEnvUrl(e.target.value)}
-                placeholder="https://staging.example.com"
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowAddEnvDialog(false)}>
-              Cancel
-            </Button>
-            <Button
-              onClick={() => {
-                if (!newEnvName.trim()) {
-                  toast.error('Environment name is required');
-                  return;
-                }
-                addEnvMutation.mutate({
-                  name: newEnvName.trim(),
-                  type: newEnvType,
-                  url: newEnvUrl.trim() || undefined,
-                });
-              }}
-              disabled={addEnvMutation.isPending}
-            >
-              {addEnvMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Add Environment
-            </Button>
-          </DialogFooter>
+        <DialogContent className="p-0">
+          <Card className="pt-8 border-0 shadow-none">
+            <CardHeader>
+              <CardTitle>Add Environment</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label>Name *</Label>
+                  <Input
+                    value={newEnvName}
+                    onChange={(e) => setNewEnvName(e.target.value)}
+                    placeholder="e.g., Production"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Type</Label>
+                  <Select value={newEnvType} onValueChange={setNewEnvType}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="development">Development</SelectItem>
+                      <SelectItem value="staging">Staging</SelectItem>
+                      <SelectItem value="production">Production</SelectItem>
+                      <SelectItem value="testing">Testing</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>URL</Label>
+                  <Input
+                    value={newEnvUrl}
+                    onChange={(e) => setNewEnvUrl(e.target.value)}
+                    placeholder="https://staging.example.com"
+                  />
+                </div>
+                <div className="flex justify-end gap-3 pt-2">
+                  <Button variant="outline" onClick={() => setShowAddEnvDialog(false)}>
+                    Cancel
+                  </Button>
+                  <Button
+                    onClick={() => {
+                      if (!newEnvName.trim()) {
+                        toast.error('Environment name is required');
+                        return;
+                      }
+                      addEnvMutation.mutate({
+                        name: newEnvName.trim(),
+                        type: newEnvType,
+                        url: newEnvUrl.trim() || undefined,
+                      });
+                    }}
+                    disabled={addEnvMutation.isPending}
+                  >
+                    {addEnvMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                    Add Environment
+                  </Button>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
         </DialogContent>
       </Dialog>
 
       {/* Add Credential Dialog */}
       <Dialog open={showAddCredentialDialog} onOpenChange={setShowAddCredentialDialog}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle>Add Credential</DialogTitle>
-            <DialogDescription>Add a new credential for this project</DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label>Name *</Label>
-              <Input
-                value={credentialForm.name}
-                onChange={(e) => setCredentialForm(prev => ({ ...prev, name: e.target.value }))}
-                placeholder="e.g., Production Server"
-              />
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>Type</Label>
-                <Select value={credentialForm.type} onValueChange={(v) => setCredentialForm(prev => ({ ...prev, type: v }))}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="server">Server</SelectItem>
-                    <SelectItem value="database">Database</SelectItem>
-                    <SelectItem value="ssh">SSH</SelectItem>
-                    <SelectItem value="api">API</SelectItem>
-                    <SelectItem value="other">Other</SelectItem>
-                  </SelectContent>
-                </Select>
+        <DialogContent className="max-w-lg p-0">
+          <Card className="pt-8 border-0 shadow-none">
+            <CardHeader>
+              <CardTitle>Add Credential</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label>Name *</Label>
+                  <Input
+                    value={credentialForm.name}
+                    onChange={(e) => setCredentialForm(prev => ({ ...prev, name: e.target.value }))}
+                    placeholder="e.g., Production Server"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label>Type</Label>
+                    <Select value={credentialForm.type} onValueChange={(v) => setCredentialForm(prev => ({ ...prev, type: v }))}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="server">Server</SelectItem>
+                        <SelectItem value="database">Database</SelectItem>
+                        <SelectItem value="ssh">SSH</SelectItem>
+                        <SelectItem value="api">API</SelectItem>
+                        <SelectItem value="other">Other</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Port</Label>
+                    <Input
+                      type="number"
+                      value={credentialForm.port}
+                      onChange={(e) => setCredentialForm(prev => ({ ...prev, port: e.target.value }))}
+                      placeholder="22"
+                    />
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label>Host *</Label>
+                  <Input
+                    value={credentialForm.host}
+                    onChange={(e) => setCredentialForm(prev => ({ ...prev, host: e.target.value }))}
+                    placeholder="192.168.1.100 or hostname"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Username</Label>
+                  <Input
+                    value={credentialForm.username}
+                    onChange={(e) => setCredentialForm(prev => ({ ...prev, username: e.target.value }))}
+                    placeholder="root"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Password</Label>
+                  <Input
+                    type="password"
+                    value={credentialForm.password}
+                    onChange={(e) => setCredentialForm(prev => ({ ...prev, password: e.target.value }))}
+                    placeholder="••••••••"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Description</Label>
+                  <Input
+                    value={credentialForm.description}
+                    onChange={(e) => setCredentialForm(prev => ({ ...prev, description: e.target.value }))}
+                    placeholder="Main production web server"
+                  />
+                </div>
+                <div className="flex justify-end gap-3 pt-2">
+                  <Button variant="outline" onClick={() => setShowAddCredentialDialog(false)}>
+                    Cancel
+                  </Button>
+                  <Button
+                    onClick={() => {
+                      if (!credentialForm.name.trim() || !credentialForm.host.trim()) {
+                        toast.error('Name and Host are required');
+                        return;
+                      }
+                      addCredentialMutation.mutate(credentialForm);
+                    }}
+                    disabled={addCredentialMutation.isPending}
+                  >
+                    {addCredentialMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                    Add Credential
+                  </Button>
+                </div>
               </div>
-              <div className="space-y-2">
-                <Label>Port</Label>
-                <Input
-                  type="number"
-                  value={credentialForm.port}
-                  onChange={(e) => setCredentialForm(prev => ({ ...prev, port: e.target.value }))}
-                  placeholder="22"
-                />
-              </div>
-            </div>
-            <div className="space-y-2">
-              <Label>Host *</Label>
-              <Input
-                value={credentialForm.host}
-                onChange={(e) => setCredentialForm(prev => ({ ...prev, host: e.target.value }))}
-                placeholder="192.168.1.100 or hostname"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Username</Label>
-              <Input
-                value={credentialForm.username}
-                onChange={(e) => setCredentialForm(prev => ({ ...prev, username: e.target.value }))}
-                placeholder="root"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Password</Label>
-              <Input
-                type="password"
-                value={credentialForm.password}
-                onChange={(e) => setCredentialForm(prev => ({ ...prev, password: e.target.value }))}
-                placeholder="••••••••"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Description</Label>
-              <Input
-                value={credentialForm.description}
-                onChange={(e) => setCredentialForm(prev => ({ ...prev, description: e.target.value }))}
-                placeholder="Main production web server"
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowAddCredentialDialog(false)}>
-              Cancel
-            </Button>
-            <Button
-              onClick={() => {
-                if (!credentialForm.name.trim() || !credentialForm.host.trim()) {
-                  toast.error('Name and Host are required');
-                  return;
-                }
-                addCredentialMutation.mutate(credentialForm);
-              }}
-              disabled={addCredentialMutation.isPending}
-            >
-              {addCredentialMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Add Credential
-            </Button>
-          </DialogFooter>
+            </CardContent>
+          </Card>
         </DialogContent>
       </Dialog>
 
       {/* Edit Credential Dialog */}
       <Dialog open={showEditCredentialDialog} onOpenChange={setShowEditCredentialDialog}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle>Edit Credential</DialogTitle>
-            <DialogDescription>Update credential details</DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label>Name *</Label>
-              <Input
-                value={credentialForm.name}
-                onChange={(e) => setCredentialForm(prev => ({ ...prev, name: e.target.value }))}
-                placeholder="e.g., Production Server"
-              />
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>Type</Label>
-                <Select value={credentialForm.type} onValueChange={(v) => setCredentialForm(prev => ({ ...prev, type: v }))}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="server">Server</SelectItem>
-                    <SelectItem value="database">Database</SelectItem>
-                    <SelectItem value="ssh">SSH</SelectItem>
-                    <SelectItem value="api">API</SelectItem>
-                    <SelectItem value="other">Other</SelectItem>
-                  </SelectContent>
-                </Select>
+        <DialogContent className="max-w-lg p-0">
+          <Card className="pt-8 border-0 shadow-none">
+            <CardHeader>
+              <CardTitle>Edit Credential</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label>Name *</Label>
+                  <Input
+                    value={credentialForm.name}
+                    onChange={(e) => setCredentialForm(prev => ({ ...prev, name: e.target.value }))}
+                    placeholder="e.g., Production Server"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label>Type</Label>
+                    <Select value={credentialForm.type} onValueChange={(v) => setCredentialForm(prev => ({ ...prev, type: v }))}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="server">Server</SelectItem>
+                        <SelectItem value="database">Database</SelectItem>
+                        <SelectItem value="ssh">SSH</SelectItem>
+                        <SelectItem value="api">API</SelectItem>
+                        <SelectItem value="other">Other</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Port</Label>
+                    <Input
+                      type="number"
+                      value={credentialForm.port}
+                      onChange={(e) => setCredentialForm(prev => ({ ...prev, port: e.target.value }))}
+                      placeholder="22"
+                    />
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label>Host *</Label>
+                  <Input
+                    value={credentialForm.host}
+                    onChange={(e) => setCredentialForm(prev => ({ ...prev, host: e.target.value }))}
+                    placeholder="192.168.1.100 or hostname"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Username</Label>
+                  <Input
+                    value={credentialForm.username}
+                    onChange={(e) => setCredentialForm(prev => ({ ...prev, username: e.target.value }))}
+                    placeholder="root"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Password (leave blank to keep current)</Label>
+                  <Input
+                    type="password"
+                    value={credentialForm.password}
+                    onChange={(e) => setCredentialForm(prev => ({ ...prev, password: e.target.value }))}
+                    placeholder="••••••••"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Description</Label>
+                  <Input
+                    value={credentialForm.description}
+                    onChange={(e) => setCredentialForm(prev => ({ ...prev, description: e.target.value }))}
+                    placeholder="Main production web server"
+                  />
+                </div>
+                <div className="flex justify-end gap-3 pt-2">
+                  <Button variant="outline" onClick={() => setShowEditCredentialDialog(false)}>
+                    Cancel
+                  </Button>
+                  <Button
+                    onClick={() => {
+                      if (!credentialForm.name.trim() || !credentialForm.host.trim()) {
+                        toast.error('Name and Host are required');
+                        return;
+                      }
+                      updateCredentialMutation.mutate(credentialForm);
+                    }}
+                    disabled={updateCredentialMutation.isPending}
+                  >
+                    {updateCredentialMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                    Save Changes
+                  </Button>
+                </div>
               </div>
-              <div className="space-y-2">
-                <Label>Port</Label>
-                <Input
-                  type="number"
-                  value={credentialForm.port}
-                  onChange={(e) => setCredentialForm(prev => ({ ...prev, port: e.target.value }))}
-                  placeholder="22"
-                />
-              </div>
-            </div>
-            <div className="space-y-2">
-              <Label>Host *</Label>
-              <Input
-                value={credentialForm.host}
-                onChange={(e) => setCredentialForm(prev => ({ ...prev, host: e.target.value }))}
-                placeholder="192.168.1.100 or hostname"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Username</Label>
-              <Input
-                value={credentialForm.username}
-                onChange={(e) => setCredentialForm(prev => ({ ...prev, username: e.target.value }))}
-                placeholder="root"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Password (leave blank to keep current)</Label>
-              <Input
-                type="password"
-                value={credentialForm.password}
-                onChange={(e) => setCredentialForm(prev => ({ ...prev, password: e.target.value }))}
-                placeholder="••••••••"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Description</Label>
-              <Input
-                value={credentialForm.description}
-                onChange={(e) => setCredentialForm(prev => ({ ...prev, description: e.target.value }))}
-                placeholder="Main production web server"
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowEditCredentialDialog(false)}>
-              Cancel
-            </Button>
-            <Button
-              onClick={() => {
-                if (!credentialForm.name.trim() || !credentialForm.host.trim()) {
-                  toast.error('Name and Host are required');
-                  return;
-                }
-                updateCredentialMutation.mutate(credentialForm);
-              }}
-              disabled={updateCredentialMutation.isPending}
-            >
-              {updateCredentialMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Save Changes
-            </Button>
-          </DialogFooter>
+            </CardContent>
+          </Card>
         </DialogContent>
       </Dialog>
 
@@ -1718,98 +1731,101 @@ export function ProjectDetailPage() {
 
       {/* Document Viewer Dialog */}
       <Dialog open={!!viewingDocument} onOpenChange={() => setViewingDocument(null)}>
-        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>{viewingDocument?.title}</DialogTitle>
-            <DialogDescription>{viewingDocument?.description || 'No description'}</DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4">
-            {/* Document Info */}
-            <div className="flex flex-wrap gap-4 text-sm">
-              <div className="flex items-center gap-2">
-                <span className="text-muted-foreground">Type:</span>
-                <Badge variant="outline">{formatStatus(viewingDocument?.type || '')}</Badge>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-muted-foreground">Status:</span>
-                <Badge className={cn(getStatusColor(viewingDocument?.status || ''))}>
-                  {formatStatus(viewingDocument?.status || '')}
-                </Badge>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-muted-foreground">Version:</span>
-                <span>{viewingDocument?.version}</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-muted-foreground">Created:</span>
-                <span>{formatDate(viewingDocument?.createdAt)}</span>
-              </div>
-            </div>
-
-            <Separator />
-
-            {/* Content */}
-            {viewingDocument?.content && (
-              <div>
-                <h4 className="font-medium mb-2">Content</h4>
-                <div className="bg-muted rounded-lg p-4 text-sm whitespace-pre-wrap">
-                  {viewingDocument.content}
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto p-0">
+          <Card className="pt-8 border-0 shadow-none">
+            <CardHeader>
+              <CardTitle>{viewingDocument?.title}</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                {/* Document Info */}
+                <div className="flex flex-wrap gap-4 text-sm">
+                  <div className="flex items-center gap-2">
+                    <span className="text-muted-foreground">Type:</span>
+                    <Badge variant="outline">{formatStatus(viewingDocument?.type || '')}</Badge>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-muted-foreground">Status:</span>
+                    <Badge className={cn(getStatusColor(viewingDocument?.status || ''))}>
+                      {formatStatus(viewingDocument?.status || '')}
+                    </Badge>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-muted-foreground">Version:</span>
+                    <span>{viewingDocument?.version}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-muted-foreground">Created:</span>
+                    <span>{formatDate(viewingDocument?.createdAt)}</span>
+                  </div>
                 </div>
-              </div>
-            )}
 
-            {/* Attached Files */}
-            {viewingDocument?.metadata?.files && viewingDocument.metadata.files.length > 0 && (
-              <div>
-                <h4 className="font-medium mb-2">Attached Files</h4>
-                <div className="space-y-2">
-                  {viewingDocument.metadata.files.map((file: any, index: number) => (
-                    <div
-                      key={index}
-                      className="flex items-center justify-between bg-muted rounded-lg p-3"
-                    >
-                      <div className="flex items-center gap-3">
-                        <FileText className="h-4 w-4 text-muted-foreground" />
-                        <div>
-                          <p className="text-sm font-medium">{file.originalName}</p>
-                          <p className="text-xs text-muted-foreground">
-                            {file.mimeType} • {(file.size / 1024).toFixed(1)} KB
-                          </p>
-                        </div>
-                      </div>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => {
-                          const token = localStorage.getItem('token');
-                          window.open(`${file.url}?token=${token}`, '_blank');
-                        }}
-                      >
-                        <Eye className="h-4 w-4 mr-1" />
-                        View
-                      </Button>
+                <Separator />
+
+                {/* Content */}
+                {viewingDocument?.content && (
+                  <div>
+                    <h4 className="font-medium mb-2">Content</h4>
+                    <div className="bg-muted rounded-lg p-4 text-sm whitespace-pre-wrap">
+                      {viewingDocument.content}
                     </div>
-                  ))}
-                </div>
-              </div>
-            )}
+                  </div>
+                )}
 
-            {/* Content URL */}
-            {viewingDocument?.contentUrl && (
-              <div>
-                <h4 className="font-medium mb-2">Link</h4>
-                <a
-                  href={viewingDocument.contentUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-primary hover:underline flex items-center gap-1 text-sm"
-                >
-                  {viewingDocument.contentUrl}
-                  <ExternalLink className="h-3 w-3" />
-                </a>
+                {/* Attached Files */}
+                {viewingDocument?.metadata?.files && viewingDocument.metadata.files.length > 0 && (
+                  <div>
+                    <h4 className="font-medium mb-2">Attached Files</h4>
+                    <div className="space-y-2">
+                      {viewingDocument.metadata.files.map((file: any, index: number) => (
+                        <div
+                          key={index}
+                          className="flex items-center justify-between bg-muted rounded-lg p-3"
+                        >
+                          <div className="flex items-center gap-3">
+                            <FileText className="h-4 w-4 text-muted-foreground" />
+                            <div>
+                              <p className="text-sm font-medium">{file.originalName}</p>
+                              <p className="text-xs text-muted-foreground">
+                                {file.mimeType} • {(file.size / 1024).toFixed(1)} KB
+                              </p>
+                            </div>
+                          </div>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              const token = localStorage.getItem('token');
+                              window.open(`${file.url}?token=${token}`, '_blank');
+                            }}
+                          >
+                            <Eye className="h-4 w-4 mr-1" />
+                            View
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Content URL */}
+                {viewingDocument?.contentUrl && (
+                  <div>
+                    <h4 className="font-medium mb-2">Link</h4>
+                    <a
+                      href={viewingDocument.contentUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-primary hover:underline flex items-center gap-1 text-sm"
+                    >
+                      {viewingDocument.contentUrl}
+                      <ExternalLink className="h-3 w-3" />
+                    </a>
+                  </div>
+                )}
               </div>
-            )}
-          </div>
+            </CardContent>
+          </Card>
         </DialogContent>
       </Dialog>
     </div>

@@ -91,7 +91,7 @@ export function ProjectForm({ project, onSubmit, onCancel, isLoading }: ProjectF
   };
 
   return (
-    <Card>
+    <Card className='pt-8'>
       <CardHeader>
         <CardTitle>{project ? 'Edit Project' : 'Create New Project'}</CardTitle>
         <CardDescription>

@@ -235,7 +235,7 @@ export function DeploymentsPage() {
 
       {/* Table */}
       <Card>
-        <CardContent className="p-0 overflow-x-auto">
+        <CardContent className="p-0 overflow-x-auto px-4">
           {isLoading ? (
             <div className="p-6 space-y-4">
               {[1, 2, 3, 4, 5].map((i) => (
@@ -355,7 +355,7 @@ export function DeploymentsPage() {
 
       {/* Create Dialog */}
       <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
-        <DialogContent>
+        <DialogContent className='py-5 px-6'>
           <DialogHeader>
             <DialogTitle>Record Deployment</DialogTitle>
             <DialogDescription>Log a new deployment for tracking</DialogDescription>
@@ -463,7 +463,7 @@ export function DeploymentsPage() {
 
       {/* Edit Dialog */}
       <Dialog open={showEditDialog} onOpenChange={setShowEditDialog}>
-        <DialogContent>
+        <DialogContent className='py-5 px-6'>
           <DialogHeader>
             <DialogTitle>Edit Deployment</DialogTitle>
             <DialogDescription>
@@ -564,7 +564,7 @@ export function DeploymentsPage() {
 
       {/* Delete Confirmation Dialog */}
       <Dialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
-        <DialogContent>
+        <DialogContent className='pt-12 pb-6 px-6'>
           <DialogHeader>
             <DialogTitle>Delete Deployment</DialogTitle>
             <DialogDescription>
@@ -572,7 +572,7 @@ export function DeploymentsPage() {
               This action cannot be undone.
             </DialogDescription>
           </DialogHeader>
-          <DialogFooter>
+          <DialogFooter className='mt-4'>
             <Button variant="outline" onClick={() => { setShowDeleteDialog(false); setSelectedDeployment(null); }}>
               Cancel
             </Button>

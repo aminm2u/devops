@@ -306,7 +306,7 @@ router.post(
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const { id } = req.params;
-      const { content } = req.body;
+      const { content, workingHours } = req.body;
 
       if (!content || !content.trim()) {
         return res.status(400).json({ error: "Content is required" });
@@ -322,6 +322,7 @@ router.post(
           taskId: parseInt(id),
           userId: req.user!.id,
           content: content.trim(),
+          workingHours: workingHours ? parseFloat(workingHours) : null,
         },
         include: {
           user: { select: { id: true, name: true, email: true } },
