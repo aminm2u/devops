@@ -229,7 +229,7 @@ export async function generateWeeklyReportPDF(data: WeeklyReportData): Promise<B
       bufferPages: true,
       info: {
         Title: "DevOps Platform - Weekly Report",
-        Author: "DevOps Central",
+        Author: "MyWorkPortal2.0",
         Subject: "Weekly Platform Report",
       },
     });
@@ -625,7 +625,7 @@ export async function generateWeeklyReportPDF(data: WeeklyReportData): Promise<B
       doc.save();
       doc.font("Helvetica").fontSize(7).fillColor(C.muted);
       doc.text(
-        "DevOps Central  •  Weekly Report",
+        "MyWorkPortal2.0  •  Weekly Report",
         MARGIN,
         PAGE_HEIGHT - 28,
         { width: CONTENT_WIDTH / 2 }

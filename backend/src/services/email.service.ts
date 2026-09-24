@@ -83,7 +83,7 @@ export function welcomeEmail(userName: string, userEmail: string): { subject: st
         </div>
         <div style="background: #f8fafc; padding: 20px; border: 1px solid #e2e8f0; border-top: none; border-radius: 0 0 8px 8px;">
           <p>Hi <strong>${userName}</strong>,</p>
-          <p>Your account has been created successfully. You can now access the DevOps Central Platform.</p>
+          <p>Your account has been created successfully. You can now access the MyWorkPortal2.0 Platform.</p>
           <p><strong>Email:</strong> ${userEmail}</p>
           <div style="text-align: center; margin: 30px 0;">
             <a href="${loginUrl}" style="background: #1e40af; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold;">Login to Platform</a>

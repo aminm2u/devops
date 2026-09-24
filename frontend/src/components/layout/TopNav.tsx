@@ -1,5 +1,4 @@
-import React from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import {
   Menu,
   Search,
@@ -8,6 +7,8 @@ import {
   LogOut,
   User,
   Settings,
+  PanelLeftClose,
+  PanelLeftOpen,
 } from 'lucide-react';
 import { NotificationBell } from '@/components/notifications/NotificationBell';
 import { Button } from '@/components/ui/button';
@@ -23,35 +24,17 @@ import {
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { useAuth } from '@/hooks/useAuth';
 import { useTheme } from '@/hooks/useTheme';
-import { cn } from '@/lib/utils';
 
 interface TopNavProps {
   onMobileMenuToggle: () => void;
+  isSidebarCollapsed: boolean;
+  onSidebarToggle: () => void;
 }
 
-const getPageTitle = (pathname: string): string => {
-  if (pathname === '/') return 'Dashboard';
-  if (pathname.startsWith('/projects')) return 'Projects';
-  if (pathname.startsWith('/infrastructure')) return 'Infrastructure';
-  if (pathname.startsWith('/settings')) return 'Settings';
-  if (pathname.startsWith('/profile')) return 'Profile';
-  if (pathname.startsWith('/budget')) return 'Budget Control';
-  if (pathname === '/requisitions/manage') return 'Requisition Management';
-  if (pathname.startsWith('/requisitions')) return 'Requisition Form';
-  if (pathname === '/helpdesk/manage') return 'Helpdesk Management';
-  if (pathname === '/helpdesk/reports') return 'Helpdesk Reports';
-  if (pathname.startsWith('/helpdesk/')) return 'Ticket Details';
-  if (pathname.startsWith('/helpdesk')) return 'Helpdesk';
-  return 'DevOps Central';
-};
-
-export function TopNav({ onMobileMenuToggle }: TopNavProps) {
-  const location = useLocation();
+export function TopNav({ onMobileMenuToggle, isSidebarCollapsed, onSidebarToggle }: TopNavProps) {
   const navigate = useNavigate();
   const { user, logout } = useAuth();
   const { effectiveTheme, toggleTheme } = useTheme();
-
-  const pageTitle = getPageTitle(location.pathname);
 
   const handleLogout = async () => {
     await logout();
@@ -66,43 +49,57 @@ export function TopNav({ onMobileMenuToggle }: TopNavProps) {
     .slice(0, 2) || 'U';
 
   return (
-    <header className="flex h-14 items-center gap-4 border-b bg-card px-4 lg:px-6">
+    <header className="flex h-14 shrink-0 items-center gap-2 bg-background/80 px-4 backdrop-blur-sm lg:px-6">
       {/* Mobile Menu Toggle */}
       <Button
         variant="ghost"
         size="icon"
-        className="lg:hidden"
+        className="h-9 w-9 lg:hidden"
         onClick={onMobileMenuToggle}
         aria-label="Toggle menu"
       >
-        <Menu className="h-5 w-5" />
+        <Menu className="h-4 w-4" />
       </Button>
 
-      {/* Page Title */}
-      <h1 className="text-lg font-semibold">{pageTitle}</h1>
+      {/* Sidebar Collapse Toggle */}
+      <Button
+        variant="ghost"
+        size="icon"
+        className="hidden h-9 w-9 lg:flex"
+        onClick={onSidebarToggle}
+        aria-label={isSidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+      >
+        {isSidebarCollapsed ? (
+          <PanelLeftOpen className="h-4 w-4" />
+        ) : (
+          <PanelLeftClose className="h-4 w-4" />
+        )}
+      </Button>
 
       {/* Spacer */}
       <div className="flex-1" />
 
       {/* Search */}
       <div className="relative hidden md:block">
-        <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+        <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
         <Input
           type="search"
           placeholder="Search..."
-          className="w-64 pl-8"
+          className="h-9 w-56 pl-8 text-sm"
         />
       </div>
 
       {/* Notification Bell */}
-      <NotificationBell />
+      <Button variant="ghost" size="icon" className="h-9 w-9">
+        <NotificationBell />
+      </Button>
 
       {/* Theme Toggle */}
-      <Button variant="ghost" size="icon" onClick={toggleTheme} aria-label="Toggle theme">
+      <Button variant="ghost" size="icon" className="h-9 w-9" onClick={toggleTheme} aria-label="Toggle theme">
         {effectiveTheme === 'dark' ? (
-          <Sun className="h-5 w-5" />
+          <Sun className="h-4 w-4" />
         ) : (
-          <Moon className="h-5 w-5" />
+          <Moon className="h-4 w-4" />
         )}
       </Button>
 
@@ -112,13 +109,13 @@ export function TopNav({ onMobileMenuToggle }: TopNavProps) {
           <Button variant="ghost" className="relative h-8 w-8 rounded-full">
             <Avatar className="h-8 w-8">
               <AvatarImage src={undefined} alt={user?.name} />
-              <AvatarFallback>{userInitials}</AvatarFallback>
+              <AvatarFallback className="text-xs">{userInitials}</AvatarFallback>
             </Avatar>
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent className="w-56" align="end" forceMount>
+        <DropdownMenuContent className="w-52" align="end" forceMount>
           <DropdownMenuLabel className="font-normal">
-            <div className="flex flex-col space-y-1">
+            <div className="flex flex-col gap-0.5">
               <p className="text-sm font-medium leading-none">{user?.name}</p>
               <p className="text-xs leading-none text-muted-foreground">
                 {user?.email}

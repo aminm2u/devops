@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Select,
@@ -16,10 +17,6 @@ import {
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
 } from '@/components/ui/dialog';
 import apiClient from '@/api/client';
 import toast from 'react-hot-toast';
@@ -338,15 +335,16 @@ export function DocumentDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>{doc ? 'Edit Document' : 'Upload Document'}</DialogTitle>
-          <DialogDescription>
-            {doc ? 'Update document details' : 'Add documents from files, links, or paste content'}
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="space-y-4">
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto p-0">
+        <Card className='pt-8 border-0 shadow-none'>
+          <CardHeader>
+            <CardTitle>{doc ? 'Edit Document' : 'Upload Document'}</CardTitle>
+            <CardDescription>
+              {doc ? 'Update document details' : 'Add documents from files, links, or paste content'}
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-4">
           {/* Title */}
           <div className="space-y-2">
             <Label>Title *</Label>
@@ -531,17 +529,19 @@ export function DocumentDialog({
               className="text-sm"
             />
           </div>
-        </div>
 
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
-          </Button>
-          <Button onClick={handleSubmit} disabled={isPending}>
-            {isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            {doc ? 'Update' : 'Create'}
-          </Button>
-        </DialogFooter>
+              <div className="flex justify-end gap-3 pt-2">
+                <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+                  Cancel
+                </Button>
+                <Button type="button" onClick={handleSubmit} disabled={isPending}>
+                  {isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  {doc ? 'Update' : 'Create'}
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
       </DialogContent>
     </Dialog>
   );

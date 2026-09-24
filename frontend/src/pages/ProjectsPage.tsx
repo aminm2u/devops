@@ -6,7 +6,6 @@ import {
   Plus,
   FolderKanban,
   Calendar,
-  User,
   ArrowUpRight,
   X,
 } from 'lucide-react';
@@ -276,7 +275,7 @@ export function ProjectsPage() {
 
       {/* Create Project Dialog */}
       <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="max-w-4xl">
           <ProjectForm
             onSubmit={async (data) => {
               await createMutation.mutateAsync(data);

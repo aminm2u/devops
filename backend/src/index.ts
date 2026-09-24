@@ -24,16 +24,17 @@ app.use(cors({
   credentials: true,
 }));
 
-// Rate limiting
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // limit each IP to 100 requests per windowMs
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: "Too many requests, please try again later" },
-});
-// skip rate limiter on /upload files for faster dev optionally
-app.use(limiter);
+// Rate limiting — skip in development to avoid blocking SPA + socket refetches
+if (process.env.NODE_ENV === 'production') {
+  const limiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 500, // 500 requests per 15 min per IP
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: "Too many requests, please try again later" },
+  });
+  app.use(limiter);
+}
 
 // Body parsing
 app.use(express.json({ limit: "10mb" }));

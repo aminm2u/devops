@@ -1,12 +1,9 @@
-import React, { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard,
   FolderKanban,
   Settings,
   User,
-  ChevronLeft,
-  ChevronRight,
   Server,
   AlertTriangle,
   Rocket,
@@ -22,12 +19,13 @@ import {
   Headphones,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { Button } from '@/components/ui/button';
 import { useAuth } from '@/hooks/useAuth';
+import { useTheme } from '@/hooks/useTheme';
+import mwpLogoWhite from '@/assets/mwp_logo_white.png';
+import mwpLogoBlack from '@/assets/mwp_logo_black.png';
 
 interface SidebarProps {
   isCollapsed: boolean;
-  onToggle: () => void;
 }
 
 interface NavItem {
@@ -43,13 +41,13 @@ interface NavGroup {
 
 const navigation: NavGroup[] = [
   {
-    label: 'Overview',
+    label: 'Main',
     items: [
       { name: 'Dashboard', href: '/', icon: LayoutDashboard },
     ],
   },
   {
-    label: 'Core',
+    label: 'Projects & Assets',
     items: [
       { name: 'Projects', href: '/projects', icon: FolderKanban },
       { name: 'Infrastructure', href: '/infrastructure', icon: Server },
@@ -98,96 +96,78 @@ const navigation: NavGroup[] = [
   },
 ];
 
-export function Sidebar({ isCollapsed, onToggle }: SidebarProps) {
+export function Sidebar({ isCollapsed }: SidebarProps) {
   const location = useLocation();
   const { user } = useAuth();
+  const { effectiveTheme } = useTheme();
   const isAdmin = user?.roles?.some((r: any) => ['super-admin', 'devops-admin'].includes(r.name));
+  const logo = effectiveTheme === 'dark' ? mwpLogoWhite : mwpLogoBlack;
 
   return (
     <aside
       className={cn(
-        'relative flex flex-col border-r bg-card transition-all duration-300',
+        'relative flex flex-col bg-secondary transition-all duration-300',
         isCollapsed ? 'w-16' : 'w-64'
       )}
     >
-      {/* Logo */}
-      <div className="flex h-14 items-center border-b px-4">
-        {!isCollapsed && (
-          <div className="flex items-center gap-2">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground font-bold text-sm">
-              DC
-            </div>
-            <span className="font-semibold text-lg">DevOps Central</span>
-          </div>
-        )}
-        {isCollapsed && (
-          <div className="mx-auto flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground font-bold text-sm">
-            DC
+      {/* Logo — same height as navbar */}
+      <div className="flex h-14 mt-2 shrink-0 items-center border-b border-border/40 justify-center">
+        {!isCollapsed ? (
+          <img
+            src={logo}
+            alt="MyWorkPortal2.0"
+            className="h-12 w-auto object-contain px-12"
+          />
+        ) : (
+          <div className="mx-auto flex h-8 w-8 items-center justify-center rounded-md bg-primary text-primary-foreground font-bold text-[11px] p-4">
+            MWP
           </div>
         )}
       </div>
 
       {/* Navigation */}
-      <nav className="flex-1 space-y-4 overflow-y-auto p-2">
-        {navigation.map((group) => (
-          <div key={group.label}>
+      <nav className="flex-1 overflow-y-auto px-2 py-3 scrollbar-none">
+        {navigation.map((group, gi) => (
+          <div key={group.label} className={cn(gi > 0 && 'mt-4')}>
             {!isCollapsed && (
-              <div className="px-3 py-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground/60">
+              <div className="mb-1 px-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/50">
                 {group.label}
               </div>
+            )}
+            {isCollapsed && gi > 0 && (
+              <div className="mx-3 my-2 border-t border-border/40" />
             )}
             <div className="space-y-0.5">
               {group.items
                 .filter((item) => {
-                  // Hide admin-only items from non-admin users
                   if ((item.name === 'Manage' || item.name === 'Users') && !isAdmin) return false;
                   return true;
                 })
                 .map((item) => {
-                const isActive = location.pathname === item.href ||
-                  (item.href !== '/' && location.pathname.startsWith(item.href));
-                return (
-                  <Link
-                    key={item.name}
-                    to={item.href}
-                    className={cn(
-                      'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
-                      isActive
-                        ? 'bg-primary/10 text-primary'
-                        : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground',
-                      isCollapsed && 'justify-center px-2'
-                    )}
-                    title={isCollapsed ? item.name : undefined}
-                  >
-                    <item.icon className="h-5 w-5 shrink-0" />
-                    {!isCollapsed && <span>{item.name}</span>}
-                  </Link>
-                );
-              })}
+                  const isActive = location.pathname === item.href ||
+                    (item.href !== '/' && location.pathname.startsWith(item.href));
+                  return (
+                    <Link
+                      key={item.name}
+                      to={item.href}
+                      className={cn(
+                        'flex items-center gap-3 rounded-lg px-3 py-[7px] text-[13px] font-medium transition-colors',
+                        isActive
+                          ? 'bg-primary/10 text-primary'
+                          : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground',
+                        isCollapsed && 'justify-center px-2'
+                      )}
+                      title={isCollapsed ? item.name : undefined}
+                    >
+                      <item.icon className="h-[18px] w-[18px] shrink-0" />
+                      {!isCollapsed && <span>{item.name}</span>}
+                    </Link>
+                  );
+                })}
             </div>
           </div>
         ))}
       </nav>
-
-      {/* Collapse Toggle */}
-      <div className="border-t p-2">
-        <Button
-          variant="ghost"
-          size="sm"
-          className={cn('w-full', isCollapsed && 'px-2')}
-          onClick={onToggle}
-          aria-label={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-        >
-          {isCollapsed ? (
-            <ChevronRight className="h-4 w-4" />
-          ) : (
-            <>
-              <ChevronLeft className="h-4 w-4 mr-2" />
-              <span>Collapse</span>
-            </>
-          )}
-        </Button>
-      </div>
     </aside>
   );
 }

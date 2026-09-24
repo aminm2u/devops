@@ -2,7 +2,6 @@ import React, { useState } from 'react';
 import { Outlet } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { TopNav } from './TopNav';
-import { cn } from '@/lib/utils';
 
 export function AppLayout() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -12,10 +11,7 @@ export function AppLayout() {
     <div className="flex h-screen overflow-hidden bg-background">
       {/* Desktop Sidebar */}
       <div className="hidden lg:flex">
-        <Sidebar
-          isCollapsed={sidebarCollapsed}
-          onToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
-        />
+        <Sidebar isCollapsed={sidebarCollapsed} />
       </div>
 
       {/* Mobile Sidebar Overlay */}
@@ -26,18 +22,19 @@ export function AppLayout() {
             onClick={() => setMobileMenuOpen(false)}
           />
           <div className="fixed inset-y-0 left-0 z-50 w-64">
-            <Sidebar
-              isCollapsed={false}
-              onToggle={() => setMobileMenuOpen(false)}
-            />
+            <Sidebar isCollapsed={false} />
           </div>
         </div>
       )}
 
       {/* Main Content */}
       <div className="flex flex-1 flex-col overflow-hidden">
-        <TopNav onMobileMenuToggle={() => setMobileMenuOpen(!mobileMenuOpen)} />
-        <main className="flex-1 overflow-y-auto p-4 lg:p-6">
+        <TopNav
+          onMobileMenuToggle={() => setMobileMenuOpen(!mobileMenuOpen)}
+          isSidebarCollapsed={sidebarCollapsed}
+          onSidebarToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
+        />
+        <main className="flex-1 overflow-y-auto px-5 py-4 lg:px-8 lg:py-5">
           <Outlet />
         </main>
       </div>

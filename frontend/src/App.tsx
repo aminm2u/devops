@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { AppLayout } from '@/components/layout/AppLayout';
@@ -28,6 +28,7 @@ import { HelpdeskReportPage } from '@/pages/HelpdeskReportPage';
 import { HelpdeskManagePage } from '@/pages/HelpdeskManagePage';
 import { useAuth } from '@/hooks/useAuth';
 import { Loader2 } from 'lucide-react';
+import { LoadingScreen } from '@/components/loading/LoadingScreen';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isLoading } = useAuth();
@@ -94,6 +95,7 @@ function PublicRoute({ children }: { children: React.ReactNode }) {
 function App() {
   const { fetchUser, token } = useAuth();
   const [initialLoad, setInitialLoad] = useState(true);
+  const [showSplash, setShowSplash] = useState(true);
 
   useEffect(() => {
     const initAuth = async () => {
@@ -104,6 +106,14 @@ function App() {
     };
     initAuth();
   }, []);
+
+  const handleSplashComplete = useCallback(() => {
+    setShowSplash(false);
+  }, []);
+
+  if (showSplash) {
+    return <LoadingScreen onComplete={handleSplashComplete} />;
+  }
 
   if (initialLoad) {
     return (

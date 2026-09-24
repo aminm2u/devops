@@ -9,7 +9,6 @@ import {
   RefreshCw,
   AlertTriangle,
   CheckCircle,
-  ExternalLink,
   Search,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -347,7 +346,7 @@ export function DomainsPage() {
 
       {/* Table */}
       <Card>
-        <CardContent className="p-0 overflow-x-auto">
+        <CardContent className="p-0 overflow-x-auto px-4">
           {isLoading ? (
             <div className="p-6 space-y-4">
               {[1, 2, 3, 4, 5].map((i) => (
@@ -384,7 +383,7 @@ export function DomainsPage() {
                   <TableHead>Registrar</TableHead>
                   <TableHead>Expires</TableHead>
                   <TableHead>Auto-Renew</TableHead>
-                  <TableHead className="w-32" />
+                  <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -419,15 +418,13 @@ export function DomainsPage() {
                         <span className="text-muted-foreground">-</span>
                       )}
                     </TableCell>
-                    <TableCell>
-                      <div className="flex gap-1">
+                    <TableCell className='text-right'>
                         <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEditDialog(domain)}>
                           <Pencil className="h-3.5 w-3.5" />
                         </Button>
                         <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => setShowDeleteDialog(domain)}>
                           <Trash2 className="h-3.5 w-3.5" />
                         </Button>
-                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -466,7 +463,7 @@ export function DomainsPage() {
 
       {/* Create / Edit Dialog */}
       <Dialog open={showFormDialog} onOpenChange={setShowFormDialog}>
-        <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
+        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto py-6 px-4">
           <DialogHeader>
             <DialogTitle>{editingDomain ? 'Edit Domain' : 'Add Domain'}</DialogTitle>
             <DialogDescription>
@@ -535,14 +532,14 @@ export function DomainsPage() {
 
       {/* Delete Dialog */}
       <Dialog open={!!showDeleteDialog} onOpenChange={() => setShowDeleteDialog(null)}>
-        <DialogContent>
+        <DialogContent className='pt-12 pb-6 px-6'>
           <DialogHeader>
             <DialogTitle>Delete Domain</DialogTitle>
             <DialogDescription>
               Are you sure you want to delete "{showDeleteDialog?.name}"? This action cannot be undone.
             </DialogDescription>
           </DialogHeader>
-          <DialogFooter>
+          <DialogFooter className='mt-4'>
             <Button variant="outline" onClick={() => setShowDeleteDialog(null)}>Cancel</Button>
             <Button
               variant="destructive"

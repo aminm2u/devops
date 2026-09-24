@@ -54,7 +54,11 @@
       "PowerShell($login = Invoke-RestMethod -Uri \"http://localhost:8080/api/auth/login\" -Method POST -ContentType \"application/json\" -Body '{\"email\":\"admin@devops-platform.local\",\"password\":\"password\"}'; $token = $login.data.accessToken; $headers = @{Authorization = \"Bearer $token\"}; $config = Invoke-RestMethod -Uri \"http://localhost:8080/api/grafana/config\" -Headers $headers; Write-Output \"Config OK - URL: $\\($config.data.url\\), Configured: $\\($config.data.isConfigured\\), Favorites: $\\($config.data.dashboards.Count\\)\")",
       "PowerShell(docker restart devops-platform-frontend 2>&1)",
       "PowerShell($login = Invoke-RestMethod -Uri \"http://localhost:8080/api/auth/login\" -Method POST -ContentType \"application/json\" -Body '{\"email\":\"admin@devops-platform.local\",\"password\":\"password\"}'; $token = $login.data.accessToken; $headers = @{Authorization = \"Bearer $token\"}; # Test GET $get = Invoke-RestMethod -Uri \"http://localhost:8080/api/settings/grafana_hidden_dashboards\" -Headers $headers; Write-Output \"GET: $\\($get | ConvertTo-Json -Compress\\)\"; # Test PUT $putBody = '{\"value\":[],\"group\":\"grafana\"}'; $put = Invoke-RestMethod -Uri \"http://localhost:8080/api/settings/grafana_hidden_dashboards\" -Method PUT -Headers \\($headers + @{\"Content-Type\"=\"application/json\"}\\) -Body $putBody; Write-Output \"PUT: $\\($put | ConvertTo-Json -Compress\\)\")",
-      "PowerShell(docker restart devops-platform-api devops-platform-frontend 2>&1)"
+      "PowerShell(docker restart devops-platform-api devops-platform-frontend 2>&1)",
+      "Bash(npm run *)",
+      "Bash(npx tsc *)",
+      "Bash(npx vite *)",
+      "Bash(npx prisma *)"
     ]
   }
 }

@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import {
   Select,
   SelectContent,
@@ -14,10 +15,6 @@ import {
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
 } from '@/components/ui/dialog';
 import apiClient from '@/api/client';
 import toast from 'react-hot-toast';
@@ -128,15 +125,16 @@ export function ServiceDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>{service ? 'Edit Service' : 'Add Service'}</DialogTitle>
-          <DialogDescription>
-            {service ? 'Update service details' : 'Add a new service to this project'}
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="space-y-4">
+      <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto p-0">
+        <Card className='pt-8 border-0 shadow-none'>
+          <CardHeader>
+            <CardTitle>{service ? 'Edit Service' : 'Add Service'}</CardTitle>
+            <CardDescription>
+              {service ? 'Update service details' : 'Add a new service to this project'}
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <form onSubmit={(e) => { e.preventDefault(); handleSubmit(); }} className="space-y-4">
           <div className="space-y-2">
             <Label>Service Name *</Label>
             <Input
@@ -258,17 +256,18 @@ export function ServiceDialog({
               rows={3}
             />
           </div>
-        </div>
-
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
-          </Button>
-          <Button onClick={handleSubmit} disabled={isPending}>
-            {isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            {service ? 'Update' : 'Add Service'}
-          </Button>
-        </DialogFooter>
+              <div className="flex justify-end gap-3 pt-2">
+                <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+                  Cancel
+                </Button>
+                <Button type="submit" disabled={isPending}>
+                  {isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  {service ? 'Update' : 'Add Service'}
+                </Button>
+              </div>
+            </form>
+          </CardContent>
+        </Card>
       </DialogContent>
     </Dialog>
   );

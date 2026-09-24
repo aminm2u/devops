@@ -1,4 +1,3 @@
-import React from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import {
@@ -17,6 +16,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { dashboardApi } from '@/api/dashboard';
 import { cn, formatRelativeTime, getStatusColor, formatStatus } from '@/lib/utils';
+import { PageHeader } from '@/components/layout/PageHeader';
 
 function StatCardSkeleton() {
   return (
@@ -53,7 +53,7 @@ function DeploymentSkeleton() {
   return (
     <div className="space-y-3">
       {[1, 2, 3].map((i) => (
-        <div key={i} className="flex items-center gap-4 p-3 rounded-lg border">
+        <div key={i} className="flex items-center gap-4 p-3 rounded-lg bg-muted/50">
           <div className="h-4 w-24 skeleton rounded" />
           <div className="h-4 w-16 skeleton rounded" />
           <div className="h-6 w-20 skeleton rounded-full" />
@@ -84,6 +84,8 @@ export function DashboardPage() {
 
   return (
     <div className="space-y-6 animate-fade-in">
+      <PageHeader title="Dashboard" description="Overview of your infrastructure and projects" />
+
       {/* Stats Cards */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         {isLoading ? (
@@ -149,7 +151,7 @@ export function DashboardPage() {
       </div>
 
       {/* Resource Health & Activity */}
-      <div className="grid gap-6 lg:grid-cols-3">
+      <div className="grid gap-4 lg:grid-cols-3">
         {/* Resource Health */}
         <Card>
           <CardHeader>
@@ -256,7 +258,7 @@ export function DashboardPage() {
       </div>
 
       {/* Recent Deployments & Attention */}
-      <div className="grid gap-6 lg:grid-cols-2">
+      <div className="grid gap-4 lg:grid-cols-2">
         {/* Recent Deployments */}
         <Card>
           <CardHeader className="flex flex-row items-center justify-between">
@@ -281,7 +283,7 @@ export function DashboardPage() {
                 {dashboardData?.recentDeployments?.map((deployment) => (
                   <div
                     key={deployment.id}
-                    className="flex items-center gap-4 rounded-lg border p-3"
+                    className="flex items-center gap-4 rounded-lg bg-muted/50 p-3"
                   >
                     <div className="min-w-0 flex-1">
                       <p className="text-sm font-medium truncate">
@@ -310,7 +312,7 @@ export function DashboardPage() {
             {isLoading ? (
               <div className="space-y-3">
                 {[1, 2, 3].map((i) => (
-                  <div key={i} className="flex items-center gap-3 p-3 rounded-lg border">
+                  <div key={i} className="flex items-center gap-3 p-3 rounded-lg bg-muted/50">
                     <div className="h-8 w-8 skeleton rounded-lg" />
                     <div className="flex-1 space-y-2">
                       <div className="h-4 w-3/4 skeleton rounded" />
@@ -324,7 +326,7 @@ export function DashboardPage() {
                 {dashboardData?.expiringSSLCertificates?.map((cert) => (
                   <div
                     key={cert.id}
-                    className="flex items-center gap-3 rounded-lg border p-3"
+                    className="flex items-center gap-3 rounded-lg bg-muted/50 p-3"
                   >
                     <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-amber-100 dark:bg-amber-900/30">
                       <Shield className="h-4 w-4 text-amber-600 dark:text-amber-400" />
