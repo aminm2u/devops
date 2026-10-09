@@ -1,6 +1,4 @@
 import { useState, useEffect, useRef } from 'react';
-import { Dialog, DialogContent } from '@/components/ui/dialog';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -8,17 +6,14 @@ import { Input } from '@/components/ui/input';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Separator } from '@/components/ui/separator';
 import { MultiSelect, Option } from '@/components/ui/multi-select';
+import { FormDialog } from '@/components/ui/form-dialog';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import {
   Calendar, Trash2, Send, Clock, UserPlus, UserMinus,
   ArrowRight, MessageSquare, Plus, Edit, Check, X,
   ChevronDown, ChevronRight, Timer
 } from 'lucide-react';
 import { DatePicker } from '@/components/ui/date-picker';
-import {
-  AlertDialog, AlertDialogContent, AlertDialogHeader,
-  AlertDialogTitle, AlertDialogDescription, AlertDialogFooter,
-  AlertDialogCancel, AlertDialogAction
-} from '@/components/ui/alert-dialog';
 import apiClient from '@/api/client';
 import toast from 'react-hot-toast';
 import { useSocket } from '@/hooks/useSocket';
@@ -242,20 +237,35 @@ export function TaskDetailModal({ taskId, open, onClose, onDelete, members }: Ta
   const assigneeStats = getAssigneeStats();
 
   return (
-    <Dialog open={open} onOpenChange={(v) => { if (!v) onClose(); }}>
-      <DialogContent className="max-w-4xl max-h-[90vh] flex flex-col p-0">
-        <Card className="pt-2 border-0 shadow-none flex flex-col flex-1 min-h-0">
-          <CardHeader>
-            <CardTitle className="text-xl">{loading ? 'Loading...' : task?.title || 'Task'}</CardTitle>
-          </CardHeader>
-
-          <CardContent className="flex-1 min-h-0 flex flex-col">
-            {loading ? (
-              <div className="flex items-center justify-center py-12">
-                <Clock className="h-6 w-6 animate-spin text-muted-foreground" />
-              </div>
-            ) : task ? (
-              <div className="flex-1 overflow-y-auto flex flex-col gap-4 pr-1 thin-scrollbar">
+    <>
+    <FormDialog
+      open={open}
+      onOpenChange={(v) => { if (!v) onClose(); }}
+      title={loading ? 'Loading...' : task?.title || 'Task'}
+      maxWidth="xl"
+      footer={
+        <div className="flex justify-between items-center pt-4 border-t border-border/50">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="text-destructive hover:text-destructive hover:bg-destructive/10"
+            onClick={() => setDeleteConfirmOpen(true)}
+          >
+            <Trash2 className="h-4 w-4 mr-2" />
+            Delete Task
+          </Button>
+          <Button type="button" variant="outline" size="sm" onClick={onClose}>Close</Button>
+        </div>
+      }
+    >
+      <div className="flex flex-col">
+        {loading ? (
+          <div className="flex items-center justify-center py-12">
+            <Clock className="h-6 w-6 animate-spin text-muted-foreground" />
+          </div>
+        ) : task ? (
+          <div className="flex flex-col gap-4 pr-1">
                 {/* Meta badges */}
                 <div className="flex flex-wrap gap-2 items-center mt-1">
                   <Badge className={`border text-[11px] px-2 py-0.5 ${getPriorityColor(task.priority)}`} variant="outline">{task.priority}</Badge>
@@ -465,6 +475,7 @@ export function TaskDetailModal({ taskId, open, onClose, onDelete, members }: Ta
                   </div>
                   <div className="flex justify-end">
                     <Button
+                      type="button"
                       onClick={handleAddComment}
                       disabled={!comment.trim() || sendingComment}
                       size="sm"
@@ -477,43 +488,17 @@ export function TaskDetailModal({ taskId, open, onClose, onDelete, members }: Ta
                 </div>
               </div>
             ) : null}
+      </div>
+    </FormDialog>
 
-            <div className="flex justify-between items-center pt-4 mt-auto border-t border-border/50">
-              <Button
-                variant="ghost"
-                size="sm"
-                className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                onClick={() => setDeleteConfirmOpen(true)}
-              >
-                <Trash2 className="h-4 w-4 mr-2" />
-                Delete Task
-              </Button>
-              <Button variant="outline" size="sm" onClick={onClose}>Close</Button>
-            </div>
-
-            {/* Delete Confirmation */}
-            <AlertDialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
-              <AlertDialogContent>
-                <AlertDialogHeader>
-                  <AlertDialogTitle>Delete Task</AlertDialogTitle>
-                  <AlertDialogDescription>
-                    Are you sure you want to delete this task? This action cannot be undone and all associated data will be permanently removed.
-                  </AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                  <AlertDialogCancel>Cancel</AlertDialogCancel>
-                  <AlertDialogAction
-                    className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                    onClick={() => { if (taskId) onDelete(taskId); }}
-                  >
-                    Delete
-                  </AlertDialogAction>
-                </AlertDialogFooter>
-              </AlertDialogContent>
-            </AlertDialog>
-          </CardContent>
-        </Card>
-      </DialogContent>
-    </Dialog>
+    {/* Delete Confirmation */}
+    <ConfirmDialog
+      open={deleteConfirmOpen}
+      onOpenChange={setDeleteConfirmOpen}
+      title="Delete Task"
+      description="Are you sure you want to delete this task? This action cannot be undone and all associated data will be permanently removed."
+      onConfirm={() => { if (taskId) onDelete(taskId); }}
+    />
+    </>
   );
 }

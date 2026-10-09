@@ -17,15 +17,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from '@/components/ui/dialog';
+import { FormDialog } from '@/components/ui/form-dialog';
 import { useAuth } from '@/hooks/useAuth';
 import { profileApi } from '@/api/profile';
 import { formatDate } from '@/lib/utils';
@@ -285,69 +277,47 @@ export function ProfilePage() {
                 Permanently delete your account and all associated data
               </p>
             </div>
-            <Dialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
-              <DialogTrigger asChild>
-                <Button variant="destructive">
-                  <Trash2 className="mr-2 h-4 w-4" />
-                  Delete Account
-                </Button>
-              </DialogTrigger>
-              <DialogContent>
-                <DialogHeader>
-                  <DialogTitle>Are you absolutely sure?</DialogTitle>
-                  <DialogDescription>
-                    This action cannot be undone. This will permanently delete your account
-                    and remove all your data from our servers.
-                  </DialogDescription>
-                </DialogHeader>
-                <div className="space-y-4">
-                  <div className="flex items-center gap-2 rounded-lg border border-destructive/50 bg-destructive/5 p-3">
-                    <AlertTriangle className="h-4 w-4 text-destructive" />
-                    <p className="text-sm text-destructive">
-                      This action is irreversible. All your projects, settings, and data will be permanently deleted.
-                    </p>
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="deletePassword">Enter your password to confirm</Label>
-                    <Input
-                      id="deletePassword"
-                      type="password"
-                      value={deletePassword}
-                      onChange={(e) => setDeletePassword(e.target.value)}
-                      placeholder="Enter your password"
-                    />
-                  </div>
-                </div>
-                <DialogFooter>
-                  <Button
-                    variant="outline"
-                    onClick={() => {
-                      setShowDeleteDialog(false);
-                      setDeletePassword('');
-                    }}
-                  >
-                    Cancel
-                  </Button>
-                  <Button
-                    variant="destructive"
-                    onClick={handleDeleteAccount}
-                    disabled={!deletePassword || deleteAccountMutation.isPending}
-                  >
-                    {deleteAccountMutation.isPending ? (
-                      <>
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        Deleting...
-                      </>
-                    ) : (
-                      'Delete Account'
-                    )}
-                  </Button>
-                </DialogFooter>
-              </DialogContent>
-            </Dialog>
+            <Button
+              variant="destructive"
+              onClick={() => setShowDeleteDialog(true)}
+            >
+              <Trash2 className="mr-2 h-4 w-4" />
+              Delete Account
+            </Button>
           </div>
         </CardContent>
       </Card>
+
+      <FormDialog
+        open={showDeleteDialog}
+        onOpenChange={(open) => {
+          setShowDeleteDialog(open);
+          if (!open) setDeletePassword('');
+        }}
+        title="Are you absolutely sure?"
+        description="This action cannot be undone. This will permanently delete your account and remove all your data from our servers."
+        onSubmit={handleDeleteAccount}
+        submitLabel="Delete Account"
+        isSubmitting={deleteAccountMutation.isPending}
+        submitDisabled={!deletePassword}
+      >
+        <div className="flex items-center gap-2 rounded-lg border border-destructive/50 bg-destructive/5 p-3">
+          <AlertTriangle className="h-4 w-4 text-destructive" />
+          <p className="text-sm text-destructive">
+            This action is irreversible. All your projects, settings, and data will be permanently deleted.
+          </p>
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="deletePassword">Enter your password to confirm</Label>
+          <Input
+            id="deletePassword"
+            type="password"
+            value={deletePassword}
+            onChange={(e) => setDeletePassword(e.target.value)}
+            placeholder="Enter your password"
+          />
+        </div>
+      </FormDialog>
     </div>
   );
 }

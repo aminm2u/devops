@@ -9,8 +9,29 @@ async function main() {
   // Clean existing data (order matters for foreign keys)
   await prisma.projectTask.deleteMany();
   await prisma.taskColumn.deleteMany();
+  // Procurement tables (new)
+  await prisma.paymentAttachment.deleteMany();
+  await prisma.payment.deleteMany();
+  await prisma.goodsReceiptItem.deleteMany();
+  await prisma.goodsReceipt.deleteMany();
+  await prisma.asset.deleteMany();
+  await prisma.purchaseOrderItem.deleteMany();
+  await prisma.purchaseOrder.deleteMany();
+  await prisma.directPurchase.deleteMany();
+  await prisma.quotationItem.deleteMany();
+  await prisma.quotation.deleteMany();
+  await prisma.rfqItem.deleteMany();
+  await prisma.requestForQuotation.deleteMany();
+  await prisma.internalProject.deleteMany();
+  await prisma.requisitionApproval.deleteMany();
+  await prisma.approvalAssignment.deleteMany();
+  await prisma.approvalPolicyTier.deleteMany();
+  await prisma.approvalPolicy.deleteMany();
   await prisma.requisitionItem.deleteMany();
   await prisma.requisitionForm.deleteMany();
+  await prisma.vendor.deleteMany();
+  await prisma.referenceData.deleteMany();
+  await prisma.referenceNumberConfig.deleteMany();
   await prisma.document.deleteMany();
   await prisma.securityFinding.deleteMany();
   await prisma.disasterRecoveryPlan.deleteMany();
@@ -899,6 +920,198 @@ async function main() {
         color: cat.color,
         isActive: true,
       },
+    });
+  }
+
+  // ── Reference Data (Dropdowns) ─────────────────────────────────────────
+  console.log("Seeding reference data...");
+
+  const referenceDataGroups: Record<string, { value: string; label: string; sortOrder: number }[]> = {
+    budget_type: [
+      { value: "project", label: "Project", sortOrder: 1 },
+      { value: "department", label: "Department", sortOrder: 2 },
+      { value: "event", label: "Event", sortOrder: 3 },
+      { value: "programme", label: "Programme", sortOrder: 4 },
+      { value: "overhead", label: "Overhead", sortOrder: 5 },
+      { value: "capital", label: "Capital", sortOrder: 6 },
+    ],
+    division: [
+      { value: "IT", label: "Information Technology", sortOrder: 1 },
+      { value: "DMA", label: "Digital Marketing & Analytics", sortOrder: 2 },
+      { value: "HR", label: "Human Resources", sortOrder: 3 },
+      { value: "BD", label: "Business Development", sortOrder: 4 },
+      { value: "DI", label: "Digital Innovation", sortOrder: 5 },
+      { value: "ADMIN", label: "Administration", sortOrder: 6 },
+      { value: "FIN", label: "Finance", sortOrder: 7 },
+      { value: "OPS", label: "Operations", sortOrder: 8 },
+    ],
+    uom: [
+      { value: "Unit", label: "Unit", sortOrder: 1 },
+      { value: "Set", label: "Set", sortOrder: 2 },
+      { value: "Box", label: "Box", sortOrder: 3 },
+      { value: "Piece", label: "Piece", sortOrder: 4 },
+      { value: "Lot", label: "Lot", sortOrder: 5 },
+      { value: "Month", label: "Month", sortOrder: 6 },
+      { value: "Year", label: "Year", sortOrder: 7 },
+      { value: "License", label: "License", sortOrder: 8 },
+      { value: "Kg", label: "Kilogram", sortOrder: 9 },
+      { value: "Meter", label: "Meter", sortOrder: 10 },
+      { value: "Box", label: "Box", sortOrder: 11 },
+      { value: "Pack", label: "Pack", sortOrder: 12 },
+    ],
+    currency: [
+      { value: "MYR", label: "Malaysian Ringgit (MYR)", sortOrder: 1 },
+      { value: "USD", label: "US Dollar (USD)", sortOrder: 2 },
+      { value: "EUR", label: "Euro (EUR)", sortOrder: 3 },
+      { value: "GBP", label: "British Pound (GBP)", sortOrder: 4 },
+      { value: "SGD", label: "Singapore Dollar (SGD)", sortOrder: 5 },
+      { value: "JPY", label: "Japanese Yen (JPY)", sortOrder: 6 },
+    ],
+    procurement_type: [
+      { value: "material", label: "Material", sortOrder: 1 },
+      { value: "service", label: "Service", sortOrder: 2 },
+    ],
+    urgency_level: [
+      { value: "low", label: "Low", sortOrder: 1 },
+      { value: "normal", label: "Normal", sortOrder: 2 },
+      { value: "high", label: "High", sortOrder: 3 },
+      { value: "urgent", label: "Urgent", sortOrder: 4 },
+    ],
+    status_budget: [
+      { value: "request", label: "Request", sortOrder: 1 },
+      { value: "approved", label: "Approved", sortOrder: 2 },
+      { value: "active", label: "Active", sortOrder: 3 },
+      { value: "closed", label: "Closed", sortOrder: 4 },
+    ],
+    status_requisition: [
+      { value: "draft", label: "Draft", sortOrder: 1 },
+      { value: "submitted", label: "Submitted", sortOrder: 2 },
+      { value: "under_review", label: "Under Review", sortOrder: 3 },
+      { value: "approved", label: "Approved", sortOrder: 4 },
+      { value: "rejected", label: "Rejected", sortOrder: 5 },
+      { value: "in_procurement", label: "In Procurement", sortOrder: 6 },
+      { value: "completed", label: "Completed", sortOrder: 7 },
+    ],
+    status_po: [
+      { value: "draft", label: "Draft", sortOrder: 1 },
+      { value: "submitted", label: "Submitted", sortOrder: 2 },
+      { value: "approved", label: "Approved", sortOrder: 3 },
+      { value: "dispatched", label: "Dispatched", sortOrder: 4 },
+      { value: "partially_received", label: "Partially Received", sortOrder: 5 },
+      { value: "fully_received", label: "Fully Received", sortOrder: 6 },
+      { value: "completed", label: "Completed", sortOrder: 7 },
+      { value: "cancelled", label: "Cancelled", sortOrder: 8 },
+    ],
+    status_rfq: [
+      { value: "draft", label: "Draft", sortOrder: 1 },
+      { value: "sent", label: "Sent", sortOrder: 2 },
+      { value: "receiving", label: "Receiving", sortOrder: 3 },
+      { value: "evaluating", label: "Evaluating", sortOrder: 4 },
+      { value: "awarded", label: "Awarded", sortOrder: 5 },
+      { value: "cancelled", label: "Cancelled", sortOrder: 6 },
+    ],
+    status_payment: [
+      { value: "draft", label: "Draft", sortOrder: 1 },
+      { value: "submitted", label: "Submitted", sortOrder: 2 },
+      { value: "approved", label: "Approved", sortOrder: 3 },
+      { value: "paid", label: "Paid", sortOrder: 4 },
+      { value: "cancelled", label: "Cancelled", sortOrder: 5 },
+    ],
+    status_grn: [
+      { value: "pending", label: "Pending", sortOrder: 1 },
+      { value: "inspected", label: "Inspected", sortOrder: 2 },
+      { value: "accepted", label: "Accepted", sortOrder: 3 },
+      { value: "rejected", label: "Rejected", sortOrder: 4 },
+      { value: "partial", label: "Partial", sortOrder: 5 },
+    ],
+    asset_category: [
+      { value: "furniture", label: "Furniture", sortOrder: 1 },
+      { value: "it_equipment", label: "IT Equipment", sortOrder: 2 },
+      { value: "vehicle", label: "Vehicle", sortOrder: 3 },
+      { value: "machinery", label: "Machinery", sortOrder: 4 },
+      { value: "other", label: "Other", sortOrder: 5 },
+    ],
+    payment_method: [
+      { value: "bank_transfer", label: "Bank Transfer", sortOrder: 1 },
+      { value: "cheque", label: "Cheque", sortOrder: 2 },
+      { value: "cash", label: "Cash", sortOrder: 3 },
+      { value: "online", label: "Online Payment", sortOrder: 4 },
+    ],
+  };
+
+  for (const [group, items] of Object.entries(referenceDataGroups)) {
+    for (const item of items) {
+      await prisma.referenceData.upsert({
+        where: { group_value: { group, value: item.value } },
+        update: { label: item.label, sortOrder: item.sortOrder },
+        create: { group, value: item.value, label: item.label, sortOrder: item.sortOrder },
+      });
+    }
+  }
+
+  // ── Reference Number Configurations ────────────────────────────────────
+  console.log("Seeding reference number configurations...");
+
+  const numberConfigs = [
+    { refType: "req", prefix: "REQ", separator: "-", yearFormat: "YYYY", digitPadding: 4 },
+    { refType: "rfq", prefix: "RFQ", separator: "-", yearFormat: "YYYY", digitPadding: 4 },
+    { refType: "po", prefix: "PO", separator: "-", yearFormat: "YYYY", digitPadding: 5 },
+    { refType: "lo", prefix: "LO", separator: "-", yearFormat: "YYYY", digitPadding: 5 },
+    { refType: "dp", prefix: "DP", separator: "-", yearFormat: "YYYY", digitPadding: 4 },
+    { refType: "grn", prefix: "GRN", separator: "-", yearFormat: "YYYY", digitPadding: 5 },
+    { refType: "pay", prefix: "PAY", separator: "-", yearFormat: "YYYY", digitPadding: 5 },
+    { refType: "asset", prefix: "ASSET", separator: "-", yearFormat: "YYYY", digitPadding: 5 },
+  ];
+
+  for (const config of numberConfigs) {
+    await prisma.referenceNumberConfig.upsert({
+      where: { refType: config.refType },
+      update: {},
+      create: {
+        refType: config.refType,
+        prefix: config.prefix,
+        separator: config.separator,
+        yearFormat: config.yearFormat,
+        digitPadding: config.digitPadding,
+        currentCounter: 1,
+      },
+    });
+  }
+
+  // ── Default Approval Policy ────────────────────────────────────────────
+  console.log("Seeding default approval policy...");
+
+  const defaultPolicy = await prisma.approvalPolicy.upsert({
+    where: { id: 1 },
+    update: {},
+    create: {
+      name: "Default Procurement Approval",
+      description: "Standard approval policy for all procurement types",
+      isActive: true,
+    },
+  });
+
+  // Create tiers
+  const existingTiers = await prisma.approvalPolicyTier.count({
+    where: { policyId: defaultPolicy.id },
+  });
+
+  if (existingTiers === 0) {
+    await prisma.approvalPolicyTier.createMany({
+      data: [
+        { policyId: defaultPolicy.id, minAmount: 0, maxAmount: 10000, requiredApprovals: 1 },
+        { policyId: defaultPolicy.id, minAmount: 10001, maxAmount: 50000, requiredApprovals: 2 },
+        { policyId: defaultPolicy.id, minAmount: 50001, maxAmount: 200000, requiredApprovals: 3 },
+        { policyId: defaultPolicy.id, minAmount: 200001, maxAmount: 999999999, requiredApprovals: 3 },
+      ],
+    });
+
+    // Assign admin and devops-admin as approvers
+    await prisma.approvalAssignment.createMany({
+      data: [
+        { policyId: defaultPolicy.id, userId: admin.id, sortOrder: 1 },
+        { policyId: defaultPolicy.id, userId: devopsAdmin.id, sortOrder: 2 },
+      ],
     });
   }
 

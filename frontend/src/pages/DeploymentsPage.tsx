@@ -1,20 +1,14 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Rocket, Plus, Loader2, Pencil, Trash2, AlertTriangle } from 'lucide-react';
+import { Rocket, Plus, Pencil, Trash2 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+import { FormDialog } from '@/components/ui/form-dialog';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import {
   Select,
   SelectContent,
@@ -22,18 +16,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
-import { Skeleton } from '@/components/ui/skeleton';
 import { UserAvatar } from '@/components/ui/UserAvatar';
+import { PageHeader } from '@/components/layout/PageHeader';
+import { DataTable, type DataTableColumn } from '@/components/DataTable';
+import { StatusBadge } from '@/components/ui/status-badge';
 import apiClient from '@/api/client';
-import { formatDate, getStatusColor, formatStatus } from '@/lib/utils';
+import { formatDate } from '@/lib/utils';
 import toast from 'react-hot-toast';
 
 interface Deployment {
@@ -177,18 +165,108 @@ export function DeploymentsPage() {
     return mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
   };
 
+  const columns: DataTableColumn<Deployment>[] = [
+    {
+      key: 'version',
+      header: 'Version',
+      accessor: (dep) => (
+        <div>
+          <span className="font-medium">{dep.name}</span>
+          <span className="ml-2 font-mono text-xs text-muted-foreground">v{dep.version}</span>
+        </div>
+      ),
+      sortValue: (dep) => `${dep.name} v${dep.version}`,
+      sortable: true,
+    },
+    {
+      key: 'project',
+      header: 'Project',
+      accessor: (dep) => <Badge variant="outline">{dep.project.name}</Badge>,
+      sortValue: (dep) => dep.project.name,
+      sortable: true,
+    },
+    {
+      key: 'status',
+      header: 'Status',
+      accessor: (dep) => <StatusBadge domain="generic" value={dep.status} />,
+      sortValue: (dep) => dep.status,
+      sortable: true,
+    },
+    {
+      key: 'commit',
+      header: 'Commit',
+      accessor: (dep) => (
+        <span className="font-mono text-xs">{dep.commitHash ? dep.commitHash.slice(0, 7) : '-'}</span>
+      ),
+    },
+    {
+      key: 'duration',
+      header: 'Duration',
+      accessor: (dep) => formatDuration(dep.durationSeconds),
+      sortValue: (dep) => dep.durationSeconds ?? null,
+      sortable: true,
+      className: 'text-sm text-muted-foreground',
+    },
+    {
+      key: 'deployer',
+      header: 'Deployer',
+      render: (dep) =>
+        dep.deployedByUser ? (
+          <div className="flex items-center gap-1.5">
+            <UserAvatar user={dep.deployedByUser} size="sm" />
+            <span>{dep.deployedByUser.name}</span>
+          </div>
+        ) : (
+          <span className="text-sm text-muted-foreground">Unknown</span>
+        ),
+      skeletonClassName: 'h-8 w-8 rounded-full',
+    },
+    {
+      key: 'date',
+      header: 'Date',
+      accessor: (dep) => (
+        <span className="text-sm text-muted-foreground">
+          {dep.deployedAt ? formatDate(dep.deployedAt) : formatDate(dep.createdAt)}
+        </span>
+      ),
+      sortValue: (dep) => new Date(dep.deployedAt || dep.createdAt).getTime(),
+      sortable: true,
+    },
+    {
+      key: 'actions',
+      header: 'Actions',
+      align: 'right',
+      render: (dep) => (
+        <div className="flex items-center justify-end gap-1">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8"
+            onClick={() => openEditDialog(dep)}
+          >
+            <Pencil className="h-4 w-4" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8 text-destructive hover:text-destructive"
+            onClick={() => openDeleteDialog(dep)}
+          >
+            <Trash2 className="h-4 w-4" />
+          </Button>
+        </div>
+      ),
+    },
+  ];
+
   return (
     <div className="space-y-6 animate-fade-in">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">Deployments</h1>
-          <p className="text-sm text-muted-foreground">Track and manage deployments across projects</p>
-        </div>
+      <PageHeader title="Deployments" description="Track and manage deployments across projects">
         <Button onClick={() => setShowCreateDialog(true)}>
           <Plus className="mr-2 h-4 w-4" />
           Record Deployment
         </Button>
-      </div>
+      </PageHeader>
 
       {/* Summary Cards */}
       <div className="grid gap-4 sm:grid-cols-4">
@@ -209,387 +287,253 @@ export function DeploymentsPage() {
         ))}
       </div>
 
-      {/* Filters */}
-      <div className="flex flex-col gap-3 sm:flex-row">
-        <div className="relative flex-1">
-          <Input
-            placeholder="Search deployments..."
-            value={search}
-            onChange={(e) => { setSearch(e.target.value); setPage(1); }}
-          />
-        </div>
-        <Select value={statusFilter} onValueChange={(v) => { setStatusFilter(v); setPage(1); }}>
-          <SelectTrigger className="w-full sm:w-[150px]">
-            <SelectValue placeholder="Status" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Statuses</SelectItem>
-            <SelectItem value="pending">Pending</SelectItem>
-            <SelectItem value="in_progress">In Progress</SelectItem>
-            <SelectItem value="completed">Completed</SelectItem>
-            <SelectItem value="failed">Failed</SelectItem>
-            <SelectItem value="rolled_back">Rolled Back</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
-
-      {/* Table */}
-      <Card>
-        <CardContent className="p-0 overflow-x-auto px-4">
-          {isLoading ? (
-            <div className="p-6 space-y-4">
-              {[1, 2, 3, 4, 5].map((i) => (
-                <div key={i} className="flex items-center gap-4">
-                  <Skeleton className="h-4 w-[120px]" />
-                  <Skeleton className="h-6 w-[80px]" />
-                  <Skeleton className="h-4 w-[200px]" />
-                  <Skeleton className="h-4 w-[100px]" />
-                </div>
-              ))}
-            </div>
-          ) : error ? (
-            <div className="flex flex-col items-center justify-center py-12">
-              <AlertTriangle className="h-8 w-8 text-destructive mb-2" />
+      <DataTable
+        columns={columns}
+        data={deployments}
+        loading={isLoading}
+        loadingRows={5}
+        error={
+          error ? (
+            <div className="flex flex-col items-center justify-center py-6">
               <p className="text-sm text-destructive">Failed to load deployments</p>
               <p className="text-xs text-muted-foreground mt-1">Please try again later</p>
             </div>
-          ) : deployments.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-12">
-              <Rocket className="h-8 w-8 text-muted-foreground mb-2" />
-              <p className="text-sm text-muted-foreground">No deployments found</p>
-            </div>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Version</TableHead>
-                  <TableHead>Project</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Commit</TableHead>
-                  <TableHead>Duration</TableHead>
-                  <TableHead>Deployer</TableHead>
-                  <TableHead>Date</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {deployments.map((dep) => (
-                  <TableRow key={dep.id}>
-                    <TableCell>
-                      <div>
-                        <span className="font-medium">{dep.name}</span>
-                        <span className="ml-2 font-mono text-xs text-muted-foreground">v{dep.version}</span>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant="outline">{dep.project.name}</Badge>
-                    </TableCell>
-                    <TableCell>
-                      <Badge className={getStatusColor(dep.status)}>
-                        {formatStatus(dep.status)}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="font-mono text-xs">
-                      {dep.commitHash ? dep.commitHash.slice(0, 7) : '-'}
-                    </TableCell>
-                    <TableCell className="text-sm text-muted-foreground">
-                      {formatDuration(dep.durationSeconds)}
-                    </TableCell>
-                    <TableCell className="text-sm text-muted-foreground">
-                      {dep.deployedByUser ? (
-                        <div className="flex items-center gap-1.5">
-                          <UserAvatar user={dep.deployedByUser} size="sm" />
-                          <span>{dep.deployedByUser.name}</span>
-                        </div>
-                      ) : (
-                        'Unknown'
-                      )}
-                    </TableCell>
-                    <TableCell className="text-sm text-muted-foreground">
-                      {dep.deployedAt ? formatDate(dep.deployedAt) : formatDate(dep.createdAt)}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex items-center justify-end gap-1">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8"
-                          onClick={() => openEditDialog(dep)}
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8 text-destructive hover:text-destructive"
-                          onClick={() => openDeleteDialog(dep)}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Pagination */}
-      {meta && meta.lastPage > 1 && (
-        <div className="flex items-center justify-between">
-          <p className="text-sm text-muted-foreground">
-            Page {meta.currentPage} of {meta.lastPage} ({meta.total} total)
-          </p>
-          <div className="flex gap-2">
-            <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
-              Previous
-            </Button>
-            <Button variant="outline" size="sm" disabled={page >= meta.lastPage} onClick={() => setPage((p) => p + 1)}>
-              Next
-            </Button>
-          </div>
-        </div>
-      )}
+          ) : undefined
+        }
+        search={{
+          value: search,
+          onChange: (v) => { setSearch(v); setPage(1); },
+          placeholder: 'Search deployments...',
+        }}
+        filters={
+          <Select value={statusFilter} onValueChange={(v) => { setStatusFilter(v); setPage(1); }}>
+            <SelectTrigger className="w-full sm:w-[150px]">
+              <SelectValue placeholder="Status" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Statuses</SelectItem>
+              <SelectItem value="pending">Pending</SelectItem>
+              <SelectItem value="in_progress">In Progress</SelectItem>
+              <SelectItem value="completed">Completed</SelectItem>
+              <SelectItem value="failed">Failed</SelectItem>
+              <SelectItem value="rolled_back">Rolled Back</SelectItem>
+            </SelectContent>
+          </Select>
+        }
+        pagination={{
+          page,
+          totalPages: meta?.lastPage ?? 1,
+          onPageChange: setPage,
+          totalItems: meta?.total,
+          itemsPerPage: 20,
+        }}
+        emptyIcon={Rocket}
+        emptyTitle="No deployments found"
+      />
 
       {/* Create Dialog */}
-      <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
-        <DialogContent className='py-5 px-6'>
-          <DialogHeader>
-            <DialogTitle>Record Deployment</DialogTitle>
-            <DialogDescription>Log a new deployment for tracking</DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label>Project *</Label>
-              <Select value={String(formProjectId)} onValueChange={(v) => setFormProjectId(Number(v))}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {projects.map((p: any) => (
-                    <SelectItem key={p.id} value={String(p.id)}>{p.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label>Name *</Label>
-              <Input
-                value={formName}
-                onChange={(e) => setFormName(e.target.value)}
-                placeholder="e.g., Production Release"
-              />
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>Version *</Label>
-                <Input
-                  value={formVersion}
-                  onChange={(e) => setFormVersion(e.target.value)}
-                  placeholder="e.g., 1.2.0"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Status</Label>
-                <Select value={formStatus} onValueChange={setFormStatus}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="pending">Pending</SelectItem>
-                    <SelectItem value="in_progress">In Progress</SelectItem>
-                    <SelectItem value="completed">Completed</SelectItem>
-                    <SelectItem value="failed">Failed</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            <div className="space-y-2">
-              <Label>Branch</Label>
-              <Input
-                value={formBranch}
-                onChange={(e) => setFormBranch(e.target.value)}
-                placeholder="e.g., main"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Commit Hash</Label>
-              <Input
-                value={formCommit}
-                onChange={(e) => setFormCommit(e.target.value)}
-                placeholder="e.g., abc1234"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Notes</Label>
-              <Textarea
-                value={formNotes}
-                onChange={(e) => setFormNotes(e.target.value)}
-                placeholder="Deployment notes..."
-                rows={3}
-              />
-            </div>
+      <FormDialog
+        open={showCreateDialog}
+        onOpenChange={(open) => {
+          setShowCreateDialog(open);
+          if (!open) resetCreateForm();
+        }}
+        title="Record Deployment"
+        description="Log a new deployment for tracking"
+        maxWidth="lg"
+        onSubmit={() => {
+          if (!formName.trim() || !formVersion.trim()) {
+            toast.error('Name and version are required');
+            return;
+          }
+          createMutation.mutate({
+            projectId: formProjectId,
+            name: formName.trim(),
+            version: formVersion.trim(),
+            status: formStatus,
+            branch: formBranch.trim() || undefined,
+            commitHash: formCommit.trim() || undefined,
+            notes: formNotes.trim() || undefined,
+          });
+        }}
+        submitLabel="Record"
+        isSubmitting={createMutation.isPending}
+      >
+        <div className="space-y-2">
+          <Label>Project *</Label>
+          <Select value={String(formProjectId)} onValueChange={(v) => setFormProjectId(Number(v))}>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {projects.map((p: any) => (
+                <SelectItem key={p.id} value={String(p.id)}>{p.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-2">
+          <Label>Name *</Label>
+          <Input
+            value={formName}
+            onChange={(e) => setFormName(e.target.value)}
+            placeholder="e.g., Production Release"
+          />
+        </div>
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <Label>Version *</Label>
+            <Input
+              value={formVersion}
+              onChange={(e) => setFormVersion(e.target.value)}
+              placeholder="e.g., 1.2.0"
+            />
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => { setShowCreateDialog(false); resetCreateForm(); }}>
-              Cancel
-            </Button>
-            <Button
-              onClick={() => {
-                if (!formName.trim() || !formVersion.trim()) {
-                  toast.error('Name and version are required');
-                  return;
-                }
-                createMutation.mutate({
-                  projectId: formProjectId,
-                  name: formName.trim(),
-                  version: formVersion.trim(),
-                  status: formStatus,
-                  branch: formBranch.trim() || undefined,
-                  commitHash: formCommit.trim() || undefined,
-                  notes: formNotes.trim() || undefined,
-                });
-              }}
-              disabled={createMutation.isPending}
-            >
-              {createMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Record
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          <div className="space-y-2">
+            <Label>Status</Label>
+            <Select value={formStatus} onValueChange={setFormStatus}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="pending">Pending</SelectItem>
+                <SelectItem value="in_progress">In Progress</SelectItem>
+                <SelectItem value="completed">Completed</SelectItem>
+                <SelectItem value="failed">Failed</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+        <div className="space-y-2">
+          <Label>Branch</Label>
+          <Input
+            value={formBranch}
+            onChange={(e) => setFormBranch(e.target.value)}
+            placeholder="e.g., main"
+          />
+        </div>
+        <div className="space-y-2">
+          <Label>Commit Hash</Label>
+          <Input
+            value={formCommit}
+            onChange={(e) => setFormCommit(e.target.value)}
+            placeholder="e.g., abc1234"
+          />
+        </div>
+        <div className="space-y-2">
+          <Label>Notes</Label>
+          <Textarea
+            value={formNotes}
+            onChange={(e) => setFormNotes(e.target.value)}
+            placeholder="Deployment notes..."
+            rows={3}
+          />
+        </div>
+      </FormDialog>
 
       {/* Edit Dialog */}
-      <Dialog open={showEditDialog} onOpenChange={setShowEditDialog}>
-        <DialogContent className='py-5 px-6'>
-          <DialogHeader>
-            <DialogTitle>Edit Deployment</DialogTitle>
-            <DialogDescription>
-              Update deployment &quot;{selectedDeployment?.name}&quot; v{selectedDeployment?.version}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label>Name *</Label>
-              <Input
-                value={editName}
-                onChange={(e) => setEditName(e.target.value)}
-                placeholder="e.g., Production Release"
-              />
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>Version *</Label>
-                <Input
-                  value={editVersion}
-                  onChange={(e) => setEditVersion(e.target.value)}
-                  placeholder="e.g., 1.2.0"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Status</Label>
-                <Select value={editStatus} onValueChange={setEditStatus}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="pending">Pending</SelectItem>
-                    <SelectItem value="in_progress">In Progress</SelectItem>
-                    <SelectItem value="completed">Completed</SelectItem>
-                    <SelectItem value="failed">Failed</SelectItem>
-                    <SelectItem value="rolled_back">Rolled Back</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            <div className="space-y-2">
-              <Label>Branch</Label>
-              <Input
-                value={editBranch}
-                onChange={(e) => setEditBranch(e.target.value)}
-                placeholder="e.g., main"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Commit Hash</Label>
-              <Input
-                value={editCommit}
-                onChange={(e) => setEditCommit(e.target.value)}
-                placeholder="e.g., abc1234"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Notes</Label>
-              <Textarea
-                value={editNotes}
-                onChange={(e) => setEditNotes(e.target.value)}
-                placeholder="Deployment notes..."
-                rows={3}
-              />
-            </div>
+      <FormDialog
+        open={showEditDialog}
+        onOpenChange={(open) => {
+          setShowEditDialog(open);
+          if (!open) setSelectedDeployment(null);
+        }}
+        title="Edit Deployment"
+        description={`Update deployment "${selectedDeployment?.name}" v${selectedDeployment?.version}`}
+        maxWidth="lg"
+        onSubmit={() => {
+          if (!editName.trim() || !editVersion.trim()) {
+            toast.error('Name and version are required');
+            return;
+          }
+          if (!selectedDeployment) return;
+          updateMutation.mutate({
+            id: selectedDeployment.id,
+            data: {
+              name: editName.trim(),
+              version: editVersion.trim(),
+              status: editStatus,
+              branch: editBranch.trim() || undefined,
+              commitHash: editCommit.trim() || undefined,
+              notes: editNotes.trim() || undefined,
+            },
+          });
+        }}
+        submitLabel="Save Changes"
+        isSubmitting={updateMutation.isPending}
+      >
+        <div className="space-y-2">
+          <Label>Name *</Label>
+          <Input
+            value={editName}
+            onChange={(e) => setEditName(e.target.value)}
+            placeholder="e.g., Production Release"
+          />
+        </div>
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <Label>Version *</Label>
+            <Input
+              value={editVersion}
+              onChange={(e) => setEditVersion(e.target.value)}
+              placeholder="e.g., 1.2.0"
+            />
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => { setShowEditDialog(false); setSelectedDeployment(null); }}>
-              Cancel
-            </Button>
-            <Button
-              onClick={() => {
-                if (!editName.trim() || !editVersion.trim()) {
-                  toast.error('Name and version are required');
-                  return;
-                }
-                if (!selectedDeployment) return;
-                updateMutation.mutate({
-                  id: selectedDeployment.id,
-                  data: {
-                    name: editName.trim(),
-                    version: editVersion.trim(),
-                    status: editStatus,
-                    branch: editBranch.trim() || undefined,
-                    commitHash: editCommit.trim() || undefined,
-                    notes: editNotes.trim() || undefined,
-                  },
-                });
-              }}
-              disabled={updateMutation.isPending}
-            >
-              {updateMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Save Changes
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          <div className="space-y-2">
+            <Label>Status</Label>
+            <Select value={editStatus} onValueChange={setEditStatus}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="pending">Pending</SelectItem>
+                <SelectItem value="in_progress">In Progress</SelectItem>
+                <SelectItem value="completed">Completed</SelectItem>
+                <SelectItem value="failed">Failed</SelectItem>
+                <SelectItem value="rolled_back">Rolled Back</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+        <div className="space-y-2">
+          <Label>Branch</Label>
+          <Input
+            value={editBranch}
+            onChange={(e) => setEditBranch(e.target.value)}
+            placeholder="e.g., main"
+          />
+        </div>
+        <div className="space-y-2">
+          <Label>Commit Hash</Label>
+          <Input
+            value={editCommit}
+            onChange={(e) => setEditCommit(e.target.value)}
+            placeholder="e.g., abc1234"
+          />
+        </div>
+        <div className="space-y-2">
+          <Label>Notes</Label>
+          <Textarea
+            value={editNotes}
+            onChange={(e) => setEditNotes(e.target.value)}
+            placeholder="Deployment notes..."
+            rows={3}
+          />
+        </div>
+      </FormDialog>
 
       {/* Delete Confirmation Dialog */}
-      <Dialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
-        <DialogContent className='pt-12 pb-6 px-6'>
-          <DialogHeader>
-            <DialogTitle>Delete Deployment</DialogTitle>
-            <DialogDescription>
-              Are you sure you want to delete deployment &quot;{selectedDeployment?.name}&quot; v{selectedDeployment?.version}?
-              This action cannot be undone.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter className='mt-4'>
-            <Button variant="outline" onClick={() => { setShowDeleteDialog(false); setSelectedDeployment(null); }}>
-              Cancel
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={() => {
-                if (!selectedDeployment) return;
-                deleteMutation.mutate(selectedDeployment.id);
-              }}
-              disabled={deleteMutation.isPending}
-            >
-              {deleteMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Delete
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <ConfirmDialog
+        open={showDeleteDialog}
+        onOpenChange={(open) => { setShowDeleteDialog(open); if (!open) setSelectedDeployment(null); }}
+        title="Delete Deployment"
+        description={<>Are you sure you want to delete deployment &quot;{selectedDeployment?.name}&quot; v{selectedDeployment?.version}? This action cannot be undone.</>}
+        onConfirm={() => {
+          if (!selectedDeployment) return;
+          deleteMutation.mutate(selectedDeployment.id);
+        }}
+        isConfirming={deleteMutation.isPending}
+      />
     </div>
   );
 }

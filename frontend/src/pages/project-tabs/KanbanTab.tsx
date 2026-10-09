@@ -1,14 +1,16 @@
 import React, { useState } from 'react';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import { Dialog, DialogContent } from '@/components/ui/dialog';
+import { FormDialog } from '@/components/ui/form-dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import { MultiSelect, Option } from '@/components/ui/multi-select';
+import { StatusBadge } from '@/components/ui/status-badge';
+import { DatePicker } from '@/components/ui/date-picker';
 import { Calendar, Plus, Trash2 } from 'lucide-react';
 import apiClient from '@/api/client';
 import toast from 'react-hot-toast';
@@ -54,7 +56,7 @@ export function KanbanTab({ project, refetch }: { project: any, refetch: () => v
 
     const newTasks = Array.from(tasks);
     const taskIndex = newTasks.findIndex((t: any) => t.id === taskId);
-    const [movedTask] = newTasks.splice(taskIndex, 1);
+    const [movedTask] = newTasks.splice(taskIndex, 1) as any[];
     movedTask.columnId = destColId;
 
     const destTasks = newTasks.filter((t: any) => t.columnId === destColId);
@@ -78,16 +80,6 @@ export function KanbanTab({ project, refetch }: { project: any, refetch: () => v
     } catch (err) {
       toast.error('Failed to move task');
       refetch();
-    }
-  };
-
-  const getPriorityColor = (priority: string) => {
-    switch (priority) {
-      case 'urgent': return 'bg-red-500/15 text-red-400 border-red-500/30';
-      case 'high': return 'bg-orange-500/15 text-orange-400 border-orange-500/30';
-      case 'medium': return 'bg-yellow-500/15 text-yellow-400 border-yellow-500/30';
-      case 'low': return 'bg-green-500/15 text-green-400 border-green-500/30';
-      default: return 'bg-muted text-muted-foreground';
     }
   };
 
@@ -235,9 +227,7 @@ export function KanbanTab({ project, refetch }: { project: any, refetch: () => v
                                   </div>
 
                                   <div className="flex items-center justify-between mt-2.5">
-                                    <Badge className={`text-[10px] px-1.5 py-0 border ${getPriorityColor(task.priority)}`} variant="outline">
-                                      {task.priority}
-                                    </Badge>
+                                    <StatusBadge domain="helpdeskPriority" value={task.priority} />
 
                                     {task.dueDate && (
                                       <div className="flex items-center text-xs text-muted-foreground">
@@ -263,81 +253,67 @@ export function KanbanTab({ project, refetch }: { project: any, refetch: () => v
       </DragDropContext>
 
       {/* Add Board Dialog */}
-      <Dialog open={colDialogOpen} onOpenChange={setColDialogOpen}>
-        <DialogContent className="p-0">
-          <Card className="pt-8 border-0 shadow-none">
-            <CardHeader>
-              <CardTitle>Add New Board</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
-                <div className="space-y-2">
-                  <Label>Board Name</Label>
-                  <Input value={newColName} onChange={e => setNewColName(e.target.value)} placeholder="e.g. Backlog, Testing" />
-                </div>
-                <div className="flex justify-end gap-3 pt-2">
-                  <Button variant="outline" onClick={() => setColDialogOpen(false)}>Cancel</Button>
-                  <Button onClick={handleAddColumn}>Save</Button>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </DialogContent>
-      </Dialog>
+      <FormDialog
+        open={colDialogOpen}
+        onOpenChange={setColDialogOpen}
+        title="Add New Board"
+        description="Create a new board column for task tracking"
+        maxWidth="sm"
+        onSubmit={handleAddColumn}
+        submitLabel="Save"
+      >
+        <div className="space-y-2">
+          <Label>Board Name</Label>
+          <Input value={newColName} onChange={e => setNewColName(e.target.value)} placeholder="e.g. Backlog, Testing" />
+        </div>
+      </FormDialog>
 
       {/* Add Task Dialog */}
-      <Dialog open={taskDialogOpen} onOpenChange={setTaskDialogOpen}>
-        <DialogContent className="p-0">
-          <Card className="pt-8 border-0 shadow-none">
-            <CardHeader>
-              <CardTitle>Add New Task</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
-                <div className="space-y-2">
-                  <Label>Task Title</Label>
-                  <Input value={taskForm.title} onChange={e => setTaskForm({...taskForm, title: e.target.value})} placeholder="What needs to be done?" />
-                </div>
-                <div className="space-y-2">
-                  <Label>Description</Label>
-                  <Textarea value={taskForm.description} onChange={e => setTaskForm({...taskForm, description: e.target.value})} placeholder="Add details..." />
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label>Assignees</Label>
-                    <MultiSelect
-                      options={assigneeOptions}
-                      selected={taskForm.assignees.map(String)}
-                      onChange={(vals) => setTaskForm({ ...taskForm, assignees: vals.map(Number) })}
-                      placeholder="Select team members..."
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Priority</Label>
-                    <Select value={taskForm.priority} onValueChange={v => setTaskForm({...taskForm, priority: v})}>
-                      <SelectTrigger><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="low">Low</SelectItem>
-                        <SelectItem value="medium">Medium</SelectItem>
-                        <SelectItem value="high">High</SelectItem>
-                        <SelectItem value="urgent">Urgent</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  <Label>Due Date</Label>
-                  <Input type="date" value={taskForm.dueDate} onChange={e => setTaskForm({...taskForm, dueDate: e.target.value})} />
-                </div>
-                <div className="flex justify-end gap-3 pt-2">
-                  <Button variant="outline" onClick={() => setTaskDialogOpen(false)}>Cancel</Button>
-                  <Button onClick={handleAddTask}>Create Task</Button>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </DialogContent>
-      </Dialog>
+      <FormDialog
+        open={taskDialogOpen}
+        onOpenChange={setTaskDialogOpen}
+        title="Add New Task"
+        description="Create a new task item in this board"
+        maxWidth="lg"
+        onSubmit={handleAddTask}
+        submitLabel="Create Task"
+      >
+        <div className="space-y-2">
+          <Label>Task Title</Label>
+          <Input value={taskForm.title} onChange={e => setTaskForm({...taskForm, title: e.target.value})} placeholder="What needs to be done?" />
+        </div>
+        <div className="space-y-2">
+          <Label>Description</Label>
+          <Textarea value={taskForm.description} onChange={e => setTaskForm({...taskForm, description: e.target.value})} placeholder="Add details..." />
+        </div>
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <Label>Assignees</Label>
+            <MultiSelect
+              options={assigneeOptions}
+              selected={taskForm.assignees.map(String)}
+              onChange={(vals) => setTaskForm({ ...taskForm, assignees: vals.map(Number) })}
+              placeholder="Select team members..."
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>Priority</Label>
+            <Select value={taskForm.priority} onValueChange={v => setTaskForm({...taskForm, priority: v})}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="low">Low</SelectItem>
+                <SelectItem value="medium">Medium</SelectItem>
+                <SelectItem value="high">High</SelectItem>
+                <SelectItem value="urgent">Urgent</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+        <div className="space-y-2">
+          <Label>Due Date</Label>
+          <DatePicker value={taskForm.dueDate} onChange={v => setTaskForm({...taskForm, dueDate: v})} />
+        </div>
+      </FormDialog>
 
       {/* Task Detail Modal */}
       <TaskDetailModal

@@ -1,11 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Loader2, Upload, X, Link, Clipboard } from 'lucide-react';
+import { Upload, X, Link, Clipboard } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Select,
@@ -14,10 +12,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import {
-  Dialog,
-  DialogContent,
-} from '@/components/ui/dialog';
+import { FormDialog } from '@/components/ui/form-dialog';
+import { FormField } from '@/components/ui/form-field';
+import { FormGrid } from '@/components/ui/form-grid';
 import apiClient from '@/api/client';
 import toast from 'react-hot-toast';
 
@@ -334,215 +331,193 @@ export function DocumentDialog({
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto p-0">
-        <Card className='pt-8 border-0 shadow-none'>
-          <CardHeader>
-            <CardTitle>{doc ? 'Edit Document' : 'Upload Document'}</CardTitle>
-            <CardDescription>
-              {doc ? 'Update document details' : 'Add documents from files, links, or paste content'}
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-          {/* Title */}
-          <div className="space-y-2">
-            <Label>Title *</Label>
-            <Input
-              value={form.title}
-              onChange={(e) => setForm({ ...form, title: e.target.value })}
-              placeholder="e.g., API Documentation"
-            />
-          </div>
+    <FormDialog
+      open={open}
+      onOpenChange={onOpenChange}
+      title={doc ? 'Edit Document' : 'Upload Document'}
+      description={doc ? 'Update document details' : 'Add documents from files, links, or paste content'}
+      maxWidth="lg"
+      onSubmit={handleSubmit}
+      submitLabel={doc ? 'Update' : 'Create'}
+      isSubmitting={isPending}
+    >
+      {/* Title */}
+      <FormField label="Title" required>
+        <Input
+          value={form.title}
+          onChange={(e) => setForm({ ...form, title: e.target.value })}
+          placeholder="e.g., API Documentation"
+        />
+      </FormField>
 
-          {/* Type, Status, Version */}
-          <div className="grid grid-cols-3 gap-4">
-            <div className="space-y-2">
-              <Label>Type</Label>
-              <Select value={form.type} onValueChange={(v) => setForm({ ...form, type: v })}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="documentation">Documentation</SelectItem>
-                  <SelectItem value="runbook">Runbook</SelectItem>
-                  <SelectItem value="architecture">Architecture</SelectItem>
-                  <SelectItem value="api">API Spec</SelectItem>
-                  <SelectItem value="meeting_notes">Meeting Notes</SelectItem>
-                  <SelectItem value="other">Other</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label>Status</Label>
-              <Select value={form.status} onValueChange={(v) => setForm({ ...form, status: v })}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="draft">Draft</SelectItem>
-                  <SelectItem value="review">Review</SelectItem>
-                  <SelectItem value="published">Published</SelectItem>
-                  <SelectItem value="archived">Archived</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label>Version</Label>
-              <Input
-                value={form.version}
-                onChange={(e) => setForm({ ...form, version: e.target.value })}
-                placeholder="1.0"
+      {/* Type, Status, Version */}
+      <FormGrid columns={3}>
+        <FormField label="Type">
+          <Select value={form.type} onValueChange={(v) => setForm({ ...form, type: v })}>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="documentation">Documentation</SelectItem>
+              <SelectItem value="runbook">Runbook</SelectItem>
+              <SelectItem value="architecture">Architecture</SelectItem>
+              <SelectItem value="api">API Spec</SelectItem>
+              <SelectItem value="meeting_notes">Meeting Notes</SelectItem>
+              <SelectItem value="other">Other</SelectItem>
+            </SelectContent>
+          </Select>
+        </FormField>
+        <FormField label="Status">
+          <Select value={form.status} onValueChange={(v) => setForm({ ...form, status: v })}>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="draft">Draft</SelectItem>
+              <SelectItem value="review">Review</SelectItem>
+              <SelectItem value="published">Published</SelectItem>
+              <SelectItem value="archived">Archived</SelectItem>
+            </SelectContent>
+          </Select>
+        </FormField>
+        <FormField label="Version">
+          <Input
+            value={form.version}
+            onChange={(e) => setForm({ ...form, version: e.target.value })}
+            placeholder="1.0"
+          />
+        </FormField>
+      </FormGrid>
+
+      {/* Upload Section */}
+      <FormField label="Attachments">
+        <Tabs value={activeTab} onValueChange={setActiveTab}>
+          <TabsList className="grid w-full grid-cols-3">
+            <TabsTrigger value="upload" className="flex items-center gap-1.5">
+              <Upload className="h-3.5 w-3.5" />
+              File Upload
+            </TabsTrigger>
+            <TabsTrigger value="url" className="flex items-center gap-1.5">
+              <Link className="h-3.5 w-3.5" />
+              From URL
+            </TabsTrigger>
+            <TabsTrigger value="paste" className="flex items-center gap-1.5">
+              <Clipboard className="h-3.5 w-3.5" />
+              Paste Content
+            </TabsTrigger>
+          </TabsList>
+
+          {/* File Upload Tab */}
+          <TabsContent value="upload">
+            <div
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
+              onClick={() => fileInputRef.current?.click()}
+              className={`
+                border-2 border-dashed rounded-lg p-8 text-center cursor-pointer
+                transition-colors duration-200
+                ${isDragOver
+                  ? 'border-primary bg-primary/5'
+                  : 'border-muted-foreground/25 hover:border-primary/50 hover:bg-muted/50'
+                }
+              `}
+            >
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                onChange={handleFileSelect}
+                className="hidden"
+                accept="*/*"
               />
+              <Upload className={`h-10 w-10 mx-auto mb-3 ${isDragOver ? 'text-primary' : 'text-muted-foreground'}`} />
+              <p className="text-sm font-medium mb-1">
+                {isDragOver ? 'Drop files here' : 'Click to upload or drag and drop'}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Supports all file types • Multiple files allowed • Max 50MB per file
+              </p>
             </div>
-          </div>
+          </TabsContent>
 
-          {/* Upload Section */}
-          <div className="space-y-2">
-            <Label>Attachments</Label>
-            <Tabs value={activeTab} onValueChange={setActiveTab}>
-              <TabsList className="grid w-full grid-cols-3">
-                <TabsTrigger value="upload" className="flex items-center gap-1.5">
-                  <Upload className="h-3.5 w-3.5" />
-                  File Upload
-                </TabsTrigger>
-                <TabsTrigger value="url" className="flex items-center gap-1.5">
-                  <Link className="h-3.5 w-3.5" />
-                  From URL
-                </TabsTrigger>
-                <TabsTrigger value="paste" className="flex items-center gap-1.5">
-                  <Clipboard className="h-3.5 w-3.5" />
-                  Paste Content
-                </TabsTrigger>
-              </TabsList>
-
-              {/* File Upload Tab */}
-              <TabsContent value="upload">
-                <div
-                  onDragOver={handleDragOver}
-                  onDragLeave={handleDragLeave}
-                  onDrop={handleDrop}
-                  onClick={() => fileInputRef.current?.click()}
-                  className={`
-                    border-2 border-dashed rounded-lg p-8 text-center cursor-pointer
-                    transition-colors duration-200
-                    ${isDragOver
-                      ? 'border-primary bg-primary/5'
-                      : 'border-muted-foreground/25 hover:border-primary/50 hover:bg-muted/50'
-                    }
-                  `}
-                >
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    multiple
-                    onChange={handleFileSelect}
-                    className="hidden"
-                    accept="*/*"
-                  />
-                  <Upload className={`h-10 w-10 mx-auto mb-3 ${isDragOver ? 'text-primary' : 'text-muted-foreground'}`} />
-                  <p className="text-sm font-medium mb-1">
-                    {isDragOver ? 'Drop files here' : 'Click to upload or drag and drop'}
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    Supports all file types • Multiple files allowed • Max 50MB per file
-                  </p>
-                </div>
-              </TabsContent>
-
-              {/* URL Tab */}
-              <TabsContent value="url">
-                <div className="flex gap-2">
-                  <Input
-                    value={urlInput}
-                    onChange={(e) => setUrlInput(e.target.value)}
-                    placeholder="https://example.com/document.pdf"
-                    onKeyDown={(e) => e.key === 'Enter' && addUrl()}
-                  />
-                  <Button type="button" variant="secondary" onClick={addUrl}>
-                    Add Link
-                  </Button>
-                </div>
-                <p className="text-xs text-muted-foreground mt-2">
-                  Add links to external documents, wikis, or resources
-                </p>
-              </TabsContent>
-
-              {/* Paste Content Tab */}
-              <TabsContent value="paste">
-                <Textarea
-                  value={pasteContent}
-                  onChange={(e) => setPasteContent(e.target.value)}
-                  placeholder="Paste your content here (text, code, JSON, etc.)..."
-                  rows={6}
-                  className="font-mono text-sm"
-                />
-                <Button type="button" variant="secondary" onClick={addPasteContent} className="mt-2">
-                  Add Content
-                </Button>
-              </TabsContent>
-            </Tabs>
-          </div>
-
-          {/* Uploaded Files List */}
-          {uploadingFiles.length > 0 && (
-            <div className="space-y-2">
-              <Label>Attached Files ({uploadingFiles.length})</Label>
-              <div className="border rounded-lg divide-y max-h-40 overflow-y-auto">
-                {uploadingFiles.map((file) => (
-                  <div key={file.id} className="flex items-center gap-3 p-3 hover:bg-muted/50">
-                    <span className="text-xl">{getFileIcon(file.type)}</span>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium truncate">{file.name}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {file.url ? 'Uploaded' : file.size > 0 ? formatFileSize(file.size) : 'Pending upload'}
-                      </p>
-                    </div>
-                    {file.url && (
-                      <Badge variant="outline" className="text-xs bg-green-50 text-green-700">✓ Uploaded</Badge>
-                    )}
-                    {!file.url && !file.isUploaded && (
-                      <Badge variant="outline" className="text-xs bg-yellow-50 text-yellow-700">Queued</Badge>
-                    )}
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-7 w-7 text-muted-foreground hover:text-destructive"
-                      onClick={() => removeFile(file.id)}
-                    >
-                      <X className="h-4 w-4" />
-                    </Button>
-                  </div>
-                ))}
-              </div>
+          {/* URL Tab */}
+          <TabsContent value="url">
+            <div className="flex gap-2">
+              <Input
+                value={urlInput}
+                onChange={(e) => setUrlInput(e.target.value)}
+                placeholder="https://example.com/document.pdf"
+                onKeyDown={(e) => e.key === 'Enter' && addUrl()}
+              />
+              <Button type="button" variant="secondary" onClick={addUrl}>
+                Add Link
+              </Button>
             </div>
-          )}
+            <p className="text-xs text-muted-foreground mt-2">
+              Add links to external documents, wikis, or resources
+            </p>
+          </TabsContent>
 
-          {/* Content */}
-          <div className="space-y-2">
-            <Label>Notes (Optional)</Label>
+          {/* Paste Content Tab */}
+          <TabsContent value="paste">
             <Textarea
-              value={form.content}
-              onChange={(e) => setForm({ ...form, content: e.target.value })}
-              placeholder="Additional notes about this document..."
-              rows={4}
-              className="text-sm"
+              value={pasteContent}
+              onChange={(e) => setPasteContent(e.target.value)}
+              placeholder="Paste your content here (text, code, JSON, etc.)..."
+              rows={6}
+              className="font-mono text-sm"
             />
-          </div>
+            <Button type="button" variant="secondary" onClick={addPasteContent} className="mt-2">
+              Add Content
+            </Button>
+          </TabsContent>
+        </Tabs>
+      </FormField>
 
-              <div className="flex justify-end gap-3 pt-2">
-                <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-                  Cancel
-                </Button>
-                <Button type="button" onClick={handleSubmit} disabled={isPending}>
-                  {isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                  {doc ? 'Update' : 'Create'}
+      {/* Uploaded Files List */}
+      {uploadingFiles.length > 0 && (
+        <FormField label={`Attached Files (${uploadingFiles.length})`}>
+          <div className="border rounded-lg divide-y max-h-40 overflow-y-auto">
+            {uploadingFiles.map((file) => (
+              <div key={file.id} className="flex items-center gap-3 p-3 hover:bg-muted/50">
+                <span className="text-xl">{getFileIcon(file.type)}</span>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium truncate">{file.name}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {file.url ? 'Uploaded' : file.size > 0 ? formatFileSize(file.size) : 'Pending upload'}
+                  </p>
+                </div>
+                {file.url && (
+                  <Badge variant="outline" className="text-xs bg-green-50 text-green-700">✓ Uploaded</Badge>
+                )}
+                {!file.url && !file.isUploaded && (
+                  <Badge variant="outline" className="text-xs bg-yellow-50 text-yellow-700">Queued</Badge>
+                )}
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                  onClick={() => removeFile(file.id)}
+                >
+                  <X className="h-4 w-4" />
                 </Button>
               </div>
-            </div>
-          </CardContent>
-        </Card>
-      </DialogContent>
-    </Dialog>
+            ))}
+          </div>
+        </FormField>
+      )}
+
+      {/* Content */}
+      <FormField label="Notes (Optional)">
+        <Textarea
+          value={form.content}
+          onChange={(e) => setForm({ ...form, content: e.target.value })}
+          placeholder="Additional notes about this document..."
+          rows={4}
+          className="text-sm"
+        />
+      </FormField>
+    </FormDialog>
   );
 }

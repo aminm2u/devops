@@ -9,13 +9,12 @@ import {
   RefreshCw,
   AlertTriangle,
   CheckCircle,
-  Search,
 } from 'lucide-react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
+import { FormField } from '@/components/ui/form-field';
 import {
   Select,
   SelectContent,
@@ -23,26 +22,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
-import { Skeleton } from '@/components/ui/skeleton';
+import { FormDialog } from '@/components/ui/form-dialog';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { DatePicker } from '@/components/ui/date-picker';
+import { PageHeader } from '@/components/layout/PageHeader';
+import { DataTable, type DataTableColumn } from '@/components/DataTable';
+import { StatusBadge } from '@/components/ui/status-badge';
 import apiClient from '@/api/client';
-import { cn, formatDate, getStatusColor, formatStatus } from '@/lib/utils';
+import { formatDate, formatStatus } from '@/lib/utils';
 import toast from 'react-hot-toast';
 
 interface Domain {
@@ -233,38 +220,110 @@ export function DomainsPage() {
     return <Badge className="bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400">{daysUntil}d</Badge>;
   };
 
+  const columns: DataTableColumn<Domain>[] = [
+    {
+      key: 'name',
+      header: 'Domain',
+      accessor: (domain) => (
+        <div className="flex items-center gap-2 font-medium">
+          <Globe className="h-4 w-4 text-muted-foreground" />
+          {domain.name}
+        </div>
+      ),
+      sortValue: (domain) => domain.name,
+      sortable: true,
+    },
+    {
+      key: 'type',
+      header: 'Type',
+      accessor: (domain) => <Badge variant="outline">{formatStatus(domain.type)}</Badge>,
+    },
+    {
+      key: 'project',
+      header: 'Project',
+      accessor: (domain) => <Badge variant="outline">{domain.project?.name || 'Internal'}</Badge>,
+      sortValue: (domain) => domain.project?.name ?? '',
+      sortable: true,
+    },
+    {
+      key: 'status',
+      header: 'Status',
+      accessor: (domain) => <StatusBadge domain="generic" value={domain.status} />,
+      sortValue: (domain) => domain.status,
+      sortable: true,
+    },
+    {
+      key: 'registrar',
+      header: 'Registrar',
+      accessor: (domain) => (
+        <span className="text-sm text-muted-foreground">{domain.registrar || '-'}</span>
+      ),
+    },
+    {
+      key: 'expires',
+      header: 'Expires',
+      accessor: (domain) => (
+        <div className="flex items-center gap-2">
+          <span className="text-sm">{domain.expirationDate ? formatDate(domain.expirationDate) : '-'}</span>
+          {getExpiryBadge(domain.expirationDate)}
+        </div>
+      ),
+      sortValue: (domain) => (domain.expirationDate ? new Date(domain.expirationDate).getTime() : null),
+      sortable: true,
+    },
+    {
+      key: 'autoRenew',
+      header: 'Auto-Renew',
+      accessor: (domain) =>
+        domain.autoRenew ? (
+          <CheckCircle className="h-4 w-4 text-emerald-600" />
+        ) : (
+          <span className="text-muted-foreground">-</span>
+        ),
+    },
+    {
+      key: 'actions',
+      header: 'Actions',
+      align: 'right',
+      render: (domain) => (
+        <div className="flex items-center justify-end gap-1">
+          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEditDialog(domain)}>
+            <Pencil className="h-3.5 w-3.5" />
+          </Button>
+          <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => setShowDeleteDialog(domain)}>
+            <Trash2 className="h-3.5 w-3.5" />
+          </Button>
+        </div>
+      ),
+    },
+  ];
+
   return (
     <div className="space-y-6 animate-fade-in">
       {/* Header */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">Domains</h1>
-          <p className="text-muted-foreground">Manage and monitor registered domains</p>
-        </div>
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={() => refetch()}>
-            <RefreshCw className="mr-2 h-4 w-4" />
-            Refresh
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => syncNpmMutation.mutate()}
-            disabled={syncNpmMutation.isPending}
-          >
-            {syncNpmMutation.isPending ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            ) : (
-              <Globe className="mr-2 h-4 w-4" />
-            )}
-            Sync from NPM
-          </Button>
-          <Button size="sm" onClick={openCreateDialog}>
-            <Plus className="mr-2 h-4 w-4" />
-            Add Domain
-          </Button>
-        </div>
-      </div>
+      <PageHeader title="Domains" description="Manage and monitor registered domains">
+        <Button variant="outline" size="sm" onClick={() => refetch()}>
+          <RefreshCw className="mr-2 h-4 w-4" />
+          Refresh
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => syncNpmMutation.mutate()}
+          disabled={syncNpmMutation.isPending}
+        >
+          {syncNpmMutation.isPending ? (
+            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+          ) : (
+            <Globe className="mr-2 h-4 w-4" />
+          )}
+          Sync from NPM
+        </Button>
+        <Button size="sm" onClick={openCreateDialog}>
+          <Plus className="mr-2 h-4 w-4" />
+          Add Domain
+        </Button>
+      </PageHeader>
 
       {/* Stats */}
       <div className="grid gap-4 sm:grid-cols-4">
@@ -320,238 +379,120 @@ export function DomainsPage() {
         </Card>
       </div>
 
-      {/* Filters */}
-      <div className="flex gap-3">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            placeholder="Search domains..."
-            value={search}
-            onChange={(e) => { setSearch(e.target.value); setPage(1); }}
-            className="pl-9"
-          />
-        </div>
-        <Select value={statusFilter} onValueChange={(v) => { setStatusFilter(v); setPage(1); }}>
-          <SelectTrigger className="w-[150px]">
-            <SelectValue placeholder="Status" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Statuses</SelectItem>
-            <SelectItem value="active">Active</SelectItem>
-            <SelectItem value="expired">Expired</SelectItem>
-            <SelectItem value="pending">Pending</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
-
-      {/* Table */}
-      <Card>
-        <CardContent className="p-0 overflow-x-auto px-4">
-          {isLoading ? (
-            <div className="p-6 space-y-4">
-              {[1, 2, 3, 4, 5].map((i) => (
-                <div key={i} className="flex items-center gap-4">
-                  <Skeleton className="h-4 w-[200px]" />
-                  <Skeleton className="h-6 w-[100px]" />
-                  <Skeleton className="h-6 w-[80px]" />
-                  <Skeleton className="h-4 w-[100px]" />
-                </div>
-              ))}
-            </div>
-          ) : error ? (
-            <div className="flex flex-col items-center justify-center py-12">
-              <AlertTriangle className="h-8 w-8 text-destructive mb-2" />
+      <DataTable
+        columns={columns}
+        data={domains}
+        loading={isLoading}
+        error={
+          error ? (
+            <div className="flex flex-col items-center justify-center py-6">
               <p className="text-sm text-destructive">Failed to load domains</p>
               <p className="text-xs text-muted-foreground mt-1">Please try again later</p>
             </div>
-          ) : domains.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-12">
-              <Globe className="h-8 w-8 text-muted-foreground mb-2" />
-              <p className="text-sm text-muted-foreground">No domains found</p>
-              <Button variant="link" size="sm" onClick={() => syncNpmMutation.mutate()}>
-                Sync domains from NPM
-              </Button>
-            </div>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Domain</TableHead>
-                  <TableHead>Type</TableHead>
-                  <TableHead>Project</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Registrar</TableHead>
-                  <TableHead>Expires</TableHead>
-                  <TableHead>Auto-Renew</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {domains.map((domain) => (
-                  <TableRow key={domain.id}>
-                    <TableCell className="font-medium">
-                      <div className="flex items-center gap-2">
-                        <Globe className="h-4 w-4 text-muted-foreground" />
-                        {domain.name}
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant="outline">{formatStatus(domain.type)}</Badge>
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant="outline">{domain.project?.name || 'Internal'}</Badge>
-                    </TableCell>
-                    <TableCell>
-                      <Badge className={cn(getStatusColor(domain.status))}>{formatStatus(domain.status)}</Badge>
-                    </TableCell>
-                    <TableCell className="text-sm text-muted-foreground">{domain.registrar || '-'}</TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm">{domain.expirationDate ? formatDate(domain.expirationDate) : '-'}</span>
-                        {getExpiryBadge(domain.expirationDate)}
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      {domain.autoRenew ? (
-                        <CheckCircle className="h-4 w-4 text-emerald-600" />
-                      ) : (
-                        <span className="text-muted-foreground">-</span>
-                      )}
-                    </TableCell>
-                    <TableCell className='text-right'>
-                        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEditDialog(domain)}>
-                          <Pencil className="h-3.5 w-3.5" />
-                        </Button>
-                        <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => setShowDeleteDialog(domain)}>
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Pagination */}
-      {meta && meta.lastPage > 1 && (
-        <div className="flex items-center justify-between">
-          <p className="text-sm text-muted-foreground">
-            Page {meta.currentPage} of {meta.lastPage} ({meta.total} total)
-          </p>
-          <div className="flex gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={page <= 1}
-              onClick={() => setPage((p) => p - 1)}
-            >
-              Previous
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={page >= meta.lastPage}
-              onClick={() => setPage((p) => p + 1)}
-            >
-              Next
-            </Button>
-          </div>
-        </div>
-      )}
+          ) : undefined
+        }
+        search={{
+          value: search,
+          onChange: (v) => { setSearch(v); setPage(1); },
+          placeholder: 'Search domains...',
+        }}
+        filters={
+          <Select value={statusFilter} onValueChange={(v) => { setStatusFilter(v); setPage(1); }}>
+            <SelectTrigger className="w-[150px]">
+              <SelectValue placeholder="Status" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Statuses</SelectItem>
+              <SelectItem value="active">Active</SelectItem>
+              <SelectItem value="expired">Expired</SelectItem>
+              <SelectItem value="pending">Pending</SelectItem>
+            </SelectContent>
+          </Select>
+        }
+        pagination={{
+          page,
+          totalPages: meta?.lastPage ?? 1,
+          onPageChange: setPage,
+          totalItems: meta?.total,
+          itemsPerPage: 20,
+        }}
+        emptyIcon={Globe}
+        emptyTitle="No domains found"
+        emptyAction={
+          <Button variant="link" size="sm" onClick={() => syncNpmMutation.mutate()}>
+            Sync domains from NPM
+          </Button>
+        }
+      />
 
       {/* Create / Edit Dialog */}
-      <Dialog open={showFormDialog} onOpenChange={setShowFormDialog}>
-        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto py-6 px-4">
-          <DialogHeader>
-            <DialogTitle>{editingDomain ? 'Edit Domain' : 'Add Domain'}</DialogTitle>
-            <DialogDescription>
-              {editingDomain ? 'Update the domain details' : 'Add a new domain'}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label>Domain Name *</Label>
-              <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g., example.com" />
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>Project</Label>
-                <Select value={String(form.projectId)} onValueChange={(v) => setForm({ ...form, projectId: Number(v) || 0 })}>
-                  <SelectTrigger><SelectValue placeholder="Select project" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="0">Internal</SelectItem>
-                    {projects.map((p: any) => (
-                      <SelectItem key={p.id} value={String(p.id)}>{p.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label>Type</Label>
-                <Select value={form.type} onValueChange={(v) => setForm({ ...form, type: v })}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="primary">Primary</SelectItem>
-                    <SelectItem value="redirect">Redirect</SelectItem>
-                    <SelectItem value="alias">Alias</SelectItem>
-                    <SelectItem value="subdomain">Subdomain</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            <div className="space-y-2">
-              <Label>Registrar</Label>
-              <Input value={form.registrar} onChange={(e) => setForm({ ...form, registrar: e.target.value })} placeholder="e.g., GoDaddy, Namecheap" />
-            </div>
-            <div className="space-y-2">
-              <Label>Expiration Date</Label>
-              <DatePicker value={form.expirationDate} onChange={(v) => setForm({ ...form, expirationDate: v })} />
-            </div>
-            <div className="flex items-center space-x-2">
-              <Button
-                type="button"
-                variant={form.autoRenew ? "default" : "outline"}
-                size="sm"
-                onClick={() => setForm({ ...form, autoRenew: !form.autoRenew })}
-              >
-                {form.autoRenew ? "Auto-renew: ON" : "Auto-renew: OFF"}
-              </Button>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => { setShowFormDialog(false); setEditingDomain(null); }}>Cancel</Button>
-            <Button onClick={handleFormSubmit} disabled={isPending}>
-              {isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              {editingDomain ? 'Update' : 'Create'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <FormDialog
+        open={showFormDialog}
+        onOpenChange={(open) => {
+          setShowFormDialog(open);
+          if (!open) setEditingDomain(null);
+        }}
+        title={editingDomain ? 'Edit Domain' : 'Add Domain'}
+        description={editingDomain ? 'Update the domain details' : 'Add a new domain'}
+        maxWidth="lg"
+        onSubmit={handleFormSubmit}
+        submitLabel={editingDomain ? 'Update' : 'Create'}
+        isSubmitting={isPending}
+      >
+        <FormField label="Domain Name" required>
+          <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g., example.com" />
+        </FormField>
+        <div className="grid grid-cols-2 gap-4">
+          <FormField label="Project">
+            <Select value={String(form.projectId)} onValueChange={(v) => setForm({ ...form, projectId: Number(v) || 0 })}>
+              <SelectTrigger><SelectValue placeholder="Select project" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="0">Internal</SelectItem>
+                {projects.map((p: any) => (
+                  <SelectItem key={p.id} value={String(p.id)}>{p.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </FormField>
+          <FormField label="Type">
+            <Select value={form.type} onValueChange={(v) => setForm({ ...form, type: v })}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="primary">Primary</SelectItem>
+                <SelectItem value="redirect">Redirect</SelectItem>
+                <SelectItem value="alias">Alias</SelectItem>
+                <SelectItem value="subdomain">Subdomain</SelectItem>
+              </SelectContent>
+            </Select>
+          </FormField>
+        </div>
+        <FormField label="Registrar">
+          <Input value={form.registrar} onChange={(e) => setForm({ ...form, registrar: e.target.value })} placeholder="e.g., GoDaddy, Namecheap" />
+        </FormField>
+        <FormField label="Expiration Date">
+          <DatePicker value={form.expirationDate} onChange={(v) => setForm({ ...form, expirationDate: v })} />
+        </FormField>
+        <div className="flex items-center space-x-2">
+          <Button
+            type="button"
+            variant={form.autoRenew ? "default" : "outline"}
+            size="sm"
+            onClick={() => setForm({ ...form, autoRenew: !form.autoRenew })}
+          >
+            {form.autoRenew ? "Auto-renew: ON" : "Auto-renew: OFF"}
+          </Button>
+        </div>
+      </FormDialog>
 
       {/* Delete Dialog */}
-      <Dialog open={!!showDeleteDialog} onOpenChange={() => setShowDeleteDialog(null)}>
-        <DialogContent className='pt-12 pb-6 px-6'>
-          <DialogHeader>
-            <DialogTitle>Delete Domain</DialogTitle>
-            <DialogDescription>
-              Are you sure you want to delete "{showDeleteDialog?.name}"? This action cannot be undone.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter className='mt-4'>
-            <Button variant="outline" onClick={() => setShowDeleteDialog(null)}>Cancel</Button>
-            <Button
-              variant="destructive"
-              onClick={() => showDeleteDialog && deleteMutation.mutate(showDeleteDialog.id)}
-              disabled={deleteMutation.isPending}
-            >
-              {deleteMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Delete
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <ConfirmDialog
+        open={!!showDeleteDialog}
+        onOpenChange={() => setShowDeleteDialog(null)}
+        title="Delete Domain"
+        description={`Are you sure you want to delete "${showDeleteDialog?.name}"? This action cannot be undone.`}
+        onConfirm={() => showDeleteDialog && deleteMutation.mutate(showDeleteDialog.id)}
+        isConfirming={deleteMutation.isPending}
+      />
     </div>
   );
 }

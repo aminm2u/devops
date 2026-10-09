@@ -580,6 +580,17 @@ export interface RequisitionItem {
   updatedAt?: string;
 }
 
+export interface RequisitionApprovalStep {
+  id: number;
+  requisitionId: number;
+  approverId: number;
+  status: string;
+  order: number;
+  comments: string | null;
+  respondedAt: string | null;
+  approver?: { id: number; name: string; email: string };
+}
+
 export interface RequisitionForm {
   id: number;
   division: string;
@@ -598,6 +609,7 @@ export interface RequisitionForm {
   createdAt: string;
   updatedAt: string;
   items?: RequisitionItem[];
+  approvals?: RequisitionApprovalStep[];
   budgetItem?: {
     id: number;
     description: string;

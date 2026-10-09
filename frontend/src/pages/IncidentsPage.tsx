@@ -1,20 +1,13 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, Plus, Loader2 } from 'lucide-react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { AlertTriangle, Plus } from 'lucide-react';
+import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+import { FormDialog } from '@/components/ui/form-dialog';
 import {
   Select,
   SelectContent,
@@ -22,19 +15,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
-import { Skeleton } from '@/components/ui/skeleton';
 import { UserAvatar } from '@/components/ui/UserAvatar';
-import { useAuth } from '@/hooks/useAuth';
+import { PageHeader } from '@/components/layout/PageHeader';
+import { DataTable, type DataTableColumn } from '@/components/DataTable';
+import { StatusBadge } from '@/components/ui/status-badge';
 import apiClient from '@/api/client';
-import { formatDate, getStatusColor, getPriorityColor, formatStatus } from '@/lib/utils';
+import { formatDate } from '@/lib/utils';
 import toast from 'react-hot-toast';
 
 interface Incident {
@@ -54,7 +40,6 @@ interface Incident {
 
 export function IncidentsPage() {
   const queryClient = useQueryClient();
-  const { hasRole } = useAuth();
 
   const [search, setSearch] = useState('');
   const [severityFilter, setSeverityFilter] = useState('all');
@@ -154,18 +139,98 @@ export function IncidentsPage() {
     low: incidents.filter((i) => i.severity === 'low' && i.status !== 'resolved').length,
   };
 
+  const columns: DataTableColumn<Incident>[] = [
+    {
+      key: 'title',
+      header: 'Title',
+      accessor: (incident) => (
+        <span className="font-medium max-w-[300px] truncate block">{incident.title}</span>
+      ),
+      sortValue: (incident) => incident.title,
+      sortable: true,
+    },
+    {
+      key: 'project',
+      header: 'Project',
+      accessor: (incident) => <Badge variant="outline">{incident.project.name}</Badge>,
+      sortValue: (incident) => incident.project.name,
+      sortable: true,
+    },
+    {
+      key: 'severity',
+      header: 'Severity',
+      accessor: (incident) => <StatusBadge domain="helpdeskPriority" value={incident.severity} />,
+      sortValue: (incident) => incident.severity,
+      sortable: true,
+    },
+    {
+      key: 'status',
+      header: 'Status',
+      accessor: (incident) => <StatusBadge domain="helpdeskStatus" value={incident.status} />,
+      sortValue: (incident) => incident.status,
+      sortable: true,
+    },
+    {
+      key: 'reporter',
+      header: 'Reporter',
+      render: (incident) =>
+        incident.reportedUser ? (
+          <div className="flex items-center gap-1.5">
+            <UserAvatar user={incident.reportedUser} size="sm" />
+            <span>{incident.reportedUser.name}</span>
+          </div>
+        ) : (
+          <span className="text-sm text-muted-foreground">Unknown</span>
+        ),
+      skeletonClassName: 'h-8 w-8 rounded-full',
+    },
+    {
+      key: 'createdAt',
+      header: 'Created',
+      accessor: (incident) => (
+        <span className="text-sm text-muted-foreground">{formatDate(incident.createdAt)}</span>
+      ),
+      sortValue: (incident) => new Date(incident.createdAt).getTime(),
+      sortable: true,
+    },
+    {
+      key: 'resolvedAt',
+      header: 'Resolved At',
+      accessor: (incident) => (
+        <span className="text-sm text-muted-foreground">
+          {incident.resolvedAt ? formatDate(incident.resolvedAt) : '-'}
+        </span>
+      ),
+      sortValue: (incident) => (incident.resolvedAt ? new Date(incident.resolvedAt).getTime() : null),
+      sortable: true,
+    },
+    {
+      key: 'actions',
+      header: '',
+      width: 'w-12',
+      render: (incident) => (
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={(e) => {
+            e.stopPropagation();
+            openUpdateDialog(incident);
+          }}
+        >
+          Edit
+        </Button>
+      ),
+    },
+  ];
+
   return (
     <div className="space-y-6 animate-fade-in">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">Incidents</h1>
-          <p className="text-sm text-muted-foreground">Report and track incidents</p>
-        </div>
+      <PageHeader title="Incidents" description="Report and track incidents">
         <Button onClick={() => setShowCreateDialog(true)}>
           <Plus className="mr-2 h-4 w-4" />
           Report Incident
         </Button>
-      </div>
+      </PageHeader>
 
       {/* Severity Summary */}
       <div className="grid gap-4 sm:grid-cols-4">
@@ -188,376 +253,254 @@ export function IncidentsPage() {
         ))}
       </div>
 
-      {/* Filters */}
-      <div className="flex flex-col gap-3 sm:flex-row">
-        <div className="relative flex-1">
-          <Input
-            placeholder="Search incidents..."
-            value={search}
-            onChange={(e) => { setSearch(e.target.value); setPage(1); }}
-          />
-        </div>
-        <Select value={severityFilter} onValueChange={(v) => { setSeverityFilter(v); setPage(1); }}>
-          <SelectTrigger className="w-full sm:w-[150px]">
-            <SelectValue placeholder="Severity" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Severities</SelectItem>
-            <SelectItem value="critical">Critical</SelectItem>
-            <SelectItem value="high">High</SelectItem>
-            <SelectItem value="medium">Medium</SelectItem>
-            <SelectItem value="low">Low</SelectItem>
-          </SelectContent>
-        </Select>
-        <Select value={statusFilter} onValueChange={(v) => { setStatusFilter(v); setPage(1); }}>
-          <SelectTrigger className="w-full sm:w-[150px]">
-            <SelectValue placeholder="Status" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Statuses</SelectItem>
-            <SelectItem value="open">Open</SelectItem>
-            <SelectItem value="investigating">Investigating</SelectItem>
-            <SelectItem value="identified">Identified</SelectItem>
-            <SelectItem value="monitoring">Monitoring</SelectItem>
-            <SelectItem value="resolved">Resolved</SelectItem>
-            <SelectItem value="closed">Closed</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
-
-      {/* Table */}
-      <Card>
-        <CardContent className="p-0 overflow-x-auto">
-          {isLoading ? (
-            <div className="p-6 space-y-4">
-              {[1, 2, 3, 4, 5].map((i) => (
-                <div key={i} className="flex items-center gap-4">
-                  <Skeleton className="h-4 w-[300px]" />
-                  <Skeleton className="h-6 w-[80px]" />
-                  <Skeleton className="h-6 w-[80px]" />
-                  <Skeleton className="h-4 w-[100px]" />
-                </div>
-              ))}
-            </div>
-          ) : error ? (
-            <div className="flex flex-col items-center justify-center py-12">
-              <AlertTriangle className="h-8 w-8 text-destructive mb-2" />
+      <DataTable
+        columns={columns}
+        data={incidents}
+        loading={isLoading}
+        onRowClick={openUpdateDialog}
+        error={
+          error ? (
+            <div className="flex flex-col items-center justify-center py-6">
               <p className="text-sm text-destructive">Failed to load incidents</p>
               <p className="text-xs text-muted-foreground mt-1">Please try again later</p>
             </div>
-          ) : incidents.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-12">
-              <AlertTriangle className="h-8 w-8 text-muted-foreground mb-2" />
-              <p className="text-sm text-muted-foreground">No incidents found</p>
-            </div>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Title</TableHead>
-                  <TableHead>Project</TableHead>
-                  <TableHead>Severity</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Reporter</TableHead>
-                  <TableHead>Created</TableHead>
-                  <TableHead>Resolved At</TableHead>
-                  <TableHead className="w-12" />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {incidents.map((incident) => (
-                  <TableRow
-                    key={incident.id}
-                    className="cursor-pointer"
-                    onClick={() => openUpdateDialog(incident)}
-                  >
-                    <TableCell className="font-medium max-w-[300px] truncate">
-                      {incident.title}
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant="outline">{incident.project.name}</Badge>
-                    </TableCell>
-                    <TableCell>
-                      <Badge className={getPriorityColor(incident.severity)}>
-                        {formatStatus(incident.severity)}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      <Badge className={getStatusColor(incident.status)}>
-                        {formatStatus(incident.status)}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-sm text-muted-foreground">
-                      {incident.reportedUser ? (
-                        <div className="flex items-center gap-1.5">
-                          <UserAvatar user={incident.reportedUser} size="sm" />
-                          <span>{incident.reportedUser.name}</span>
-                        </div>
-                      ) : (
-                        'Unknown'
-                      )}
-                    </TableCell>
-                    <TableCell className="text-sm text-muted-foreground">
-                      {formatDate(incident.createdAt)}
-                    </TableCell>
-                    <TableCell className="text-sm text-muted-foreground">
-                      {incident.resolvedAt ? formatDate(incident.resolvedAt) : '-'}
-                    </TableCell>
-                    <TableCell>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          openUpdateDialog(incident);
-                        }}
-                      >
-                        Edit
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Pagination */}
-      {meta && meta.lastPage > 1 && (
-        <div className="flex items-center justify-between">
-          <p className="text-sm text-muted-foreground">
-            Page {meta.currentPage} of {meta.lastPage} ({meta.total} total)
-          </p>
-          <div className="flex gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={page <= 1}
-              onClick={() => setPage((p) => p - 1)}
-            >
-              Previous
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={page >= meta.lastPage}
-              onClick={() => setPage((p) => p + 1)}
-            >
-              Next
-            </Button>
-          </div>
-        </div>
-      )}
+          ) : undefined
+        }
+        search={{
+          value: search,
+          onChange: (v) => { setSearch(v); setPage(1); },
+          placeholder: 'Search incidents...',
+        }}
+        filters={
+          <>
+            <Select value={severityFilter} onValueChange={(v) => { setSeverityFilter(v); setPage(1); }}>
+              <SelectTrigger className="w-full sm:w-[150px]">
+                <SelectValue placeholder="Severity" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Severities</SelectItem>
+                <SelectItem value="critical">Critical</SelectItem>
+                <SelectItem value="high">High</SelectItem>
+                <SelectItem value="medium">Medium</SelectItem>
+                <SelectItem value="low">Low</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select value={statusFilter} onValueChange={(v) => { setStatusFilter(v); setPage(1); }}>
+              <SelectTrigger className="w-full sm:w-[150px]">
+                <SelectValue placeholder="Status" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Statuses</SelectItem>
+                <SelectItem value="open">Open</SelectItem>
+                <SelectItem value="investigating">Investigating</SelectItem>
+                <SelectItem value="identified">Identified</SelectItem>
+                <SelectItem value="monitoring">Monitoring</SelectItem>
+                <SelectItem value="resolved">Resolved</SelectItem>
+                <SelectItem value="closed">Closed</SelectItem>
+              </SelectContent>
+            </Select>
+          </>
+        }
+        pagination={{
+          page,
+          totalPages: meta?.lastPage ?? 1,
+          onPageChange: setPage,
+          totalItems: meta?.total,
+          itemsPerPage: 20,
+        }}
+        emptyIcon={AlertTriangle}
+        emptyTitle="No incidents found"
+      />
 
       {/* Create Dialog */}
-      <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle>Report Incident</DialogTitle>
-            <DialogDescription>Document a new incident for tracking and resolution</DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4">
+      <FormDialog
+        open={showCreateDialog}
+        onOpenChange={(open) => {
+          setShowCreateDialog(open);
+          if (!open) resetForm();
+        }}
+        title="Report Incident"
+        description="Document a new incident for tracking and resolution"
+        maxWidth="lg"
+        onSubmit={() => {
+          if (!formTitle.trim()) { toast.error('Title is required'); return; }
+          createMutation.mutate({
+            projectId: formProjectId,
+            title: formTitle.trim(),
+            description: formDescription.trim() || undefined,
+            severity: formSeverity,
+            status: formStatus,
+            affectedServices: formAffected.trim() || undefined,
+          });
+        }}
+        submitLabel="Report Incident"
+        isSubmitting={createMutation.isPending}
+      >
+        <div className="space-y-2">
+          <Label>Project *</Label>
+          <Select value={String(formProjectId)} onValueChange={(v) => setFormProjectId(Number(v))}>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {projects.map((p: any) => (
+                <SelectItem key={p.id} value={String(p.id)}>
+                  {p.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-2">
+          <Label>Title *</Label>
+          <Input
+            value={formTitle}
+            onChange={(e) => setFormTitle(e.target.value)}
+            placeholder="Brief description of the incident"
+          />
+        </div>
+        <div className="space-y-2">
+          <Label>Description</Label>
+          <Textarea
+            value={formDescription}
+            onChange={(e) => setFormDescription(e.target.value)}
+            placeholder="Detailed description of what happened..."
+            rows={3}
+          />
+        </div>
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <Label>Severity *</Label>
+            <Select value={formSeverity} onValueChange={setFormSeverity}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="low">Low</SelectItem>
+                <SelectItem value="medium">Medium</SelectItem>
+                <SelectItem value="high">High</SelectItem>
+                <SelectItem value="critical">Critical</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-2">
+            <Label>Status</Label>
+            <Select value={formStatus} onValueChange={setFormStatus}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="open">Open</SelectItem>
+                <SelectItem value="investigating">Investigating</SelectItem>
+                <SelectItem value="identified">Identified</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+        <div className="space-y-2">
+          <Label>Affected Services</Label>
+          <Input
+            value={formAffected}
+            onChange={(e) => setFormAffected(e.target.value)}
+            placeholder="e.g., API Gateway, Database, Auth Service"
+          />
+        </div>
+      </FormDialog>
+
+      {/* Update Dialog */}
+      {showUpdateDialog && (
+        <FormDialog
+          open={!!showUpdateDialog}
+          onOpenChange={() => setShowUpdateDialog(null)}
+          title="Update Incident"
+          description="Update the status and details of this incident"
+          maxWidth="lg"
+          onSubmit={() => {
+            updateMutation.mutate({
+              id: showUpdateDialog.id,
+              data: {
+                title: updateForm.title,
+                description: updateForm.description,
+                severity: updateForm.severity,
+                status: updateForm.status,
+                rootCause: updateForm.rootCause || undefined,
+                resolution: updateForm.resolution || undefined,
+              },
+            });
+          }}
+          submitLabel="Update"
+          isSubmitting={updateMutation.isPending}
+        >
+          <div className="space-y-2">
+            <Label>Title</Label>
+            <Input
+              value={updateForm.title}
+              onChange={(e) => setUpdateForm(prev => ({ ...prev, title: e.target.value }))}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>Description</Label>
+            <Textarea
+              value={updateForm.description}
+              onChange={(e) => setUpdateForm(prev => ({ ...prev, description: e.target.value }))}
+              rows={3}
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
-              <Label>Project *</Label>
-              <Select value={String(formProjectId)} onValueChange={(v) => setFormProjectId(Number(v))}>
+              <Label>Severity</Label>
+              <Select
+                value={updateForm.severity}
+                onValueChange={(v) => setUpdateForm(prev => ({ ...prev, severity: v }))}
+              >
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {projects.map((p: any) => (
-                    <SelectItem key={p.id} value={String(p.id)}>
-                      {p.name}
-                    </SelectItem>
-                  ))}
+                  <SelectItem value="low">Low</SelectItem>
+                  <SelectItem value="medium">Medium</SelectItem>
+                  <SelectItem value="high">High</SelectItem>
+                  <SelectItem value="critical">Critical</SelectItem>
                 </SelectContent>
               </Select>
             </div>
             <div className="space-y-2">
-              <Label>Title *</Label>
-              <Input
-                value={formTitle}
-                onChange={(e) => setFormTitle(e.target.value)}
-                placeholder="Brief description of the incident"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Description</Label>
-              <Textarea
-                value={formDescription}
-                onChange={(e) => setFormDescription(e.target.value)}
-                placeholder="Detailed description of what happened..."
-                rows={3}
-              />
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>Severity *</Label>
-                <Select value={formSeverity} onValueChange={setFormSeverity}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="low">Low</SelectItem>
-                    <SelectItem value="medium">Medium</SelectItem>
-                    <SelectItem value="high">High</SelectItem>
-                    <SelectItem value="critical">Critical</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label>Status</Label>
-                <Select value={formStatus} onValueChange={setFormStatus}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="open">Open</SelectItem>
-                    <SelectItem value="investigating">Investigating</SelectItem>
-                    <SelectItem value="identified">Identified</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            <div className="space-y-2">
-              <Label>Affected Services</Label>
-              <Input
-                value={formAffected}
-                onChange={(e) => setFormAffected(e.target.value)}
-                placeholder="e.g., API Gateway, Database, Auth Service"
-              />
+              <Label>Status</Label>
+              <Select
+                value={updateForm.status}
+                onValueChange={(v) => setUpdateForm(prev => ({ ...prev, status: v }))}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="open">Open</SelectItem>
+                  <SelectItem value="investigating">Investigating</SelectItem>
+                  <SelectItem value="identified">Identified</SelectItem>
+                  <SelectItem value="monitoring">Monitoring</SelectItem>
+                  <SelectItem value="resolved">Resolved</SelectItem>
+                  <SelectItem value="closed">Closed</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => { setShowCreateDialog(false); resetForm(); }}>
-              Cancel
-            </Button>
-            <Button
-              onClick={() => {
-                if (!formTitle.trim()) { toast.error('Title is required'); return; }
-                createMutation.mutate({
-                  projectId: formProjectId,
-                  title: formTitle.trim(),
-                  description: formDescription.trim() || undefined,
-                  severity: formSeverity,
-                  status: formStatus,
-                  affectedServices: formAffected.trim() || undefined,
-                });
-              }}
-              disabled={createMutation.isPending}
-            >
-              {createMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Report Incident
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Update Dialog */}
-      {showUpdateDialog && (
-        <Dialog open={!!showUpdateDialog} onOpenChange={() => setShowUpdateDialog(null)}>
-          <DialogContent className="max-w-lg">
-            <DialogHeader>
-              <DialogTitle>Update Incident</DialogTitle>
-              <DialogDescription>Update the status and details of this incident</DialogDescription>
-            </DialogHeader>
-            <div className="space-y-4">
-              <div className="space-y-2">
-                <Label>Title</Label>
-                <Input
-                  value={updateForm.title}
-                  onChange={(e) => setUpdateForm(prev => ({ ...prev, title: e.target.value }))}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Description</Label>
-                <Textarea
-                  value={updateForm.description}
-                  onChange={(e) => setUpdateForm(prev => ({ ...prev, description: e.target.value }))}
-                  rows={3}
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>Severity</Label>
-                  <Select
-                    value={updateForm.severity}
-                    onValueChange={(v) => setUpdateForm(prev => ({ ...prev, severity: v }))}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="low">Low</SelectItem>
-                      <SelectItem value="medium">Medium</SelectItem>
-                      <SelectItem value="high">High</SelectItem>
-                      <SelectItem value="critical">Critical</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>Status</Label>
-                  <Select
-                    value={updateForm.status}
-                    onValueChange={(v) => setUpdateForm(prev => ({ ...prev, status: v }))}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="open">Open</SelectItem>
-                      <SelectItem value="investigating">Investigating</SelectItem>
-                      <SelectItem value="identified">Identified</SelectItem>
-                      <SelectItem value="monitoring">Monitoring</SelectItem>
-                      <SelectItem value="resolved">Resolved</SelectItem>
-                      <SelectItem value="closed">Closed</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-              <div className="space-y-2">
-                <Label>Root Cause</Label>
-                <Textarea
-                  value={updateForm.rootCause}
-                  onChange={(e) => setUpdateForm(prev => ({ ...prev, rootCause: e.target.value }))}
-                  rows={2}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Resolution</Label>
-                <Textarea
-                  value={updateForm.resolution}
-                  onChange={(e) => setUpdateForm(prev => ({ ...prev, resolution: e.target.value }))}
-                  rows={2}
-                />
-              </div>
-            </div>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setShowUpdateDialog(null)}>
-                Cancel
-              </Button>
-              <Button
-                onClick={() => {
-                  updateMutation.mutate({
-                    id: showUpdateDialog.id,
-                    data: {
-                      title: updateForm.title,
-                      description: updateForm.description,
-                      severity: updateForm.severity,
-                      status: updateForm.status,
-                      rootCause: updateForm.rootCause || undefined,
-                      resolution: updateForm.resolution || undefined,
-                    },
-                  });
-                }}
-                disabled={updateMutation.isPending}
-              >
-                {updateMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                Update
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+          <div className="space-y-2">
+            <Label>Root Cause</Label>
+            <Textarea
+              value={updateForm.rootCause}
+              onChange={(e) => setUpdateForm(prev => ({ ...prev, rootCause: e.target.value }))}
+              rows={2}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>Resolution</Label>
+            <Textarea
+              value={updateForm.resolution}
+              onChange={(e) => setUpdateForm(prev => ({ ...prev, resolution: e.target.value }))}
+              rows={2}
+            />
+          </div>
+        </FormDialog>
       )}
     </div>
   );

@@ -1,26 +1,10 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Activity, Plus, Pencil, Trash2, LogIn, AlertTriangle } from 'lucide-react';
-import { Card, CardContent } from '@/components/ui/card';
+import { Activity, Plus, Pencil, Trash2, LogIn } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
-import { Skeleton } from '@/components/ui/skeleton';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { PageHeader } from '@/components/layout/PageHeader';
+import { DataTable, type DataTableColumn } from '@/components/DataTable';
 import apiClient from '@/api/client';
 import { formatRelativeTime } from '@/lib/utils';
 
@@ -90,129 +74,103 @@ export function ActivityLogPage() {
   const logs: ActivityLog[] = data?.data || [];
   const meta = data?.meta;
 
+  const columns: DataTableColumn<ActivityLog>[] = [
+    {
+      key: 'icon',
+      header: '',
+      width: 'w-16',
+      render: (log) => (
+        <div className="flex h-8 w-8 items-center justify-center rounded-full bg-muted">
+          {getEventIcon(log.event)}
+        </div>
+      ),
+      skeletonClassName: 'h-8 w-8 rounded-full',
+    },
+    {
+      key: 'description',
+      header: 'Description',
+      render: (log) => (
+        <div className="flex items-center gap-2">
+          <span className="text-sm">{log.description}</span>
+          <Badge variant="secondary" className={`text-xs ${getEventColor(log.event)}`}>
+            {log.event}
+          </Badge>
+        </div>
+      ),
+    },
+    {
+      key: 'model',
+      header: 'Model',
+      render: (log) =>
+        getModelLabel(log.subjectType) ? (
+          <Badge variant="outline" className="text-xs">
+            {getModelLabel(log.subjectType)}
+          </Badge>
+        ) : (
+          <span className="text-muted-foreground">-</span>
+        ),
+    },
+    {
+      key: 'user',
+      header: 'User',
+      accessor: (log) => log.user?.name || 'System',
+      className: 'text-sm text-muted-foreground',
+    },
+    {
+      key: 'createdAt',
+      header: 'Time',
+      accessor: (log) => formatRelativeTime(log.createdAt),
+      sortValue: (log) => new Date(log.createdAt).getTime(),
+      sortable: true,
+      className: 'text-sm text-muted-foreground whitespace-nowrap',
+    },
+  ];
+
   return (
     <div className="space-y-6 animate-fade-in">
-      <div>
-        <h1 className="text-2xl font-bold">Activity Log</h1>
-        <p className="text-muted-foreground">Audit trail of all actions across the platform</p>
-      </div>
+      <PageHeader title="Activity Log" description="Audit trail of all actions across the platform" />
 
-      {/* Filters */}
-      <div className="flex gap-3">
-        <div className="relative flex-1">
-          <Input
-            placeholder="Search activity..."
-            value={search}
-            onChange={(e) => { setSearch(e.target.value); setPage(1); }}
-          />
-        </div>
-        <Select value={eventFilter} onValueChange={(v) => { setEventFilter(v); setPage(1); }}>
-          <SelectTrigger className="w-[150px]">
-            <SelectValue placeholder="Event Type" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Events</SelectItem>
-            <SelectItem value="created">Created</SelectItem>
-            <SelectItem value="updated">Updated</SelectItem>
-            <SelectItem value="deleted">Deleted</SelectItem>
-            <SelectItem value="login">Login</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
-
-      {/* Activity Table */}
-      <Card>
-        <CardContent className="p-0 overflow-x-auto">
-          {isLoading ? (
-            <div className="p-6 space-y-4">
-              {[1, 2, 3, 4, 5, 6, 7, 8].map((i) => (
-                <div key={i} className="flex items-center gap-4">
-                  <Skeleton className="h-8 w-8 rounded-full" />
-                  <Skeleton className="h-4 w-[400px]" />
-                  <Skeleton className="h-4 w-[100px] ml-auto" />
-                </div>
-              ))}
-            </div>
-          ) : error ? (
-            <div className="flex flex-col items-center justify-center py-12">
-              <AlertTriangle className="h-8 w-8 text-destructive mb-2" />
+      <DataTable
+        columns={columns}
+        data={logs}
+        loading={isLoading}
+        error={
+          error ? (
+            <div className="flex flex-col items-center justify-center py-6">
               <p className="text-sm text-destructive">Failed to load activity log</p>
               <p className="text-xs text-muted-foreground mt-1">Please try again later</p>
             </div>
-          ) : logs.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-12">
-              <Activity className="h-8 w-8 text-muted-foreground mb-2" />
-              <p className="text-sm text-muted-foreground">No activity found</p>
-            </div>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-10" />
-                  <TableHead>Description</TableHead>
-                  <TableHead>Model</TableHead>
-                  <TableHead>User</TableHead>
-                  <TableHead>Time</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {logs.map((log) => (
-                  <TableRow key={log.id}>
-                    <TableCell>
-                      <div className="flex h-8 w-8 items-center justify-center rounded-full bg-muted">
-                        {getEventIcon(log.event)}
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm">{log.description}</span>
-                        <Badge
-                          variant="secondary"
-                          className={`text-xs ${getEventColor(log.event)}`}
-                        >
-                          {log.event}
-                        </Badge>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      {getModelLabel(log.subjectType) ? (
-                        <Badge variant="outline" className="text-xs">
-                          {getModelLabel(log.subjectType)}
-                        </Badge>
-                      ) : (
-                        <span className="text-muted-foreground">-</span>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-sm text-muted-foreground">
-                      {log.user?.name || 'System'}
-                    </TableCell>
-                    <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
-                      {formatRelativeTime(log.createdAt)}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Pagination */}
-      {meta && meta.lastPage > 1 && (
-        <div className="flex items-center justify-between">
-          <p className="text-sm text-muted-foreground">
-            Page {meta.currentPage} of {meta.lastPage} ({meta.total} total)
-          </p>
-          <div className="flex gap-2">
-            <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
-              Previous
-            </Button>
-            <Button variant="outline" size="sm" disabled={page >= meta.lastPage} onClick={() => setPage((p) => p + 1)}>
-              Next
-            </Button>
-          </div>
-        </div>
-      )}
+          ) : undefined
+        }
+        search={{
+          value: search,
+          onChange: (v) => { setSearch(v); setPage(1); },
+          placeholder: 'Search activity...',
+        }}
+        filters={
+          <Select value={eventFilter} onValueChange={(v) => { setEventFilter(v); setPage(1); }}>
+            <SelectTrigger className="w-[150px]">
+              <SelectValue placeholder="Event Type" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Events</SelectItem>
+              <SelectItem value="created">Created</SelectItem>
+              <SelectItem value="updated">Updated</SelectItem>
+              <SelectItem value="deleted">Deleted</SelectItem>
+              <SelectItem value="login">Login</SelectItem>
+            </SelectContent>
+          </Select>
+        }
+        pagination={{
+          page,
+          totalPages: meta?.lastPage ?? 1,
+          onPageChange: setPage,
+          totalItems: meta?.total,
+          itemsPerPage: 30,
+        }}
+        emptyIcon={Activity}
+        emptyTitle="No activity found"
+      />
     </div>
   );
 }

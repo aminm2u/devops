@@ -2,19 +2,15 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   FileText,
-  Loader2,
-  Search,
   Eye,
   CheckCircle,
   XCircle,
   Clock,
   DollarSign,
   AlertTriangle,
+  Loader2,
 } from 'lucide-react';
-import { Card, CardContent } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import {
@@ -33,14 +29,12 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
   DialogFooter,
-  DialogHeader,
-  DialogTitle,
 } from '@/components/ui/dialog';
-import { Skeleton } from '@/components/ui/skeleton';
+import { FormDialog } from '@/components/ui/form-dialog';
+import { PageHeader } from '@/components/layout/PageHeader';
+import { DataTable, type DataTableColumn } from '@/components/DataTable';
+import { StatusBadge } from '@/components/ui/status-badge';
 import apiClient from '@/api/client';
 import { RequisitionForm } from '@/types';
 import { formatDate } from '@/lib/utils';
@@ -54,17 +48,21 @@ function formatCurrency(amount: number): string {
   }).format(amount);
 }
 
-function getStatusBadge(status: string) {
+function getStatusIcon(status: string) {
   switch (status) {
     case 'submitted':
-      return <Badge className="bg-blue-100 text-blue-700"><Clock className="h-3 w-3 mr-1" />Submitted</Badge>;
+      return <Clock className="h-3 w-3 mr-1" />;
     case 'approved':
-      return <Badge className="bg-green-100 text-green-700"><CheckCircle className="h-3 w-3 mr-1" />Approved</Badge>;
+      return <CheckCircle className="h-3 w-3 mr-1" />;
     case 'rejected':
-      return <Badge className="bg-red-100 text-red-700"><XCircle className="h-3 w-3 mr-1" />Rejected</Badge>;
+      return <XCircle className="h-3 w-3 mr-1" />;
     default:
-      return <Badge variant="outline">{status}</Badge>;
+      return undefined;
   }
+}
+
+function getStatusBadge(status: string) {
+  return <StatusBadge domain="requisition" value={status} icon={getStatusIcon(status)} />;
 }
 
 // ── Main Page ───────────────────────────────────────────────────────────────
@@ -99,19 +97,17 @@ export function RequisitionManagePage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['requisitions-manage'] });
-      queryClient.invalidateQueries({ queryKey: ['requisitions'] });
-      queryClient.invalidateQueries({ queryKey: ['budget'] });
       setApprovingItem(null);
-      toast.success('Requisition approved. Budget utilization updated.');
+      toast.success('Requisition approved');
     },
     onError: (err: any) => {
-      toast.error(err.response?.data?.error || 'Failed to approve requisition');
+      toast.error(err.response?.data?.message || 'Failed to approve requisition');
     },
   });
 
   const rejectMutation = useMutation({
     mutationFn: async ({ id, reason }: { id: number; reason?: string }) => {
-      const res = await apiClient.put(`/requisitions/${id}/approve`, {
+      const res = await apiClient.put(`/requisitions/${id}/reject`, {
         action: 'rejected',
         reason,
       });
@@ -119,212 +115,146 @@ export function RequisitionManagePage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['requisitions-manage'] });
-      queryClient.invalidateQueries({ queryKey: ['requisitions'] });
       setRejectingItem(null);
       toast.success('Requisition rejected');
     },
     onError: (err: any) => {
-      toast.error(err.response?.data?.error || 'Failed to reject requisition');
+      toast.error(err.response?.data?.message || 'Failed to reject requisition');
     },
   });
 
   const forms: RequisitionForm[] = data?.data || [];
 
-  // Stats
-  const stats = {
-    total: forms.length,
-    submitted: forms.filter((f) => f.status === 'submitted').length,
-    approved: forms.filter((f) => f.status === 'approved').length,
-    rejected: forms.filter((f) => f.status === 'rejected').length,
-    totalCost: forms.reduce((sum, f) => sum + f.totalEstimatedCost, 0),
-  };
+  const columns: DataTableColumn<RequisitionForm>[] = [
+    {
+      key: 'ref',
+      header: 'Ref #',
+      accessor: (form) => <span className="font-mono text-sm">RF-{String(form.id).padStart(4, '0')}</span>,
+      sortValue: (form) => form.id,
+      sortable: true,
+    },
+    {
+      key: 'division',
+      header: 'Division',
+      accessor: (form) => form.division,
+      sortable: true,
+    },
+    {
+      key: 'processOwner',
+      header: 'Process Owner',
+      accessor: (form) => form.processOwner || '-',
+    },
+    {
+      key: 'requestedBy',
+      header: 'Requested By',
+      accessor: (form) => form.requestedByName || '-',
+    },
+    {
+      key: 'budgetItem',
+      header: 'Budget Item',
+      render: (form) =>
+        form.budgetItem ? (
+          <span className="text-sm">
+            {form.budgetItem.description}
+            <span className="text-muted-foreground ml-1">({form.budgetItem.division})</span>
+          </span>
+        ) : (
+          <span className="text-muted-foreground">-</span>
+        ),
+    },
+    {
+      key: 'totalEstimatedCost',
+      header: 'Total Cost',
+      accessor: (form) => <span className="font-medium tabular-nums">{formatCurrency(form.totalEstimatedCost)}</span>,
+      sortValue: (form) => form.totalEstimatedCost,
+      sortable: true,
+      align: 'right',
+    },
+    {
+      key: 'requiredDate',
+      header: 'Required Date',
+      accessor: (form) => (form.requiredDate ? formatDate(form.requiredDate) : '-'),
+      sortValue: (form) => (form.requiredDate ? new Date(form.requiredDate).getTime() : null),
+      sortable: true,
+    },
+    {
+      key: 'status',
+      header: 'Status',
+      accessor: (form) => getStatusBadge(form.status),
+      sortValue: (form) => form.status,
+      sortable: true,
+    },
+    {
+      key: 'actions',
+      header: 'Actions',
+      align: 'right',
+      render: (form) => (
+        <div className="flex items-center justify-end gap-1">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setViewingItem(form)}
+            title="View Details"
+          >
+            <Eye className="h-4 w-4" />
+          </Button>
+          {form.status === 'submitted' && (
+            <>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setApprovingItem(form)}
+                title="Approve"
+                className="text-green-600 hover:text-green-700"
+              >
+                <CheckCircle className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setRejectingItem(form)}
+                title="Reject"
+                className="text-red-600 hover:text-red-700"
+              >
+                <XCircle className="h-4 w-4" />
+              </Button>
+            </>
+          )}
+        </div>
+      ),
+    },
+  ];
 
   return (
     <div className="space-y-6 animate-fade-in">
       {/* Header */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">Requisition Management</h1>
-          <p className="text-muted-foreground">Review and approve requisition requests</p>
-        </div>
-      </div>
+      <PageHeader title="Manage Requisitions" description="Review, approve, and track department requisitions" />
 
-      {/* Stats */}
-      <div className="grid gap-4 sm:grid-cols-4">
-        <Card>
-          <CardContent className="pt-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-muted-foreground">Pending Review</p>
-                <p className="text-2xl font-bold text-blue-600">{stats.submitted}</p>
-              </div>
-              <Clock className="h-8 w-8 text-blue-500" />
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="pt-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-muted-foreground">Approved</p>
-                <p className="text-2xl font-bold text-green-600">{stats.approved}</p>
-              </div>
-              <CheckCircle className="h-8 w-8 text-green-500" />
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="pt-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-muted-foreground">Rejected</p>
-                <p className="text-2xl font-bold text-red-600">{stats.rejected}</p>
-              </div>
-              <XCircle className="h-8 w-8 text-red-500" />
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="pt-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-muted-foreground">Total Cost</p>
-                <p className="text-2xl font-bold">{formatCurrency(stats.totalCost)}</p>
-              </div>
-              <DollarSign className="h-8 w-8 text-muted-foreground" />
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Filters */}
-      <Card>
-        <CardContent className="pt-6">
-          <div className="flex gap-3">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                placeholder="Search requisitions..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="pl-9"
-              />
-            </div>
-            <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="w-[150px]">
-                <SelectValue placeholder="All Statuses" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Statuses</SelectItem>
-                <SelectItem value="submitted">Submitted</SelectItem>
-                <SelectItem value="approved">Approved</SelectItem>
-                <SelectItem value="rejected">Rejected</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Table */}
-      <Card>
-        <CardContent className="p-0 overflow-x-auto">
-          {isLoading ? (
-            <div className="p-6 space-y-4">
-              {[1, 2, 3, 4, 5].map((i) => (
-                <div key={i} className="flex items-center gap-4">
-                  <Skeleton className="h-4 w-[80px]" />
-                  <Skeleton className="h-4 w-[150px]" />
-                  <Skeleton className="h-4 w-[120px]" />
-                  <Skeleton className="h-4 w-[100px]" />
-                  <Skeleton className="h-4 w-[80px]" />
-                </div>
-              ))}
-            </div>
-          ) : forms.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-12">
-              <FileText className="h-8 w-8 text-muted-foreground mb-2" />
-              <p className="text-sm text-muted-foreground">No requisition forms found</p>
-            </div>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Ref #</TableHead>
-                  <TableHead>Division</TableHead>
-                  <TableHead>Process Owner</TableHead>
-                  <TableHead>Requested By</TableHead>
-                  <TableHead>Budget Item</TableHead>
-                  <TableHead className="text-right">Total Cost</TableHead>
-                  <TableHead>Required Date</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {forms.map((form) => (
-                  <TableRow key={form.id}>
-                    <TableCell className="font-mono text-sm">RF-{String(form.id).padStart(4, '0')}</TableCell>
-                    <TableCell>{form.division}</TableCell>
-                    <TableCell>{form.processOwner || '-'}</TableCell>
-                    <TableCell>{form.requestedByName || '-'}</TableCell>
-                    <TableCell>
-                      {form.budgetItem ? (
-                        <span className="text-sm">
-                          {form.budgetItem.description}
-                          <span className="text-muted-foreground ml-1">({form.budgetItem.division})</span>
-                        </span>
-                      ) : (
-                        <span className="text-muted-foreground">-</span>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-right font-medium">
-                      {formatCurrency(form.totalEstimatedCost)}
-                    </TableCell>
-                    <TableCell>
-                      {form.requiredDate ? formatDate(form.requiredDate) : '-'}
-                    </TableCell>
-                    <TableCell>{getStatusBadge(form.status)}</TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex items-center justify-end gap-1">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => setViewingItem(form)}
-                          title="View Details"
-                        >
-                          <Eye className="h-4 w-4" />
-                        </Button>
-                        {form.status === 'submitted' && (
-                          <>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => setApprovingItem(form)}
-                              title="Approve"
-                              className="text-green-600 hover:text-green-700"
-                            >
-                              <CheckCircle className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => setRejectingItem(form)}
-                              title="Reject"
-                              className="text-red-600 hover:text-red-700"
-                            >
-                              <XCircle className="h-4 w-4" />
-                            </Button>
-                          </>
-                        )}
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
+      <DataTable
+        columns={columns}
+        data={forms}
+        loading={isLoading}
+        search={{
+          value: search,
+          onChange: setSearch,
+          placeholder: 'Search requisitions...',
+        }}
+        filters={
+          <Select value={statusFilter} onValueChange={setStatusFilter}>
+            <SelectTrigger className="w-[160px]">
+              <SelectValue placeholder="Status" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Statuses</SelectItem>
+              <SelectItem value="submitted">Submitted</SelectItem>
+              <SelectItem value="approved">Approved</SelectItem>
+              <SelectItem value="rejected">Rejected</SelectItem>
+            </SelectContent>
+          </Select>
+        }
+        emptyIcon={FileText}
+        emptyTitle="No requisition forms found"
+      />
 
       {/* View Dialog */}
       {viewingItem && (
@@ -342,21 +272,22 @@ export function RequisitionManagePage() {
         />
       )}
 
-      {/* Approve Dialog */}
+      {/* Approve / Reject Dialog */}
       {approvingItem && (
-        <ApproveDialog
+        <ApprovalDialog
           item={approvingItem}
-          onApprove={(reason) => approveMutation.mutate({ id: approvingItem.id, reason })}
+          action="approve"
+          onConfirm={(reason) => approveMutation.mutate({ id: approvingItem.id, reason })}
           onClose={() => setApprovingItem(null)}
           isSubmitting={approveMutation.isPending}
         />
       )}
 
-      {/* Reject Dialog */}
       {rejectingItem && (
-        <RejectDialog
+        <ApprovalDialog
           item={rejectingItem}
-          onReject={(reason) => rejectMutation.mutate({ id: rejectingItem.id, reason })}
+          action="reject"
+          onConfirm={(reason) => rejectMutation.mutate({ id: rejectingItem.id, reason })}
           onClose={() => setRejectingItem(null)}
           isSubmitting={rejectMutation.isPending}
         />
@@ -381,17 +312,44 @@ function RequisitionManageViewDialog({
   const canAction = item.status === 'submitted';
 
   return (
-    <Dialog open onOpenChange={onClose}>
-      <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle className="flex items-center justify-between">
-            <span>Requisition RF-{String(item.id).padStart(4, '0')}</span>
-            {getStatusBadge(item.status)}
-          </DialogTitle>
-          <DialogDescription>
-            Submitted by {item.requestedByName || 'Unknown'} on {item.requestedByDate ? formatDate(item.requestedByDate) : '-'}
-          </DialogDescription>
-        </DialogHeader>
+    <FormDialog
+      open
+      onOpenChange={onClose}
+      title={
+        <span className="flex items-center gap-2">
+          Requisition RF-{String(item.id).padStart(4, '0')}
+          {getStatusBadge(item.status)}
+        </span>
+      }
+      description={`Submitted by ${item.requestedByName || 'Unknown'} on ${item.requestedByDate ? formatDate(item.requestedByDate) : '-'}`}
+      maxWidth="lg"
+      footer={
+        <DialogFooter className="pt-2">
+          <Button type="button" variant="outline" onClick={onClose}>Close</Button>
+          {canAction && (
+            <>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={onReject}
+                className="text-red-600 border-red-200 hover:bg-red-50"
+              >
+                <XCircle className="h-4 w-4 mr-2" />
+                Reject
+              </Button>
+              <Button
+                type="button"
+                onClick={onApprove}
+                className="bg-green-600 hover:bg-green-700"
+              >
+                <CheckCircle className="h-4 w-4 mr-2" />
+                Approve
+              </Button>
+            </>
+          )}
+        </DialogFooter>
+      }
+    >
 
         <div className="space-y-4">
           {/* Form Info */}
@@ -484,156 +442,169 @@ function RequisitionManageViewDialog({
             </div>
           )}
         </div>
+    </FormDialog>
+  );
+}
 
-        <DialogFooter>
-          <Button variant="outline" onClick={onClose}>Close</Button>
-          {canAction && (
-            <>
-              <Button
-                variant="outline"
-                onClick={onReject}
-                className="text-red-600 border-red-200 hover:bg-red-50"
-              >
-                <XCircle className="h-4 w-4 mr-2" />
-                Reject
-              </Button>
-              <Button
-                onClick={onApprove}
-                className="bg-green-600 hover:bg-green-700"
-              >
+// ── Approve / Reject Dialog ─────────────────────────────────────────────────
+
+function ApprovalDialog({
+  item,
+  action,
+  onConfirm,
+  onClose,
+  isSubmitting,
+}: {
+  item: RequisitionForm;
+  action: 'approve' | 'reject';
+  onConfirm: (reason?: string) => void;
+  onClose: () => void;
+  isSubmitting: boolean;
+}) {
+  const [reason, setReason] = useState('');
+  const isApprove = action === 'approve';
+
+  const remaining = item.budgetItem
+    ? item.budgetItem.allocatedBudget - item.budgetItem.utilizedBudget
+    : null;
+  const insufficient = remaining !== null && remaining < item.totalEstimatedCost;
+
+  return (
+    <FormDialog
+      open
+      onOpenChange={onClose}
+      title={
+        <span className="flex items-center gap-2">
+          {isApprove ? 'Approve' : 'Reject'} RF-{String(item.id).padStart(4, '0')}
+          {getStatusBadge(item.status)}
+        </span>
+      }
+      description={
+        isApprove
+          ? 'Review the summary below before approving this requisition.'
+          : 'Provide feedback so the requester knows why this was rejected.'
+      }
+      maxWidth="md"
+      footer={
+        <DialogFooter className="pt-2">
+          <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
+          {isApprove ? (
+            <Button type="button" onClick={() => onConfirm(reason || undefined)} disabled={isSubmitting}>
+              {isSubmitting ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
                 <CheckCircle className="h-4 w-4 mr-2" />
-                Approve
-              </Button>
-            </>
+              )}
+              Approve
+            </Button>
+          ) : (
+            <Button type="button" variant="destructive" onClick={() => onConfirm(reason || undefined)} disabled={isSubmitting}>
+              {isSubmitting ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <XCircle className="h-4 w-4 mr-2" />
+              )}
+              Reject
+            </Button>
           )}
         </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-// ── Approve Dialog ──────────────────────────────────────────────────────────
-
-function ApproveDialog({
-  item,
-  onApprove,
-  onClose,
-  isSubmitting,
-}: {
-  item: RequisitionForm;
-  onApprove: (reason?: string) => void;
-  onClose: () => void;
-  isSubmitting: boolean;
-}) {
-  const [reason, setReason] = useState('');
-
-  return (
-    <Dialog open onOpenChange={onClose}>
-      <DialogContent className="max-w-md">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2 text-green-700">
-            <CheckCircle className="h-5 w-5" />
-            Approve Requisition
-          </DialogTitle>
-          <DialogDescription>
-            Approve RF-{String(item.id).padStart(4, '0')} and update budget utilization.
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="space-y-4">
-          <div className="p-3 bg-green-50 rounded-lg border border-green-200 text-sm">
-            <div><span className="font-bold">Total Cost:</span> {formatCurrency(item.totalEstimatedCost)}</div>
-            {item.budgetItem && (
-              <div><span className="font-bold">Budget Item:</span> {item.budgetItem.description}</div>
-            )}
+      }
+    >
+      {/* Summary */}
+      <div className="rounded-lg border border-border/40 bg-muted/30 p-4 space-y-2 text-sm">
+        <div className="flex items-center justify-between gap-4">
+          <span className="text-muted-foreground">Total Estimated Cost</span>
+          <span className="text-base font-bold tabular-nums">{formatCurrency(item.totalEstimatedCost)}</span>
+        </div>
+        <div className="flex items-center justify-between gap-4">
+          <span className="text-muted-foreground">Requested By</span>
+          <span>{item.requestedByName || '-'}</span>
+        </div>
+        <div className="flex items-center justify-between gap-4">
+          <span className="text-muted-foreground">Required Date</span>
+          <span>{item.requiredDate ? formatDate(item.requiredDate) : '-'}</span>
+        </div>
+        <div className="flex items-center justify-between gap-4">
+          <span className="text-muted-foreground">Items</span>
+          <span className="tabular-nums">{item.items?.length || 0}</span>
+        </div>
+        {item.purpose && (
+          <div className="flex items-start justify-between gap-4">
+            <span className="text-muted-foreground shrink-0">Purpose</span>
+            <span className="text-right line-clamp-2">{item.purpose}</span>
           </div>
+        )}
+      </div>
 
-          <div className="space-y-2">
-            <Label>Approval Note (Optional)</Label>
-            <Textarea
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-              placeholder="Add any notes about this approval..."
-              rows={2}
-            />
+      {/* Budget impact */}
+      {item.budgetItem && (
+        <div className={`rounded-lg border p-4 text-sm ${
+          insufficient
+            ? 'border-amber-500/30 bg-amber-100 text-amber-700 dark:bg-amber-900/20 dark:text-amber-400'
+            : 'border-border/40 bg-muted/30'
+        }`}>
+          <div className="flex items-center gap-2 font-semibold mb-1">
+            <DollarSign className="h-4 w-4" />
+            {item.budgetItem.description}
+            <span className="font-normal text-muted-foreground">({item.budgetItem.division})</span>
+          </div>
+          <div className="flex items-center justify-between gap-4">
+            <span className="text-muted-foreground">Remaining after {isApprove ? 'approval' : 'this request'}</span>
+            <span className={`font-bold tabular-nums ${
+              insufficient ? '' : 'text-green-600 dark:text-green-400'
+            }`}>
+              {formatCurrency(isApprove ? remaining! - item.totalEstimatedCost : remaining!)}
+            </span>
+          </div>
+          {insufficient && (
+            <p className="flex items-center gap-1.5 mt-1.5 text-xs">
+              <AlertTriangle className="h-3.5 w-3.5" />
+              This request exceeds the remaining budget of {formatCurrency(remaining!)}
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Approval chain */}
+      {item.approvals && item.approvals.length > 0 && (
+        <div className="space-y-2">
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Approval Chain
+          </p>
+          <div className="rounded-lg border border-border/40 bg-muted/30 divide-y divide-border/40">
+            {item.approvals.map((step, i) => (
+              <div key={step.id} className="flex items-center gap-3 px-4 py-2.5 text-sm">
+                <span className="h-5 w-5 rounded-full bg-primary/10 text-primary text-[10px] font-bold flex items-center justify-center shrink-0">
+                  {i + 1}
+                </span>
+                <span className="min-w-0 flex-1 truncate">{step.approver?.name || `User #${step.approverId}`}</span>
+                {step.comments && (
+                  <span className="text-xs text-muted-foreground truncate max-w-[180px]">{step.comments}</span>
+                )}
+                {step.status === 'approved' && <CheckCircle className="h-4 w-4 text-green-600 shrink-0" />}
+                {step.status === 'rejected' && <XCircle className="h-4 w-4 text-red-600 shrink-0" />}
+                {step.status === 'cancelled' && <XCircle className="h-4 w-4 text-muted-foreground/50 shrink-0" />}
+                {step.status === 'pending' && <Clock className="h-4 w-4 text-muted-foreground shrink-0" />}
+              </div>
+            ))}
           </div>
         </div>
+      )}
 
-        <DialogFooter>
-          <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button
-            onClick={() => onApprove(reason || undefined)}
-            disabled={isSubmitting}
-            className="bg-green-600 hover:bg-green-700"
-          >
-            {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            Approve
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-// ── Reject Dialog ───────────────────────────────────────────────────────────
-
-function RejectDialog({
-  item,
-  onReject,
-  onClose,
-  isSubmitting,
-}: {
-  item: RequisitionForm;
-  onReject: (reason?: string) => void;
-  onClose: () => void;
-  isSubmitting: boolean;
-}) {
-  const [reason, setReason] = useState('');
-
-  return (
-    <Dialog open onOpenChange={onClose}>
-      <DialogContent className="max-w-md">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2 text-red-700">
-            <XCircle className="h-5 w-5" />
-            Reject Requisition
-          </DialogTitle>
-          <DialogDescription>
-            Reject RF-{String(item.id).padStart(4, '0')}. The requester will be notified.
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="space-y-4">
-          <div className="p-3 bg-red-50 rounded-lg border border-red-200 text-sm">
-            <div><span className="font-bold">Total Cost:</span> {formatCurrency(item.totalEstimatedCost)}</div>
-            {item.budgetItem && (
-              <div><span className="font-bold">Budget Item:</span> {item.budgetItem.description}</div>
-            )}
-          </div>
-
-          <div className="space-y-2">
-            <Label>Rejection Reason (Optional)</Label>
-            <Textarea
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-              placeholder="Provide a reason for rejection..."
-              rows={3}
-            />
-          </div>
-        </div>
-
-        <DialogFooter>
-          <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button
-            onClick={() => onReject(reason || undefined)}
-            disabled={isSubmitting}
-            className="bg-red-600 hover:bg-red-700"
-          >
-            {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            Reject
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+      {/* Note */}
+      <div className="space-y-2">
+        <Label>{isApprove ? 'Approval Note (Optional)' : 'Rejection Reason'}</Label>
+        <Textarea
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          placeholder={
+            isApprove
+              ? 'Add any notes about this approval...'
+              : 'Explain why this requisition is being rejected...'
+          }
+          rows={3}
+        />
+      </div>
+    </FormDialog>
   );
 }

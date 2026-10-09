@@ -233,6 +233,17 @@ router.get(
               budgetItem: { select: { id: true, category: true, description: true, allocatedBudget: true } },
             },
           },
+          purchaseOrders: {
+            where: { deletedAt: null },
+            orderBy: { createdAt: "desc" },
+            include: {
+              vendor: { select: { id: true, name: true } },
+              payments: {
+                where: { isActive: true, deletedAt: null },
+                select: { id: true, totalPaid: true, status: true },
+              },
+            },
+          },
           taskColumns: {
             orderBy: { position: 'asc' }
           },

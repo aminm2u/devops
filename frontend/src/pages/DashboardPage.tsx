@@ -17,6 +17,7 @@ import { Badge } from '@/components/ui/badge';
 import { dashboardApi } from '@/api/dashboard';
 import { cn, formatRelativeTime, getStatusColor, formatStatus } from '@/lib/utils';
 import { PageHeader } from '@/components/layout/PageHeader';
+import { StatCard } from '@/components/stat-card';
 
 function StatCardSkeleton() {
   return (
@@ -84,7 +85,7 @@ export function DashboardPage() {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <PageHeader title="Dashboard" description="Overview of your infrastructure and projects" />
+      <PageHeader size="sm" title="Dashboard" description="Overview of your infrastructure and projects" />
 
       {/* Stats Cards */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
@@ -97,55 +98,37 @@ export function DashboardPage() {
           </>
         ) : (
           <>
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <CardTitle className="text-sm font-medium">Total Projects</CardTitle>
-                <FolderKanban className="h-4 w-4 text-muted-foreground" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{dashboardData?.totalProjects ?? 0}</div>
-                <p className="text-xs text-muted-foreground">
-                  {dashboardData?.activeProjects ?? 0} active
-                </p>
-              </CardContent>
-            </Card>
+            <StatCard
+              label="Total Projects"
+              value={dashboardData?.totalProjects ?? 0}
+              caption={`${dashboardData?.activeProjects ?? 0} active`}
+              icon={FolderKanban}
+              iconClassName="text-muted-foreground"
+            />
 
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <CardTitle className="text-sm font-medium">Infrastructure Nodes</CardTitle>
-                <Server className="h-4 w-4 text-muted-foreground" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{dashboardData?.totalInfrastructureNodes ?? 0}</div>
-                <p className="text-xs text-muted-foreground">
-                  {dashboardData?.healthyNodes ?? 0} healthy
-                </p>
-              </CardContent>
-            </Card>
+            <StatCard
+              label="Infrastructure Nodes"
+              value={dashboardData?.totalInfrastructureNodes ?? 0}
+              caption={`${dashboardData?.healthyNodes ?? 0} healthy`}
+              icon={Server}
+              iconClassName="text-muted-foreground"
+            />
 
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <CardTitle className="text-sm font-medium">Open Incidents</CardTitle>
-                <AlertTriangle className="h-4 w-4 text-muted-foreground" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{dashboardData?.openIncidents ?? 0}</div>
-                <p className="text-xs text-destructive">
-                  {dashboardData?.criticalIncidents ?? 0} critical
-                </p>
-              </CardContent>
-            </Card>
+            <StatCard
+              label="Open Incidents"
+              value={dashboardData?.openIncidents ?? 0}
+              caption={`${dashboardData?.criticalIncidents ?? 0} critical`}
+              icon={AlertTriangle}
+              iconClassName="text-muted-foreground"
+            />
 
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <CardTitle className="text-sm font-medium">SSL Expiring Soon</CardTitle>
-                <Shield className="h-4 w-4 text-muted-foreground" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{dashboardData?.expiringSSLCertificates?.length ?? 0}</div>
-                <p className="text-xs text-amber-600">Requires attention</p>
-              </CardContent>
-            </Card>
+            <StatCard
+              label="SSL Expiring Soon"
+              value={dashboardData?.expiringSSLCertificates?.length ?? 0}
+              caption="Requires attention"
+              icon={Shield}
+              iconClassName="text-muted-foreground"
+            />
           </>
         )}
       </div>

@@ -1,19 +1,13 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Users, Plus, Loader2, Shield, Mail, Calendar, AlertTriangle, Pencil, Trash2 } from 'lucide-react';
+import { Users, Plus, Shield, Mail, Calendar, AlertTriangle, Pencil, Trash2 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+import { FormDialog } from '@/components/ui/form-dialog';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import {
   Select,
   SelectContent,
@@ -21,15 +15,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
-import { Skeleton } from '@/components/ui/skeleton';
+import { UserAvatar } from '@/components/ui/UserAvatar';
+import { PageHeader } from '@/components/layout/PageHeader';
+import { DataTable, type DataTableColumn } from '@/components/DataTable';
 import { useAuth } from '@/hooks/useAuth';
 import apiClient from '@/api/client';
 import { formatDate } from '@/lib/utils';
@@ -127,6 +115,100 @@ export function UsersPage() {
   const users: User[] = data?.data || [];
   const meta = data?.meta;
 
+  const columns: DataTableColumn<User>[] = [
+    {
+      key: 'user',
+      header: 'User',
+      render: (user) => (
+        <div className="flex items-center gap-3">
+          <UserAvatar user={user} size="lg" />
+          <span className="font-medium">{user.name}</span>
+        </div>
+      ),
+      sortValue: (user) => user.name,
+      sortable: true,
+      skeletonClassName: 'h-10 w-10 rounded-full',
+    },
+    {
+      key: 'email',
+      header: 'Email',
+      accessor: (user) => (
+        <div className="flex items-center gap-1 text-muted-foreground">
+          <Mail className="h-3 w-3" />
+          {user.email}
+        </div>
+      ),
+    },
+    {
+      key: 'roles',
+      header: 'Roles',
+      accessor: (user) => (
+        <div className="flex gap-1">
+          {user.roles.map((role) => (
+            <Badge
+              key={role.id}
+              variant={role.name === 'admin' ? 'default' : 'secondary'}
+            >
+              {role.name}
+            </Badge>
+          ))}
+        </div>
+      ),
+    },
+    {
+      key: 'createdAt',
+      header: 'Joined',
+      accessor: (user) => (
+        <div className="flex items-center gap-1 text-sm text-muted-foreground">
+          <Calendar className="h-3 w-3" />
+          {formatDate(user.createdAt)}
+        </div>
+      ),
+      sortValue: (user) => new Date(user.createdAt).getTime(),
+      sortable: true,
+    },
+    {
+      key: 'actions',
+      header: '',
+      width: 'w-24',
+      render: (user) => (
+        <div className="flex gap-1">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              setShowEditDialog(user);
+              setFormName(user.name);
+              setFormEmail(user.email);
+              setFormPassword('');
+              setFormRole(user.roles[0]?.name || 'viewer');
+            }}
+          >
+            <Pencil className="h-3.5 w-3.5" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              setShowRoleDialog(user);
+              setSelectedRole(user.roles[0]?.name || 'viewer');
+            }}
+          >
+            <Shield className="h-3.5 w-3.5" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-destructive hover:text-destructive"
+            onClick={() => setShowDeleteDialog(user)}
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </Button>
+        </div>
+      ),
+    },
+  ];
+
   if (!isAdmin) {
     return (
       <div className="flex flex-col items-center justify-center py-12">
@@ -139,16 +221,12 @@ export function UsersPage() {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">User Management</h1>
-          <p className="text-sm text-muted-foreground">Manage system users and their access</p>
-        </div>
+      <PageHeader title="User Management" description="Manage system users and their access">
         <Button onClick={() => setShowCreateDialog(true)}>
           <Plus className="mr-2 h-4 w-4" />
           Add User
         </Button>
-      </div>
+      </PageHeader>
 
       {/* Summary */}
       <div className="grid gap-4 sm:grid-cols-3">
@@ -178,410 +256,256 @@ export function UsersPage() {
         </Card>
       </div>
 
-      {/* Search */}
-      <div className="flex gap-3">
-        <div className="relative flex-1">
-          <Input
-            placeholder="Search users by name or email..."
-            value={search}
-            onChange={(e) => { setSearch(e.target.value); setPage(1); }}
-          />
-        </div>
-      </div>
-
-      {/* Users Table */}
-      <Card>
-        <CardContent className="p-0 overflow-x-auto">
-          {isLoading ? (
-            <div className="p-6 space-y-4">
-              {[1, 2, 3, 4, 5].map((i) => (
-                <div key={i} className="flex items-center gap-4">
-                  <Skeleton className="h-10 w-10 rounded-full" />
-                  <Skeleton className="h-4 w-[200px]" />
-                  <Skeleton className="h-4 w-[150px]" />
-                  <Skeleton className="h-6 w-[80px]" />
-                </div>
-              ))}
-            </div>
-          ) : error ? (
-            <div className="flex flex-col items-center justify-center py-12">
-              <AlertTriangle className="h-8 w-8 text-destructive mb-2" />
+      <DataTable
+        columns={columns}
+        data={users}
+        loading={isLoading}
+        error={
+          error ? (
+            <div className="flex flex-col items-center justify-center py-6">
               <p className="text-sm text-destructive">Failed to load users</p>
               <p className="text-xs text-muted-foreground mt-1">Please try again later</p>
             </div>
-          ) : users.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-12">
-              <Users className="h-8 w-8 text-muted-foreground mb-2" />
-              <p className="text-sm text-muted-foreground">No users found</p>
-            </div>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>User</TableHead>
-                  <TableHead>Email</TableHead>
-                  <TableHead>Roles</TableHead>
-                  <TableHead>Joined</TableHead>
-                  <TableHead className="w-24" />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {users.map((user) => (
-                  <TableRow key={user.id}>
-                    <TableCell>
-                      <div className="flex items-center gap-3">
-                        <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/10 text-primary font-semibold text-sm">
-                          {user.name.charAt(0).toUpperCase()}
-                        </div>
-                        <span className="font-medium">{user.name}</span>
-                      </div>
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      <div className="flex items-center gap-1">
-                        <Mail className="h-3 w-3" />
-                        {user.email}
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex gap-1">
-                        {user.roles.map((role) => (
-                          <Badge
-                            key={role.id}
-                            variant={role.name === 'admin' ? 'default' : 'secondary'}
-                          >
-                            {role.name}
-                          </Badge>
-                        ))}
-                      </div>
-                    </TableCell>
-                    <TableCell className="text-sm text-muted-foreground">
-                      <div className="flex items-center gap-1">
-                        <Calendar className="h-3 w-3" />
-                        {formatDate(user.createdAt)}
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex gap-1">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => {
-                            setShowEditDialog(user);
-                            setFormName(user.name);
-                            setFormEmail(user.email);
-                            setFormPassword('');
-                            setFormRole(user.roles[0]?.name || 'viewer');
-                          }}
-                        >
-                          <Pencil className="h-3.5 w-3.5" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => {
-                            setShowRoleDialog(user);
-                            setSelectedRole(user.roles[0]?.name || 'viewer');
-                          }}
-                        >
-                          <Shield className="h-3.5 w-3.5" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="text-destructive hover:text-destructive"
-                          onClick={() => setShowDeleteDialog(user)}
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Pagination */}
-      {meta && meta.lastPage > 1 && (
-        <div className="flex items-center justify-between">
-          <p className="text-sm text-muted-foreground">
-            Page {meta.currentPage} of {meta.lastPage} ({meta.total} total)
-          </p>
-          <div className="flex gap-2">
-            <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
-              Previous
-            </Button>
-            <Button variant="outline" size="sm" disabled={page >= meta.lastPage} onClick={() => setPage((p) => p + 1)}>
-              Next
-            </Button>
-          </div>
-        </div>
-      )}
+          ) : undefined
+        }
+        search={{
+          value: search,
+          onChange: (v) => { setSearch(v); setPage(1); },
+          placeholder: 'Search users by name or email...',
+        }}
+        pagination={{
+          page,
+          totalPages: meta?.lastPage ?? 1,
+          onPageChange: setPage,
+          totalItems: meta?.total,
+          itemsPerPage: 20,
+        }}
+        emptyIcon={Users}
+        emptyTitle="No users found"
+      />
 
       {/* Create User Dialog */}
-      <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Add User</DialogTitle>
-            <DialogDescription>Create a new user account</DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="create-name">Name *</Label>
-              <Input
-                id="create-name"
-                value={formName}
-                onChange={(e) => setFormName(e.target.value)}
-                placeholder="Full name"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="create-email">Email *</Label>
-              <Input
-                id="create-email"
-                type="email"
-                value={formEmail}
-                onChange={(e) => setFormEmail(e.target.value)}
-                placeholder="user@example.com"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="create-password">Password *</Label>
-              <Input
-                id="create-password"
-                type="password"
-                value={formPassword}
-                onChange={(e) => setFormPassword(e.target.value)}
-                placeholder="Minimum 8 characters"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Role</Label>
-              <Select value={formRole} onValueChange={setFormRole}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="viewer">Viewer</SelectItem>
-                  <SelectItem value="devops-engineer">DevOps Engineer</SelectItem>
-                  <SelectItem value="devops-admin">DevOps Admin</SelectItem>
-                  <SelectItem value="super-admin">Super Admin</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => { setShowCreateDialog(false); resetForm(); }}>
-              Cancel
-            </Button>
-            <Button
-              onClick={() => {
-                if (!formName.trim() || !formEmail.trim()) {
-                  toast.error('Name and email are required');
-                  return;
-                }
-                if (formPassword.length < 8) {
-                  toast.error('Password must be at least 8 characters');
-                  return;
-                }
-                createMutation.mutate({
-                  name: formName.trim(),
-                  email: formEmail.trim(),
-                  password: formPassword,
-                  role: formRole,
-                });
-              }}
-              disabled={createMutation.isPending}
-            >
-              {createMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Create User
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <FormDialog
+        open={showCreateDialog}
+        onOpenChange={(open) => {
+          setShowCreateDialog(open);
+          if (!open) resetForm();
+        }}
+        title="Add User"
+        description="Create a new user account"
+        maxWidth="md"
+        onSubmit={() => {
+          if (!formName.trim() || !formEmail.trim()) {
+            toast.error('Name and email are required');
+            return;
+          }
+          if (formPassword.length < 8) {
+            toast.error('Password must be at least 8 characters');
+            return;
+          }
+          createMutation.mutate({
+            name: formName.trim(),
+            email: formEmail.trim(),
+            password: formPassword,
+            role: formRole,
+          });
+        }}
+        submitLabel="Create User"
+        isSubmitting={createMutation.isPending}
+      >
+        <div className="space-y-2">
+          <Label htmlFor="create-name">Name *</Label>
+          <Input
+            id="create-name"
+            value={formName}
+            onChange={(e) => setFormName(e.target.value)}
+            placeholder="Full name"
+          />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="create-email">Email *</Label>
+          <Input
+            id="create-email"
+            type="email"
+            value={formEmail}
+            onChange={(e) => setFormEmail(e.target.value)}
+            placeholder="user@example.com"
+          />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="create-password">Password *</Label>
+          <Input
+            id="create-password"
+            type="password"
+            value={formPassword}
+            onChange={(e) => setFormPassword(e.target.value)}
+            placeholder="Minimum 8 characters"
+          />
+        </div>
+        <div className="space-y-2">
+          <Label>Role</Label>
+          <Select value={formRole} onValueChange={setFormRole}>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="viewer">Viewer</SelectItem>
+              <SelectItem value="devops-engineer">DevOps Engineer</SelectItem>
+              <SelectItem value="devops-admin">DevOps Admin</SelectItem>
+              <SelectItem value="super-admin">Super Admin</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      </FormDialog>
 
       {/* Role Assignment Dialog */}
       {showRoleDialog && (
-        <Dialog open={!!showRoleDialog} onOpenChange={() => setShowRoleDialog(null)}>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Manage Role</DialogTitle>
-              <DialogDescription>Assign a role to {showRoleDialog.name}</DialogDescription>
-            </DialogHeader>
-            <div className="space-y-4">
-              <div className="flex items-center gap-3 p-3 bg-muted rounded-lg">
-                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10 text-primary font-semibold">
-                  {showRoleDialog.name.charAt(0).toUpperCase()}
-                </div>
-                <div>
-                  <p className="font-medium">{showRoleDialog.name}</p>
-                  <p className="text-sm text-muted-foreground">{showRoleDialog.email}</p>
-                </div>
-              </div>
-              <div className="space-y-2">
-                <Label>Current Roles</Label>
-                <div className="flex gap-2">
-                  {showRoleDialog.roles.map((role) => (
-                    <Badge key={role.id} variant={role.name === 'admin' ? 'default' : 'secondary'}>
-                      {role.name}
-                    </Badge>
-                  ))}
-                </div>
-              </div>
-              <div className="space-y-2">
-                <Label>Assign New Role</Label>
-                <Select value={selectedRole} onValueChange={setSelectedRole}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="viewer">Viewer</SelectItem>
-                    <SelectItem value="devops-engineer">DevOps Engineer</SelectItem>
-                    <SelectItem value="devops-admin">DevOps Admin</SelectItem>
-                    <SelectItem value="super-admin">Super Admin</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+        <FormDialog
+          open={!!showRoleDialog}
+          onOpenChange={() => setShowRoleDialog(null)}
+          title="Manage Role"
+          description={`Assign a role to ${showRoleDialog.name}`}
+          maxWidth="md"
+          onSubmit={() => {
+            assignRoleMutation.mutate({
+              userId: showRoleDialog.id,
+              role: selectedRole,
+            });
+          }}
+          submitLabel="Update Role"
+          isSubmitting={assignRoleMutation.isPending}
+        >
+          <div className="flex items-center gap-3 p-3 bg-muted rounded-lg">
+            <UserAvatar user={showRoleDialog} size="lg" />
+            <div>
+              <p className="font-medium">{showRoleDialog.name}</p>
+              <p className="text-sm text-muted-foreground">{showRoleDialog.email}</p>
             </div>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setShowRoleDialog(null)}>
-                Cancel
-              </Button>
-              <Button
-                onClick={() => {
-                  assignRoleMutation.mutate({
-                    userId: showRoleDialog.id,
-                    role: selectedRole,
-                  });
-                }}
-                disabled={assignRoleMutation.isPending}
-              >
-                {assignRoleMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                Update Role
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+          </div>
+          <div className="space-y-2">
+            <Label>Current Roles</Label>
+            <div className="flex gap-2">
+              {showRoleDialog.roles.map((role) => (
+                <Badge key={role.id} variant={role.name === 'admin' ? 'default' : 'secondary'}>
+                  {role.name}
+                </Badge>
+              ))}
+            </div>
+          </div>
+          <div className="space-y-2">
+            <Label>Assign New Role</Label>
+            <Select value={selectedRole} onValueChange={setSelectedRole}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="viewer">Viewer</SelectItem>
+                <SelectItem value="devops-engineer">DevOps Engineer</SelectItem>
+                <SelectItem value="devops-admin">DevOps Admin</SelectItem>
+                <SelectItem value="super-admin">Super Admin</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </FormDialog>
       )}
 
       {/* Edit User Dialog */}
-      <Dialog open={!!showEditDialog} onOpenChange={() => { setShowEditDialog(null); resetForm(); }}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Edit User</DialogTitle>
-            <DialogDescription>Update user information for {showEditDialog?.name}</DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="edit-name">Name</Label>
-              <Input
-                id="edit-name"
-                value={formName}
-                onChange={(e) => setFormName(e.target.value)}
-                placeholder="Full name"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="edit-email">Email</Label>
-              <Input
-                id="edit-email"
-                type="email"
-                value={formEmail}
-                onChange={(e) => setFormEmail(e.target.value)}
-                placeholder="user@example.com"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="edit-password">New Password (leave blank to keep current)</Label>
-              <Input
-                id="edit-password"
-                type="password"
-                value={formPassword}
-                onChange={(e) => setFormPassword(e.target.value)}
-                placeholder="Minimum 8 characters"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Role</Label>
-              <Select value={formRole} onValueChange={setFormRole}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="viewer">Viewer</SelectItem>
-                  <SelectItem value="devops-engineer">DevOps Engineer</SelectItem>
-                  <SelectItem value="devops-admin">DevOps Admin</SelectItem>
-                  <SelectItem value="super-admin">Super Admin</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+      {showEditDialog && (
+        <FormDialog
+          open={!!showEditDialog}
+          onOpenChange={() => {
+            setShowEditDialog(null);
+            resetForm();
+          }}
+          title="Edit User"
+          description={`Update user information for ${showEditDialog.name}`}
+          maxWidth="md"
+          onSubmit={() => {
+            if (!formName.trim() || !formEmail.trim()) {
+              toast.error('Name and email are required');
+              return;
+            }
+            const updateData: any = {
+              name: formName.trim(),
+              email: formEmail.trim(),
+              role: formRole,
+            };
+            if (formPassword.length >= 8) {
+              updateData.password = formPassword;
+            }
+            editMutation.mutate({
+              userId: showEditDialog.id,
+              data: updateData,
+            });
+          }}
+          submitLabel="Save Changes"
+          isSubmitting={editMutation.isPending}
+        >
+          <div className="space-y-2">
+            <Label htmlFor="edit-name">Name</Label>
+            <Input
+              id="edit-name"
+              value={formName}
+              onChange={(e) => setFormName(e.target.value)}
+              placeholder="Full name"
+            />
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => { setShowEditDialog(null); resetForm(); }}>
-              Cancel
-            </Button>
-            <Button
-              onClick={() => {
-                if (!formName.trim() || !formEmail.trim()) {
-                  toast.error('Name and email are required');
-                  return;
-                }
-                const updateData: any = {
-                  name: formName.trim(),
-                  email: formEmail.trim(),
-                  role: formRole,
-                };
-                if (formPassword.length >= 8) {
-                  updateData.password = formPassword;
-                }
-                editMutation.mutate({
-                  userId: showEditDialog!.id,
-                  data: updateData,
-                });
-              }}
-              disabled={editMutation.isPending}
-            >
-              {editMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Save Changes
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          <div className="space-y-2">
+            <Label htmlFor="edit-email">Email</Label>
+            <Input
+              id="edit-email"
+              type="email"
+              value={formEmail}
+              onChange={(e) => setFormEmail(e.target.value)}
+              placeholder="user@example.com"
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="edit-password">New Password (leave blank to keep current)</Label>
+            <Input
+              id="edit-password"
+              type="password"
+              value={formPassword}
+              onChange={(e) => setFormPassword(e.target.value)}
+              placeholder="Minimum 8 characters"
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>Role</Label>
+            <Select value={formRole} onValueChange={setFormRole}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="viewer">Viewer</SelectItem>
+                <SelectItem value="devops-engineer">DevOps Engineer</SelectItem>
+                <SelectItem value="devops-admin">DevOps Admin</SelectItem>
+                <SelectItem value="super-admin">Super Admin</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </FormDialog>
+      )}
 
       {/* Delete Confirmation Dialog */}
-      <Dialog open={!!showDeleteDialog} onOpenChange={() => setShowDeleteDialog(null)}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Delete User</DialogTitle>
-            <DialogDescription>
-              Are you sure you want to delete <strong>{showDeleteDialog?.name}</strong>? This action cannot be undone.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="flex items-center gap-3 p-3 bg-destructive/10 rounded-lg">
-            <AlertTriangle className="h-5 w-5 text-destructive" />
-            <p className="text-sm text-destructive">
-              This will permanently remove the user and all their data.
-            </p>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowDeleteDialog(null)}>
-              Cancel
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={() => {
-                deleteMutation.mutate(showDeleteDialog!.id);
-              }}
-              disabled={deleteMutation.isPending}
-            >
-              {deleteMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Delete User
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <ConfirmDialog
+        open={!!showDeleteDialog}
+        onOpenChange={() => setShowDeleteDialog(null)}
+        title="Delete User"
+        description={<>Are you sure you want to delete <strong>{showDeleteDialog?.name}</strong>? This action cannot be undone.</>}
+        confirmLabel="Delete User"
+        onConfirm={() => {
+          deleteMutation.mutate(showDeleteDialog!.id);
+        }}
+        isConfirming={deleteMutation.isPending}
+      >
+        <div className="flex items-center gap-3 p-3 bg-destructive/10 rounded-lg">
+          <AlertTriangle className="h-5 w-5 text-destructive" />
+          <p className="text-sm text-destructive">
+            This will permanently remove the user and all their data.
+          </p>
+        </div>
+      </ConfirmDialog>
     </div>
   );
 }

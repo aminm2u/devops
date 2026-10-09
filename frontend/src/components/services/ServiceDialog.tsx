@@ -1,10 +1,6 @@
 import { useState, useEffect } from 'react';
-import { Loader2 } from 'lucide-react';
-import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import {
   Select,
   SelectContent,
@@ -12,10 +8,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import {
-  Dialog,
-  DialogContent,
-} from '@/components/ui/dialog';
+import { FormDialog } from '@/components/ui/form-dialog';
+import { FormField } from '@/components/ui/form-field';
+import { FormGrid } from '@/components/ui/form-grid';
 import apiClient from '@/api/client';
 import toast from 'react-hot-toast';
 
@@ -124,151 +119,128 @@ export function ServiceDialog({
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto p-0">
-        <Card className='pt-8 border-0 shadow-none'>
-          <CardHeader>
-            <CardTitle>{service ? 'Edit Service' : 'Add Service'}</CardTitle>
-            <CardDescription>
-              {service ? 'Update service details' : 'Add a new service to this project'}
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={(e) => { e.preventDefault(); handleSubmit(); }} className="space-y-4">
-          <div className="space-y-2">
-            <Label>Service Name *</Label>
-            <Input
-              value={form.name}
-              onChange={(e) => setForm({ ...form, name: e.target.value })}
-              placeholder="e.g., API Gateway"
-            />
-          </div>
+    <FormDialog
+      open={open}
+      onOpenChange={onOpenChange}
+      title={service ? 'Edit Service' : 'Add Service'}
+      description={service ? 'Update service details' : 'Add a new service to this project'}
+      maxWidth="md"
+      onSubmit={handleSubmit}
+      submitLabel={service ? 'Update' : 'Add Service'}
+      isSubmitting={isPending}
+    >
+      <FormField label="Service Name" required>
+        <Input
+          value={form.name}
+          onChange={(e) => setForm({ ...form, name: e.target.value })}
+          placeholder="e.g., API Gateway"
+        />
+      </FormField>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label>Type</Label>
-              <Select value={form.type} onValueChange={(v) => setForm({ ...form, type: v })}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="web">Web</SelectItem>
-                  <SelectItem value="api">API</SelectItem>
-                  <SelectItem value="database">Database</SelectItem>
-                  <SelectItem value="cache">Cache</SelectItem>
-                  <SelectItem value="queue">Queue</SelectItem>
-                  <SelectItem value="worker">Worker</SelectItem>
-                  <SelectItem value="cron">Cron</SelectItem>
-                  <SelectItem value="other">Other</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label>Status</Label>
-              <Select value={form.status} onValueChange={(v) => setForm({ ...form, status: v })}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="active">Active</SelectItem>
-                  <SelectItem value="inactive">Inactive</SelectItem>
-                  <SelectItem value="maintenance">Maintenance</SelectItem>
-                  <SelectItem value="error">Error</SelectItem>
-                  <SelectItem value="unknown">Unknown</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
+      <FormGrid>
+        <FormField label="Type">
+          <Select value={form.type} onValueChange={(v) => setForm({ ...form, type: v })}>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="web">Web</SelectItem>
+              <SelectItem value="api">API</SelectItem>
+              <SelectItem value="database">Database</SelectItem>
+              <SelectItem value="cache">Cache</SelectItem>
+              <SelectItem value="queue">Queue</SelectItem>
+              <SelectItem value="worker">Worker</SelectItem>
+              <SelectItem value="cron">Cron</SelectItem>
+              <SelectItem value="other">Other</SelectItem>
+            </SelectContent>
+          </Select>
+        </FormField>
+        <FormField label="Status">
+          <Select value={form.status} onValueChange={(v) => setForm({ ...form, status: v })}>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="active">Active</SelectItem>
+              <SelectItem value="inactive">Inactive</SelectItem>
+              <SelectItem value="maintenance">Maintenance</SelectItem>
+              <SelectItem value="error">Error</SelectItem>
+              <SelectItem value="unknown">Unknown</SelectItem>
+            </SelectContent>
+          </Select>
+        </FormField>
+      </FormGrid>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label>Version</Label>
-              <Input
-                value={form.version}
-                onChange={(e) => setForm({ ...form, version: e.target.value })}
-                placeholder="e.g., v1.2.3"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Port</Label>
-              <Input
-                type="number"
-                value={form.port}
-                onChange={(e) => setForm({ ...form, port: e.target.value })}
-                placeholder="e.g., 8080"
-              />
-            </div>
-          </div>
+      <FormGrid>
+        <FormField label="Version">
+          <Input
+            value={form.version}
+            onChange={(e) => setForm({ ...form, version: e.target.value })}
+            placeholder="e.g., v1.2.3"
+          />
+        </FormField>
+        <FormField label="Port">
+          <Input
+            type="number"
+            value={form.port}
+            onChange={(e) => setForm({ ...form, port: e.target.value })}
+            placeholder="e.g., 8080"
+          />
+        </FormField>
+      </FormGrid>
 
-          {environments.length > 0 && (
-            <div className="space-y-2">
-              <Label>Environment</Label>
-              <Select value={form.environmentId} onValueChange={(v) => setForm({ ...form, environmentId: v })}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select environment" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="">None</SelectItem>
-                  {environments.map((env) => (
-                    <SelectItem key={env.id} value={env.id.toString()}>
-                      {env.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          )}
+      {environments.length > 0 && (
+        <FormField label="Environment">
+          <Select value={form.environmentId} onValueChange={(v) => setForm({ ...form, environmentId: v })}>
+            <SelectTrigger>
+              <SelectValue placeholder="Select environment" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="">None</SelectItem>
+              {environments.map((env) => (
+                <SelectItem key={env.id} value={env.id.toString()}>
+                  {env.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </FormField>
+      )}
 
-          {nodes.length > 0 && (
-            <div className="space-y-2">
-              <Label>Server</Label>
-              <Select value={form.infrastructureNodeId} onValueChange={(v) => setForm({ ...form, infrastructureNodeId: v })}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select server" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="">None</SelectItem>
-                  {nodes.map((node) => (
-                    <SelectItem key={node.id} value={node.id.toString()}>
-                      {node.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          )}
+      {nodes.length > 0 && (
+        <FormField label="Server">
+          <Select value={form.infrastructureNodeId} onValueChange={(v) => setForm({ ...form, infrastructureNodeId: v })}>
+            <SelectTrigger>
+              <SelectValue placeholder="Select server" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="">None</SelectItem>
+              {nodes.map((node) => (
+                <SelectItem key={node.id} value={node.id.toString()}>
+                  {node.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </FormField>
+      )}
 
-          <div className="space-y-2">
-            <Label>Health Check URL</Label>
-            <Input
-              value={form.healthCheckUrl}
-              onChange={(e) => setForm({ ...form, healthCheckUrl: e.target.value })}
-              placeholder="https://example.com/health"
-            />
-          </div>
+      <FormField label="Health Check URL">
+        <Input
+          value={form.healthCheckUrl}
+          onChange={(e) => setForm({ ...form, healthCheckUrl: e.target.value })}
+          placeholder="https://example.com/health"
+        />
+      </FormField>
 
-          <div className="space-y-2">
-            <Label>Description</Label>
-            <Textarea
-              value={form.description}
-              onChange={(e) => setForm({ ...form, description: e.target.value })}
-              placeholder="Brief description of the service"
-              rows={3}
-            />
-          </div>
-              <div className="flex justify-end gap-3 pt-2">
-                <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-                  Cancel
-                </Button>
-                <Button type="submit" disabled={isPending}>
-                  {isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                  {service ? 'Update' : 'Add Service'}
-                </Button>
-              </div>
-            </form>
-          </CardContent>
-        </Card>
-      </DialogContent>
-    </Dialog>
+      <FormField label="Description">
+        <Textarea
+          value={form.description}
+          onChange={(e) => setForm({ ...form, description: e.target.value })}
+          placeholder="Brief description of the service"
+          rows={3}
+        />
+      </FormField>
+    </FormDialog>
   );
 }

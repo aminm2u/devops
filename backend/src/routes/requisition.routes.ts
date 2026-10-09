@@ -7,12 +7,15 @@ import { RequestWithUser } from "../types/index.js";
 import { NotFoundError } from "../lib/errors.js";
 import { logActivity } from "../middleware/activity.js";
 import prisma from "../config/database.js";
+import { createApprovalChain, processApprovalStep } from "../services/approvalEngine.js";
 
 const router = Router();
 
 const requisitionItemSchema = z.object({
   id: z.number().int().optional(),
   description: z.string().min(1, "Description is required"),
+  specification: z.string().optional().nullable(),
+  category: z.string().optional().nullable(),
   qty: z.number().int().positive("Quantity must be positive"),
   unitPrice: z.number().min(0).optional().default(0),
   uom: z.string().optional().nullable(),
@@ -23,10 +26,16 @@ const createRequisitionSchema = z.object({
   division: z.string().min(1, "Division is required"),
   processOwner: z.string().optional().nullable(),
   budgetItemId: z.number().int().positive().optional().nullable(),
+  projectId: z.number().int().positive().optional().nullable(),
   totalEstimatedCost: z.number().min(0).optional(),
   requiredDate: z.string().datetime().optional().nullable(),
   purpose: z.string().optional().nullable(),
   status: z.enum(["draft", "submitted", "approved", "rejected"]).optional(),
+  // New fields
+  isUnbudgeted: z.boolean().optional(),
+  procurementType: z.enum(["material", "service"]).optional(),
+  urgencyLevel: z.enum(["low", "normal", "high", "urgent"]).optional(),
+  purchaseType: z.enum(["project", "non_project"]).optional(),
   requestedByName: z.string().optional().nullable(),
   requestedByDate: z.string().datetime().optional().nullable(),
   approvedByName: z.string().optional().nullable(),
@@ -65,7 +74,11 @@ router.get(
           where,
           include: {
             items: { where: { deletedAt: null, isActive: true } },
-            budgetItem: { select: { id: true, description: true, division: true, allocatedBudget: true, utilizedBudget: true, currency: true } },
+            budgetItem: { select: { id: true, description: true, division: true, allocatedBudget: true, utilizedBudget: true, currency: true, budgetType: true } },
+            approvals: {
+              include: { approver: { select: { id: true, name: true, email: true } } },
+              orderBy: { order: "asc" },
+            },
           },
           orderBy: { createdAt: "desc" },
           skip,
@@ -102,7 +115,11 @@ router.get(
         where: { id: parseInt(id, 10), deletedAt: null },
         include: {
           items: { where: { deletedAt: null, isActive: true }, orderBy: { id: "asc" } },
-          budgetItem: { select: { id: true, description: true, division: true, allocatedBudget: true, utilizedBudget: true, currency: true } },
+          budgetItem: { select: { id: true, description: true, division: true, allocatedBudget: true, utilizedBudget: true, currency: true, budgetType: true } },
+          approvals: {
+            include: { approver: { select: { id: true, name: true, email: true } } },
+            orderBy: { order: "asc" },
+          },
         },
       });
 
@@ -119,11 +136,10 @@ router.get(
   }
 );
 
-// POST /api/requisitions - Create requisition form with items
+// POST /api/requisitions - Create requisition form with items (any authenticated user)
 router.post(
   "/",
   authenticate,
-  requireRole("super-admin", "devops-admin"),
   validate(createRequisitionSchema),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
@@ -134,10 +150,16 @@ router.post(
           division: formData.division,
           processOwner: formData.processOwner || null,
           budgetItemId: formData.budgetItemId || null,
+          projectId: formData.projectId || null,
           totalEstimatedCost: formData.totalEstimatedCost || 0,
           requiredDate: formData.requiredDate ? new Date(formData.requiredDate) : null,
           purpose: formData.purpose || null,
           status: formData.status || "draft",
+          createdByUserId: req.user!.id,
+          isUnbudgeted: formData.isUnbudgeted || false,
+          procurementType: formData.procurementType || "material",
+          urgencyLevel: formData.urgencyLevel || "normal",
+          purchaseType: formData.purchaseType || "non_project",
           requestedByName: formData.requestedByName || null,
           requestedByDate: formData.requestedByDate ? new Date(formData.requestedByDate) : null,
           approvedByName: formData.approvedByName || null,
@@ -145,7 +167,10 @@ router.post(
           items: {
             create: items.map((item: any) => ({
               description: item.description,
+              specification: item.specification || null,
+              category: item.category || null,
               qty: item.qty,
+              unitPrice: item.unitPrice || 0,
               uom: item.uom || null,
               remark: item.remark || null,
             })),
@@ -177,7 +202,6 @@ router.post(
 router.put(
   "/:id",
   authenticate,
-  requireRole("super-admin", "devops-admin"),
   validate(updateRequisitionSchema),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
@@ -187,11 +211,16 @@ router.put(
       });
       if (!existing) throw new NotFoundError("Requisition form not found");
 
+      // Only draft requisitions can be edited
+      if (existing.status !== "draft") {
+        return res.status(400).json({
+          error: `Cannot edit a requisition with status "${existing.status}". Only draft requisitions can be edited.`,
+        });
+      }
+
       const { items, ...formData } = req.body;
 
-      // Update form and replace items in a transaction
       const form = await prisma.$transaction(async (tx) => {
-        // Update the form
         const updatedForm = await tx.requisitionForm.update({
           where: { id: existing.id },
           data: {
@@ -200,12 +229,17 @@ router.put(
             ...(formData.budgetItemId !== undefined && {
               budgetItem: formData.budgetItemId ? { connect: { id: formData.budgetItemId } } : { disconnect: true },
             }),
+            ...(formData.projectId !== undefined && { projectId: formData.projectId }),
             ...(formData.totalEstimatedCost !== undefined && { totalEstimatedCost: formData.totalEstimatedCost }),
             ...(formData.requiredDate !== undefined && {
               requiredDate: formData.requiredDate ? new Date(formData.requiredDate) : null,
             }),
             ...(formData.purpose !== undefined && { purpose: formData.purpose }),
             ...(formData.status !== undefined && { status: formData.status }),
+            ...(formData.isUnbudgeted !== undefined && { isUnbudgeted: formData.isUnbudgeted }),
+            ...(formData.procurementType !== undefined && { procurementType: formData.procurementType }),
+            ...(formData.urgencyLevel !== undefined && { urgencyLevel: formData.urgencyLevel }),
+            ...(formData.purchaseType !== undefined && { purchaseType: formData.purchaseType }),
             ...(formData.requestedByName !== undefined && { requestedByName: formData.requestedByName }),
             ...(formData.requestedByDate !== undefined && {
               requestedByDate: formData.requestedByDate ? new Date(formData.requestedByDate) : null,
@@ -217,21 +251,21 @@ router.put(
           },
         });
 
-        // Replace items if provided
         if (items) {
-          // Soft delete existing items
           await tx.requisitionItem.updateMany({
             where: { requisitionFormId: existing.id, deletedAt: null },
             data: { deletedAt: new Date(), isActive: false },
           });
 
-          // Create new items
           if (items.length > 0) {
             await tx.requisitionItem.createMany({
               data: items.map((item: any) => ({
                 requisitionFormId: existing.id,
                 description: item.description,
+                specification: item.specification || null,
+                category: item.category || null,
                 qty: item.qty,
+                unitPrice: item.unitPrice || 0,
                 uom: item.uom || null,
                 remark: item.remark || null,
               })),
@@ -239,7 +273,6 @@ router.put(
           }
         }
 
-        // Return the updated form with items
         return tx.requisitionForm.findUnique({
           where: { id: existing.id },
           include: { items: { where: { deletedAt: null, isActive: true } } },
@@ -266,7 +299,6 @@ router.put(
 router.delete(
   "/:id",
   authenticate,
-  requireRole("super-admin", "devops-admin"),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const { id } = req.params;
@@ -275,14 +307,19 @@ router.delete(
       });
       if (!existing) throw new NotFoundError("Requisition form not found");
 
+      // Only draft requisitions can be deleted
+      if (existing.status !== "draft") {
+        return res.status(400).json({
+          error: `Cannot delete a requisition with status "${existing.status}". Only draft requisitions can be deleted.`,
+        });
+      }
+
       await prisma.$transaction(async (tx) => {
-        // Soft delete items
         await tx.requisitionItem.updateMany({
           where: { requisitionFormId: existing.id, deletedAt: null },
           data: { deletedAt: new Date(), isActive: false },
         });
 
-        // Soft delete form
         await tx.requisitionForm.update({
           where: { id: existing.id },
           data: { deletedAt: new Date(), isActive: false },
@@ -305,7 +342,105 @@ router.delete(
   }
 );
 
-// ==================== Approve / Reject ====================
+// ==================== Submit for Approval ====================
+
+router.put(
+  "/:id/submit",
+  authenticate,
+  async (req: Request, res: Response) => {
+    try {
+      const id = parseInt(req.params.id);
+
+      const existing = await prisma.requisitionForm.findFirst({
+        where: { id, isActive: true, deletedAt: null },
+        include: { budgetItem: true },
+      });
+
+      if (!existing) {
+        return res.status(404).json({ error: "Requisition form not found" });
+      }
+
+      if (existing.status !== "draft") {
+        return res.status(400).json({
+          error: `Cannot submit a form with status "${existing.status}". Only "draft" forms can be submitted.`,
+        });
+      }
+
+      const user = (req as any).user;
+
+      // Update status to submitted
+      await prisma.requisitionForm.update({
+        where: { id },
+        data: {
+          status: "submitted",
+          requestedByName: user.name || user.email || "User",
+          requestedByDate: new Date(),
+        },
+      });
+
+      // Try to create approval chain based on policy
+      const budgetType = existing.budgetItem?.budgetType || null;
+      const hasChain = await createApprovalChain(
+        id,
+        budgetType,
+        existing.division,
+        Number(existing.totalEstimatedCost)
+      );
+
+      // If no approval chain was created (no policy or no approvers), auto-approve
+      if (!hasChain) {
+        await prisma.requisitionForm.update({
+          where: { id },
+          data: {
+            status: "approved",
+            approvedByName: "Auto-approved (no policy)",
+            approvedByDate: new Date(),
+          },
+        });
+
+        // Update budget utilization if linked
+        if (existing.budgetItemId) {
+          await prisma.budgetItem.update({
+            where: { id: existing.budgetItemId },
+            data: {
+              utilizedBudget: { increment: existing.totalEstimatedCost },
+            },
+          });
+        }
+      } else {
+        // Set to under_review since we have an approval chain
+        await prisma.requisitionForm.update({
+          where: { id },
+          data: { status: "under_review" },
+        });
+      }
+
+      const updated = await prisma.requisitionForm.findUnique({
+        where: { id },
+        include: {
+          items: { where: { isActive: true, deletedAt: null } },
+          budgetItem: {
+            select: {
+              id: true, description: true, division: true,
+              allocatedBudget: true, utilizedBudget: true, currency: true,
+            },
+          },
+          approvals: {
+            include: { approver: { select: { id: true, name: true, email: true } } },
+            orderBy: { order: "asc" },
+          },
+        },
+      });
+
+      res.json(updated);
+    } catch (error) {
+      console.error("Error submitting requisition:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  }
+);
+
+// ==================== Approve / Reject (single-step for backward compat) ====================
 
 const approveRejectSchema = z.object({
   action: z.enum(["approved", "rejected"]),
@@ -330,16 +465,37 @@ router.put(
         return res.status(404).json({ error: "Requisition form not found" });
       }
 
-      if (existing.status !== "submitted") {
+      if (existing.status !== "submitted" && existing.status !== "under_review") {
         return res.status(400).json({
-          error: `Cannot ${body.action} a form with status "${existing.status}". Only "submitted" forms can be processed.`,
+          error: `Cannot ${body.action} a form with status "${existing.status}".`,
         });
       }
 
       const user = (req as any).user;
       const userName = user.name || user.email || "Admin";
 
-      // Update requisition status
+      // Check if there's an approval chain
+      const pendingApprovals = await prisma.requisitionApproval.findMany({
+        where: { requisitionId: id, status: "pending" },
+      });
+
+      if (pendingApprovals.length > 0) {
+        // Use the approval engine for chain-based approval
+        const result = await processApprovalStep(
+          id,
+          user.id,
+          body.action,
+          body.reason
+        );
+
+        return res.json({
+          success: true,
+          status: result.requisitionStatus,
+          isComplete: result.isComplete,
+        });
+      }
+
+      // Legacy single-step approval
       const updated = await prisma.requisitionForm.update({
         where: { id },
         data: {
@@ -354,38 +510,24 @@ router.put(
           items: { where: { isActive: true, deletedAt: null } },
           budgetItem: {
             select: {
-              id: true,
-              description: true,
-              division: true,
-              allocatedBudget: true,
-              utilizedBudget: true,
-              currency: true,
+              id: true, description: true, division: true,
+              allocatedBudget: true, utilizedBudget: true, currency: true,
             },
           },
         },
       });
 
-      // If approved and has budget item, update utilized budget
       if (body.action === "approved" && existing.budgetItemId) {
         await prisma.budgetItem.update({
           where: { id: existing.budgetItemId },
-          data: {
-            utilizedBudget: {
-              increment: existing.totalEstimatedCost,
-            },
-          },
+          data: { utilizedBudget: { increment: existing.totalEstimatedCost } },
         });
       }
 
-      // If rejected and was previously approved (revoke), decrease utilized budget
       if (body.action === "rejected" && existing.status === "approved" && existing.budgetItemId) {
         await prisma.budgetItem.update({
           where: { id: existing.budgetItemId },
-          data: {
-            utilizedBudget: {
-              decrement: existing.totalEstimatedCost,
-            },
-          },
+          data: { utilizedBudget: { decrement: existing.totalEstimatedCost } },
         });
       }
 
@@ -400,56 +542,56 @@ router.put(
   }
 );
 
-// ==================== Submit for Approval ====================
+// ==================== Individual Approval Step ====================
+
+const approvalStepSchema = z.object({
+  action: z.enum(["approved", "rejected"]),
+  comments: z.string().optional(),
+});
 
 router.put(
-  "/:id/submit",
+  "/:id/approve-step",
+  authenticate,
+  async (req: Request, res: Response) => {
+    try {
+      const id = parseInt(req.params.id);
+      const body = approvalStepSchema.parse(req.body);
+      const user = (req as any).user;
+
+      const result = await processApprovalStep(id, user.id, body.action, body.comments);
+
+      res.json({
+        success: true,
+        status: result.requisitionStatus,
+        isComplete: result.isComplete,
+      });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Validation error", details: error.errors });
+      }
+      console.error("Error in approval step:", error);
+      res.status(500).json({ error: (error as Error).message || "Internal server error" });
+    }
+  }
+);
+
+// ==================== Approval Status ====================
+
+router.get(
+  "/:id/approval-status",
   authenticate,
   async (req: Request, res: Response) => {
     try {
       const id = parseInt(req.params.id);
 
-      const existing = await prisma.requisitionForm.findFirst({
-        where: { id, isActive: true, deletedAt: null },
+      const approvals = await prisma.requisitionApproval.findMany({
+        where: { requisitionId: id },
+        include: { approver: { select: { id: true, name: true, email: true } } },
+        orderBy: { order: "asc" },
       });
 
-      if (!existing) {
-        return res.status(404).json({ error: "Requisition form not found" });
-      }
-
-      if (existing.status !== "draft") {
-        return res.status(400).json({
-          error: `Cannot submit a form with status "${existing.status}". Only "draft" forms can be submitted.`,
-        });
-      }
-
-      const user = (req as any).user;
-
-      const updated = await prisma.requisitionForm.update({
-        where: { id },
-        data: {
-          status: "submitted",
-          requestedByName: user.name || user.email || "User",
-          requestedByDate: new Date(),
-        },
-        include: {
-          items: { where: { isActive: true, deletedAt: null } },
-          budgetItem: {
-            select: {
-              id: true,
-              description: true,
-              division: true,
-              allocatedBudget: true,
-              utilizedBudget: true,
-              currency: true,
-            },
-          },
-        },
-      });
-
-      res.json(updated);
+      res.json({ success: true, data: approvals });
     } catch (error) {
-      console.error("Error submitting requisition:", error);
       res.status(500).json({ error: "Internal server error" });
     }
   }
