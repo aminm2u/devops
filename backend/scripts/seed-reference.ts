@@ -121,6 +121,12 @@ const referenceDataGroups: Record<string, { value: string; label: string; sortOr
     { value: "cash", label: "Cash", sortOrder: 3 },
     { value: "online", label: "Online Payment", sortOrder: 4 },
   ],
+  timesheet_category: [
+    { value: "project", label: "Project", sortOrder: 1 },
+    { value: "management", label: "Management", sortOrder: 2 },
+    { value: "programme", label: "Programme", sortOrder: 3 },
+    { value: "others", label: "Others", sortOrder: 4 },
+  ],
 };
 
 const numberConfigs = [

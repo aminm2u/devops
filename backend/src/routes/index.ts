@@ -22,6 +22,7 @@ import budgetRoutes from "./budget.routes.js";
 import requisitionRoutes from "./requisition.routes.js";
 import helpdeskRoutes from "./helpdesk.routes.js";
 import taskRoutes from "./task.routes.js";
+import timesheetRoutes from "./timesheet.routes.js";
 import referenceRoutes from "./reference.routes.js";
 import vendorRoutes from "./vendor.routes.js";
 import rfqRoutes from "./rfq.routes.js";
@@ -65,6 +66,7 @@ router.use("/payments", paymentRoutes);
 router.use("/internal-projects", internalProjectRoutes);
 router.use("/helpdesk", helpdeskRoutes);
 router.use("/tasks", taskRoutes);
+router.use("/timesheet", timesheetRoutes);
 router.use("/references", referenceRoutes);
 
 export default router;

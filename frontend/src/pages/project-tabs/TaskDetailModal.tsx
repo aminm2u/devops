@@ -17,13 +17,14 @@ import { DatePicker } from '@/components/ui/date-picker';
 import apiClient from '@/api/client';
 import toast from 'react-hot-toast';
 import { useSocket } from '@/hooks/useSocket';
+import { SubtaskChecklist } from '@/components/tasks/SubtaskChecklist';
 
 interface TaskDetailModalProps {
   taskId: number | null;
   open: boolean;
   onClose: () => void;
   onDelete: (taskId: number) => void;
-  members: any[];
+  members?: any[];
 }
 
 export function TaskDetailModal({ taskId, open, onClose, onDelete, members }: TaskDetailModalProps) {
@@ -39,12 +40,16 @@ export function TaskDetailModal({ taskId, open, onClose, onDelete, members }: Ta
   const [editingDueDate, setEditingDueDate] = useState(false);
   const [dueDateValue, setDueDateValue] = useState('');
   const [activityOpen, setActivityOpen] = useState(false);
+  // Self-fetched project members when used outside ProjectDetailPage (e.g. calendar)
+  const [fetchedMembers, setFetchedMembers] = useState<any[]>([]);
   const commentsEndRef = useRef<HTMLDivElement>(null);
   const { socket } = useSocket();
 
-  const assigneeOptions: Option[] = members.map((m: any) => ({
+  const effectiveMembers = members && members.length > 0 ? members : fetchedMembers;
+
+  const assigneeOptions: Option[] = effectiveMembers.map((m: any) => ({
     label: m.user.name,
-    value: String(m.userId),
+    value: String(m.userId ?? m.id),
   }));
 
   useEffect(() => {
@@ -93,6 +98,16 @@ export function TaskDetailModal({ taskId, open, onClose, onDelete, members }: Ta
       const data = res.data.data;
       setTask(data);
       setSelectedAssignees((data.assignees || []).map(String));
+
+      // Outside ProjectDetailPage no members prop is passed — fetch the project team
+      if ((!members || members.length === 0) && data.projectId) {
+        try {
+          const projRes = await apiClient.get(`/projects/${data.projectId}`);
+          setFetchedMembers(projRes.data.data?.teamAssignments || []);
+        } catch {
+          setFetchedMembers([]);
+        }
+      }
     } catch (err) {
       toast.error('Failed to load task');
     } finally {
@@ -104,18 +119,35 @@ export function TaskDetailModal({ taskId, open, onClose, onDelete, members }: Ta
     if (!comment.trim() || !taskId) return;
     try {
       setSendingComment(true);
-      const res = await apiClient.post(`/tasks/${taskId}/comments`, {
-        content: comment,
-        workingHours: workingHours ? parseFloat(workingHours) : null,
-      });
-      setTask((prev: any) => ({
-        ...prev,
-        comments: [...(prev?.comments || []), res.data.data],
-      }));
+      const hours = workingHours ? Math.round(parseFloat(workingHours) * 4) / 4 : 0;
+
+      if (hours > 0) {
+        // Shared work log — same TimeEntry record as the Timesheet page
+        const res = await apiClient.post('/timesheet/entries', {
+          workDate: new Date().toISOString().split('T')[0],
+          hours,
+          description: comment.trim(),
+          taskId,
+        });
+        setTask((prev: any) => ({
+          ...prev,
+          timeEntries: [...(prev?.timeEntries || []), res.data.data],
+        }));
+        toast.success('Work logged');
+      } else {
+        // Text-only update — plain comment, no hours
+        const res = await apiClient.post(`/tasks/${taskId}/comments`, {
+          content: comment.trim(),
+        });
+        setTask((prev: any) => ({
+          ...prev,
+          comments: [...(prev?.comments || []), res.data.data],
+        }));
+      }
       setComment('');
       setWorkingHours('');
     } catch (err) {
-      toast.error('Failed to add comment');
+      toast.error('Failed to log work');
     } finally {
       setSendingComment(false);
     }
@@ -193,6 +225,14 @@ export function TaskDetailModal({ taskId, open, onClose, onDelete, members }: Ta
         return <><strong>{userName}</strong> unassigned <strong>{d.assigneeName}</strong></>;
       case 'updated':
         return <><strong>{userName}</strong> updated {d.fields?.join(', ')}</>;
+      case 'work_logged':
+        return <><strong>{userName}</strong> logged <strong>{d.hours}h</strong> of work{d.subtaskId ? ' on a subtask' : ''}: <em className="text-muted-foreground">"{d.description}"</em></>;
+      case 'subtask_created':
+        return <><strong>{userName}</strong> added subtask <strong>{d.title}</strong></>;
+      case 'subtask_updated':
+        return <><strong>{userName}</strong> updated subtask <strong>{d.title}</strong></>;
+      case 'subtask_deleted':
+        return <><strong>{userName}</strong> deleted subtask <strong>{d.title}</strong></>;
       default:
         return <><strong>{userName}</strong> performed an action</>;
     }
@@ -205,6 +245,14 @@ export function TaskDetailModal({ taskId, open, onClose, onDelete, members }: Ta
     });
     (task?.comments || []).forEach((c: any) => {
       items.push({ type: 'comment', data: c, time: new Date(c.createdAt) });
+    });
+    // Shared work log entries (from Log Work or the Timesheet page)
+    (task?.timeEntries || []).forEach((e: any) => {
+      items.push({
+        type: 'work',
+        data: e,
+        time: new Date(e.createdAt || e.workDate),
+      });
     });
     items.sort((a, b) => a.time.getTime() - b.time.getTime());
     return items;
@@ -220,9 +268,13 @@ export function TaskDetailModal({ taskId, open, onClose, onDelete, members }: Ta
         (c: any) => c.userId === a.id
       );
       const commentCount = userComments.length;
-      const totalHoursLogged = userComments.reduce(
-        (sum: number, c: any) => sum + (parseFloat(c.workingHours) || 0), 0
+      // Shared work log (TimeEntry) + legacy comment workingHours
+      const userEntries = (task.timeEntries || []).filter(
+        (e: any) => e.userId === a.id
       );
+      const totalHoursLogged =
+        userEntries.reduce((sum: number, e: any) => sum + (parseFloat(e.hours) || 0), 0) +
+        userComments.reduce((sum: number, c: any) => sum + (parseFloat(c.workingHours) || 0), 0);
       const assignedAt = assignActivities.length > 0 ? new Date(assignActivities[0].createdAt) : null;
       const hoursActive = assignedAt
         ? Math.round((Date.now() - assignedAt.getTime()) / (1000 * 60 * 60))
@@ -370,6 +422,17 @@ export function TaskDetailModal({ taskId, open, onClose, onDelete, members }: Ta
 
                 <Separator />
 
+                {/* Subtasks (2-level checklist) */}
+                <SubtaskChecklist
+                  taskId={task.id}
+                  subtasks={task.subtasks || []}
+                  members={effectiveMembers}
+                  timeEntries={task.timeEntries || []}
+                  onUpdate={fetchTask}
+                />
+
+                <Separator />
+
                 {/* Activity Timeline */}
                 <div>
                   <button
@@ -403,7 +466,7 @@ export function TaskDetailModal({ taskId, open, onClose, onDelete, members }: Ta
                             <span className="text-[11px] text-muted-foreground/70">
                               {item.time.toLocaleString()}
                             </span>
-                            {item.type === 'comment' ? (
+                            {item.type === 'comment' || item.type === 'work' ? (
                               <div className="mt-1.5">
                                 <div className="flex items-center gap-2 mb-1">
                                   <Avatar className="h-5 w-5">
@@ -412,15 +475,20 @@ export function TaskDetailModal({ taskId, open, onClose, onDelete, members }: Ta
                                     </AvatarFallback>
                                   </Avatar>
                                   <span className="text-xs font-semibold">{item.data.user?.name}</span>
-                                  {item.data.workingHours ? (
+                                  {(item.type === 'work' || item.data.workingHours) ? (
                                     <Badge variant="outline" className="text-[9px] px-1.5 py-0 gap-1 border-primary/30 text-primary">
                                       <Timer className="h-2.5 w-2.5" />
-                                      {item.data.workingHours}h
+                                      {item.type === 'work' ? Number(item.data.hours) : item.data.workingHours}h
                                     </Badge>
                                   ) : null}
+                                  {item.type === 'work' && item.data.subtaskId && (
+                                    <Badge variant="outline" className="text-[9px] px-1.5 py-0">
+                                      subtask
+                                    </Badge>
+                                  )}
                                 </div>
                                 <div className="bg-card border border-border/50 rounded-lg p-2.5 text-sm whitespace-pre-wrap">
-                                  {item.data.content}
+                                  {item.type === 'work' ? item.data.description : item.data.content}
                                 </div>
                               </div>
                             ) : (

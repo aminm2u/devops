@@ -248,7 +248,10 @@ router.get(
             orderBy: { position: 'asc' }
           },
           tasks: {
-            orderBy: { position: 'asc' }
+            orderBy: { position: 'asc' },
+            include: {
+              subtasks: { select: { id: true, status: true } }
+            }
           },
           infrastructureNodes: {
             where: { deletedAt: null },

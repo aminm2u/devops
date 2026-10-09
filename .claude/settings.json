@@ -1,12 +1,12 @@
 {
   "env": {
-    "ANTHROPIC_BASE_URL": "https://ai-hub.aicampus.my",
-    "ANTHROPIC_API_KEY": "sk-hub-EPYhFIZINyc83ASfR6ObEDwIJIaL5-VvQR4WkOidiuA",
+    "ANTHROPIC_BASE_URL": "https://ai-hub.my",
+    "ANTHROPIC_API_KEY": "sk-hub-4I3vOoAzYULjqXsMEnKTK6jPAXsN68H4yaMIxN6WICY",
     "CLAUDE_CODE_USE_OAUTH": "false",
-    "ANTHROPIC_MODEL": "glm-4.7",
-    "ANTHROPIC_DEFAULT_SONNET_MODEL": "glm-4.7",
-    "ANTHROPIC_DEFAULT_OPUS_MODEL": "glm-4.7",
-    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "glm-4.7"
+    "ANTHROPIC_MODEL": "mimo-v2.6-pro",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "mimo-v2.6-pro",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "mimo-v2.6-pro",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "mimo-v2.6-pro"
   },
   "permissions": {
     "allow": [

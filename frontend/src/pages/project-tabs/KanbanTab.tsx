@@ -11,7 +11,7 @@ import { Label } from '@/components/ui/label';
 import { MultiSelect, Option } from '@/components/ui/multi-select';
 import { StatusBadge } from '@/components/ui/status-badge';
 import { DatePicker } from '@/components/ui/date-picker';
-import { Calendar, Plus, Trash2 } from 'lucide-react';
+import { Calendar, Plus, Trash2, CheckSquare } from 'lucide-react';
 import apiClient from '@/api/client';
 import toast from 'react-hot-toast';
 import { TaskDetailModal } from './TaskDetailModal';
@@ -229,12 +229,20 @@ export function KanbanTab({ project, refetch }: { project: any, refetch: () => v
                                   <div className="flex items-center justify-between mt-2.5">
                                     <StatusBadge domain="helpdeskPriority" value={task.priority} />
 
-                                    {task.dueDate && (
-                                      <div className="flex items-center text-xs text-muted-foreground">
-                                        <Calendar className="w-3 h-3 mr-1" />
-                                        {new Date(task.dueDate).toLocaleDateString()}
-                                      </div>
-                                    )}
+                                    <div className="flex items-center gap-2">
+                                      {(task.subtasks || []).length > 0 && (
+                                        <div className="flex items-center text-xs text-muted-foreground">
+                                          <CheckSquare className="w-3 h-3 mr-1" />
+                                          {task.subtasks.filter((s: any) => s.status === 'done').length}/{task.subtasks.length}
+                                        </div>
+                                      )}
+                                      {task.dueDate && (
+                                        <div className="flex items-center text-xs text-muted-foreground">
+                                          <Calendar className="w-3 h-3 mr-1" />
+                                          {new Date(task.dueDate).toLocaleDateString()}
+                                        </div>
+                                      )}
+                                    </div>
                                   </div>
                                 </CardContent>
                               </Card>

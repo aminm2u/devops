@@ -8,7 +8,11 @@ type ActivityAction =
   | "assigned"
   | "unassigned"
   | "updated"
-  | "deleted";
+  | "deleted"
+  | "work_logged"
+  | "subtask_created"
+  | "subtask_updated"
+  | "subtask_deleted";
 
 interface LogTaskActivityParams {
   taskId: number;

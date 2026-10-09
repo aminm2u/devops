@@ -49,6 +49,7 @@ model ProjectRole {
   id          Int              @id @default(autoincrement())
   name        String
   assignments TeamAssignment[]
+  timesheetRules TimesheetApprovalRule[]
 
   @@map("project_roles")
 }
@@ -102,6 +103,11 @@ model User {
   helpdeskAttachments        HelpdeskAttachment[]
   taskComments               TaskComment[]
   taskActivities             TaskActivity[]
+  // Timesheet & work log relations
+  timeEntries                TimeEntry[]                   @relation("TimeEntryUser")
+  timesheetToApprove         TimeEntry[]                   @relation("TimesheetApprover")
+  subtasksAssigned           TaskSubtask[]                 @relation("SubtaskAssignee")
+  timesheetRuleUsers         TimesheetApprovalRuleUser[]
   // Procurement relations
   createdRequisitions        RequisitionForm[]     @relation("RequisitionCreatedBy")
   approvalAssignments        ApprovalAssignment[]
@@ -364,6 +370,7 @@ model Project {
   helpdeskTickets       HelpdeskTicket[]
   tasks                 ProjectTask[] // Kanban tasks
   taskColumns           TaskColumn[] // Kanban columns
+  timeEntries           TimeEntry[] // Work log entries
   // Procurement relations
   purchaseOrders        PurchaseOrder[]
   directPurchases       DirectPurchase[]
@@ -458,6 +465,8 @@ model ProjectTask {
   column     TaskColumn     @relation(fields: [columnId], references: [id], onDelete: Cascade)
   comments   TaskComment[]
   activities TaskActivity[]
+  subtasks   TaskSubtask[]
+  timeEntries TimeEntry[]
 
   @@map("project_tasks")
 }
@@ -490,6 +499,111 @@ model TaskActivity {
 
   @@index([taskId])
   @@map("task_activities")
+}
+
+// ==================== Subtasks (2-level: task -> subtask) ====================
+
+model TaskSubtask {
+  id          Int       @id @default(autoincrement())
+  taskId      Int       @map("task_id")
+  title       String
+  description String?   @db.Text
+  assigneeId  Int?      @map("assignee_id")
+  dueDate     DateTime? @map("due_date")
+  status      String    @default("open") // open | in_progress | done
+  position    Int       @default(0)
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  task        ProjectTask  @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  assignee    User?        @relation("SubtaskAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  timeEntries TimeEntry[]
+
+  @@index([taskId])
+  @@index([assigneeId])
+  @@index([status])
+  @@map("task_subtasks")
+}
+
+// ==================== Timesheet & Shared Work Log ====================
+
+model TimeEntry {
+  id             Int       @id @default(autoincrement())
+  userId         Int       @map("user_id") // who performed the work
+  workDate       DateTime  @db.Date // calendar day of work (no TZ math)
+  hours          Decimal   @db.Decimal(5, 2) // 0.25-24, step 0.25
+  description    String    @db.Text
+
+  // Linkage: ad-hoc (both null) | task | task+subtask
+  taskId         Int?      @map("task_id") // parent ProjectTask
+  subtaskId      Int?      @map("subtask_id")
+  projectId      Int?      @map("project_id") // denormalized from task for routing/reports
+
+  categoryValue  String    @map("category_value") // ReferenceData group timesheet_category
+  status         String    @default("draft") // draft | submitted | approved | rejected
+  submittedAt    DateTime? @map("submitted_at")
+  decidedAt      DateTime? @map("decided_at")
+  approverId     Int?      @map("approver_id") // resolved at submit; snapshot
+  approvalRuleId Int?      @map("approval_rule_id")
+  rejectReason   String?   @map("reject_reason") @db.Text
+
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+  deletedAt      DateTime? @map("deleted_at")
+
+  user         User                    @relation("TimeEntryUser", fields: [userId], references: [id], onDelete: Cascade)
+  task         ProjectTask?            @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  subtask      TaskSubtask?            @relation(fields: [subtaskId], references: [id], onDelete: Cascade)
+  project      Project?                @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  approver     User?                   @relation("TimesheetApprover", fields: [approverId], references: [id], onDelete: SetNull)
+  approvalRule TimesheetApprovalRule?  @relation(fields: [approvalRuleId], references: [id], onDelete: SetNull)
+
+  @@index([userId, workDate])
+  @@index([taskId])
+  @@index([subtaskId])
+  @@index([projectId])
+  @@index([status])
+  @@index([approverId, status])
+  @@map("time_entries")
+}
+
+// ==================== Timesheet Approval Rules ====================
+
+model TimesheetApprovalRule {
+  id            Int       @id @default(autoincrement())
+  name          String
+  isActive      Boolean   @default(true)
+  sortOrder     Int       @default(0) // first match wins
+
+  // Matchers (null = wildcard)
+  categoryValue String?   @map("category_value") // timesheet_category value
+  projectId     Int?      @map("project_id")
+
+  // Approver resolver
+  approverType  String    @map("approver_type") // project_role | users | direct_manager | app_role
+  projectRoleId Int?      @map("project_role_id")
+  appRole       String?   @map("app_role")
+
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  projectRole   ProjectRole? @relation(fields: [projectRoleId], references: [id], onDelete: SetNull)
+  users         TimesheetApprovalRuleUser[]
+  timeEntries   TimeEntry[]
+
+  @@index([isActive, sortOrder])
+  @@map("timesheet_approval_rules")
+}
+
+model TimesheetApprovalRuleUser {
+  ruleId Int
+  userId Int
+
+  rule TimesheetApprovalRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+  user User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([ruleId, userId])
+  @@map("timesheet_approval_rule_users")
 }
 
 model InfrastructureNode {

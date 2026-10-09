@@ -38,6 +38,10 @@ import { HelpdeskTicketDetailPage } from '@/pages/HelpdeskTicketDetailPage';
 import { HelpdeskReportPage } from '@/pages/HelpdeskReportPage';
 import { HelpdeskManagePage } from '@/pages/HelpdeskManagePage';
 import { ComponentShowcasePage } from '@/pages/ComponentShowcasePage';
+import { TimesheetPage } from '@/pages/TimesheetPage';
+import { TimesheetApprovalsPage } from '@/pages/TimesheetApprovalsPage';
+import { CalendarPage } from '@/pages/CalendarPage';
+import { TimesheetSettingsPage } from '@/pages/TimesheetSettingsPage';
 import { useAuth } from '@/hooks/useAuth';
 import { Loader2 } from 'lucide-react';
 import { LoadingScreen } from '@/components/loading/LoadingScreen';
@@ -190,7 +194,11 @@ function App() {
         <Route path="assets" element={<AssetListPage />} />
         <Route path="payments" element={<PaymentListPage />} />
         <Route path="internal-projects" element={<InternalProjectListPage />} />
+        <Route path="my-work/calendar" element={<CalendarPage />} />
+        <Route path="my-work/timesheet" element={<TimesheetPage />} />
+        <Route path="my-work/approvals" element={<TimesheetApprovalsPage />} />
         <Route path="settings/procurement" element={<AdminRoute><ProcurementSettingsPage /></AdminRoute>} />
+        <Route path="settings/timesheet" element={<AdminRoute><TimesheetSettingsPage /></AdminRoute>} />
         <Route path="helpdesk" element={<HelpdeskPage />} />
         <Route path="helpdesk/manage" element={<AdminRoute><HelpdeskManagePage /></AdminRoute>} />
         <Route path="helpdesk/reports" element={<HelpdeskReportPage />} />
