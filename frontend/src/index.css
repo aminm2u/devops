@@ -124,3 +124,146 @@
   background-size: 200% 100%;
   animation: shimmer 2s infinite;
 }
+
+/* Tiptap rich text editor content styles */
+.rich-text-editor .ProseMirror {
+  outline: none;
+  min-height: inherit;
+}
+
+.rich-text-editor .ProseMirror p {
+  margin: 0.5rem 0;
+  line-height: 1.5;
+}
+
+.rich-text-editor .ProseMirror p:first-child {
+  margin-top: 0;
+}
+
+.rich-text-editor .ProseMirror p:last-child {
+  margin-bottom: 0;
+}
+
+.rich-text-editor .ProseMirror h2 {
+  font-size: 1.25rem;
+  font-weight: 700;
+  margin: 1rem 0 0.5rem;
+  line-height: 1.3;
+}
+
+.rich-text-editor .ProseMirror h3 {
+  font-size: 1.1rem;
+  font-weight: 600;
+  margin: 0.75rem 0 0.375rem;
+  line-height: 1.3;
+}
+
+.rich-text-editor .ProseMirror ul {
+  list-style-type: disc;
+  padding-left: 1.25rem;
+  margin: 0.5rem 0;
+}
+
+.rich-text-editor .ProseMirror ol {
+  list-style-type: decimal;
+  padding-left: 1.25rem;
+  margin: 0.5rem 0;
+}
+
+.rich-text-editor .ProseMirror li {
+  margin: 0.25rem 0;
+}
+
+.rich-text-editor .ProseMirror a {
+  color: hsl(var(--primary));
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.rich-text-editor .ProseMirror p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  color: hsl(var(--muted-foreground));
+  pointer-events: none;
+  height: 0;
+}
+
+/* react-big-calendar — shadcn token re-skin (theme-aware) */
+.my-calendar .rbc-calendar {
+  color: hsl(var(--foreground));
+  font-family: inherit;
+}
+.my-calendar .rbc-header {
+  padding: 8px 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: hsl(var(--muted-foreground));
+  border-bottom: 1px solid hsl(var(--border));
+}
+.my-calendar .rbc-month-row,
+.my-calendar .rbc-day-bg,
+.my-calendar .rbc-off-range-bg {
+  background: transparent;
+  border-color: hsl(var(--border));
+}
+.my-calendar .rbc-day-bg {
+  background: hsl(var(--card));
+}
+.my-calendar .rbc-off-range-bg {
+  background: hsl(var(--muted) / 0.4);
+}
+.my-calendar .rbc-today {
+  background: hsl(var(--primary) / 0.08);
+}
+.my-calendar .rbc-month-view {
+  border: 1px solid hsl(var(--border));
+  border-radius: 8px;
+  overflow: hidden;
+}
+.my-calendar .rbc-date-cell {
+  padding: 4px 6px;
+  font-size: 12px;
+  color: hsl(var(--muted-foreground));
+}
+.my-calendar .rbc-date-cell.rbc-now {
+  font-weight: 700;
+  color: hsl(var(--primary));
+}
+.my-calendar .rbc-show-more {
+  color: hsl(var(--primary));
+  font-size: 11px;
+}
+.my-calendar .rbc-time-view,
+.my-calendar .rbc-time-header {
+  border-color: hsl(var(--border));
+}
+.my-calendar .rbc-time-header-content,
+.my-calendar .rbc-time-content,
+.my-calendar .rbc-time-slot,
+.my-calendar .rbc-timeslot-group {
+  border-color: hsl(var(--border));
+}
+.my-calendar .rbc-time-gutter,
+.my-calendar .rbc-time-header-gutter {
+  background: hsl(var(--muted) / 0.3);
+}
+.my-calendar .rbc-label {
+  color: hsl(var(--muted-foreground));
+  font-size: 11px;
+}
+.my-calendar .rbc-event,
+.my-calendar .rbc-event:focus {
+  outline: none;
+}
+.my-calendar .rbc-row-segment {
+  padding: 1px 2px;
+}
+.my-calendar .rbc-toolbar {
+  display: none; /* custom CalendarToolbar replaces it */
+}
+.my-calendar .rbc-off-range {
+  color: hsl(var(--muted-foreground) / 0.5);
+}
+.dark .my-calendar .rbc-day-bg {
+  background: hsl(var(--card));
+}

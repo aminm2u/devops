@@ -21,10 +21,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import {
-  Dialog,
-  DialogContent,
-} from '@/components/ui/dialog';
 import { projectsApi } from '@/api/projects';
 import { useAuth } from '@/hooks/useAuth';
 import { ProjectForm } from '@/components/projects/ProjectForm';
@@ -274,17 +270,15 @@ export function ProjectsPage() {
       )}
 
       {/* Create Project Dialog */}
-      <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
-        <DialogContent className="max-w-4xl">
-          <ProjectForm
-            onSubmit={async (data) => {
-              await createMutation.mutateAsync(data);
-            }}
-            onCancel={() => setShowCreateDialog(false)}
-            isLoading={createMutation.isPending}
-          />
-        </DialogContent>
-      </Dialog>
+      <ProjectForm
+        open={showCreateDialog}
+        onOpenChange={setShowCreateDialog}
+        onSubmit={async (data) => {
+          await createMutation.mutateAsync(data);
+        }}
+        onCancel={() => setShowCreateDialog(false)}
+        isLoading={createMutation.isPending}
+      />
     </div>
   );
 }

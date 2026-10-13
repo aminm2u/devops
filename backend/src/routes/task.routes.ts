@@ -39,6 +39,18 @@ const createColumnSchema = z.object({
   name: z.string().min(1).max(255),
 });
 
+// Subtasks are checklist-style children of a task (2-level limit: no sub-subtasks)
+const createSubtaskSchema = z.object({
+  title: z.string().min(1).max(255),
+  description: z.string().optional().nullable(),
+  assigneeId: z.number().int().positive().optional().nullable(),
+  dueDate: z.string().datetime().optional().nullable(),
+  status: z.enum(["open", "in_progress", "done"]).optional(),
+  position: z.number().int().min(0).optional(),
+});
+
+const updateSubtaskSchema = createSubtaskSchema.partial();
+
 // POST /api/tasks/columns
 router.post(
   "/columns",
@@ -274,6 +286,19 @@ router.get(
             },
             orderBy: { createdAt: "asc" },
           },
+          subtasks: {
+            include: {
+              assignee: { select: { id: true, name: true, email: true } },
+            },
+            orderBy: { position: "asc" },
+          },
+          timeEntries: {
+            where: { deletedAt: null },
+            include: {
+              user: { select: { id: true, name: true, email: true } },
+            },
+            orderBy: [{ workDate: "asc" }, { createdAt: "asc" }],
+          },
           column: { select: { id: true, name: true } },
         },
       });
@@ -312,6 +337,14 @@ router.post(
         return res.status(400).json({ error: "Content is required" });
       }
 
+      // Hours are recorded as TimeEntry work logs (POST /api/timesheet/entries),
+      // no longer as comment fields — reject to keep one source of truth.
+      if (workingHours !== undefined && workingHours !== null) {
+        return res.status(400).json({
+          error: "workingHours is no longer accepted on comments. Log work via /api/timesheet/entries.",
+        });
+      }
+
       const task = await prisma.projectTask.findUnique({
         where: { id: parseInt(id) },
       });
@@ -322,7 +355,6 @@ router.post(
           taskId: parseInt(id),
           userId: req.user!.id,
           content: content.trim(),
-          workingHours: workingHours ? parseFloat(workingHours) : null,
         },
         include: {
           user: { select: { id: true, name: true, email: true } },
@@ -340,6 +372,135 @@ router.post(
       try { getIO().emit('task-comment', { taskId: parseInt(id), comment }); } catch (e) {}
 
       res.status(201).json({ success: true, data: comment });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+// POST /api/tasks/:id/subtasks
+router.post(
+  "/:id/subtasks",
+  authenticate,
+  validate(createSubtaskSchema),
+  async (req: RequestWithUser, res: Response, next: NextFunction) => {
+    try {
+      const taskId = parseInt(req.params.id, 10);
+      const task = await prisma.projectTask.findUnique({ where: { id: taskId } });
+      if (!task) throw new NotFoundError("Task not found");
+
+      const data = req.body;
+      const last = await prisma.taskSubtask.findFirst({
+        where: { taskId },
+        orderBy: { position: "desc" },
+      });
+
+      const subtask = await prisma.taskSubtask.create({
+        data: {
+          taskId,
+          title: data.title,
+          description: data.description,
+          assigneeId: data.assigneeId ?? null,
+          dueDate: data.dueDate ? new Date(data.dueDate) : null,
+          status: data.status || "open",
+          position: data.position ?? (last ? last.position + 1 : 0),
+        },
+        include: {
+          assignee: { select: { id: true, name: true, email: true } },
+        },
+      });
+
+      await logTaskActivity({
+        taskId,
+        userId: req.user!.id,
+        action: "subtask_created",
+        details: { subtaskId: subtask.id, title: subtask.title },
+      });
+
+      try { getIO().emit('task-updated', { taskId }); } catch (e) {}
+
+      res.status(201).json({ success: true, data: subtask });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+// PUT /api/tasks/:id/subtasks/:subtaskId
+router.put(
+  "/:id/subtasks/:subtaskId",
+  authenticate,
+  validate(updateSubtaskSchema),
+  async (req: RequestWithUser, res: Response, next: NextFunction) => {
+    try {
+      const taskId = parseInt(req.params.id, 10);
+      const subtaskId = parseInt(req.params.subtaskId, 10);
+
+      const existing = await prisma.taskSubtask.findUnique({ where: { id: subtaskId } });
+      if (!existing || existing.taskId !== taskId) throw new NotFoundError("Subtask not found");
+
+      const data = req.body;
+      const subtask = await prisma.taskSubtask.update({
+        where: { id: subtaskId },
+        data: {
+          ...(data.title !== undefined && { title: data.title }),
+          ...(data.description !== undefined && { description: data.description }),
+          ...(data.assigneeId !== undefined && { assigneeId: data.assigneeId ?? null }),
+          ...(data.dueDate !== undefined && { dueDate: data.dueDate ? new Date(data.dueDate) : null }),
+          ...(data.status !== undefined && { status: data.status }),
+          ...(data.position !== undefined && { position: data.position }),
+        },
+        include: {
+          assignee: { select: { id: true, name: true, email: true } },
+        },
+      });
+
+      await logTaskActivity({
+        taskId,
+        userId: req.user!.id,
+        action: "subtask_updated",
+        details: {
+          subtaskId,
+          title: subtask.title,
+          fields: Object.keys(data),
+          status: subtask.status,
+        },
+      });
+
+      try { getIO().emit('task-updated', { taskId }); } catch (e) {}
+
+      res.status(200).json({ success: true, data: subtask });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+// DELETE /api/tasks/:id/subtasks/:subtaskId
+router.delete(
+  "/:id/subtasks/:subtaskId",
+  authenticate,
+  async (req: RequestWithUser, res: Response, next: NextFunction) => {
+    try {
+      const taskId = parseInt(req.params.id, 10);
+      const subtaskId = parseInt(req.params.subtaskId, 10);
+
+      const existing = await prisma.taskSubtask.findUnique({ where: { id: subtaskId } });
+      if (!existing || existing.taskId !== taskId) throw new NotFoundError("Subtask not found");
+
+      // Cascade removes the subtask's time entries (hours are removed with it)
+      await prisma.taskSubtask.delete({ where: { id: subtaskId } });
+
+      await logTaskActivity({
+        taskId,
+        userId: req.user!.id,
+        action: "subtask_deleted",
+        details: { subtaskId, title: existing.title },
+      });
+
+      try { getIO().emit('task-updated', { taskId }); } catch (e) {}
+
+      res.status(204).send();
     } catch (error) {
       next(error);
     }

@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react';
-import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Card, CardContent } from '@/components/ui/card';
+import { UserAvatar } from '@/components/ui/UserAvatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent } from '@/components/ui/dialog';
+import { FormDialog } from '@/components/ui/form-dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import { UserPlus, UserCheck } from 'lucide-react';
@@ -93,11 +93,7 @@ export function TeamTab({ project, refetch }: { project: any, refetch: () => voi
         {members.map((assignment: any) => (
           <Card key={assignment.id}>
             <CardContent className="p-6 flex items-center gap-4">
-              <Avatar className="h-12 w-12">
-                <AvatarFallback className="bg-blue-100 text-blue-700">
-                  {assignment.user.name.substring(0, 2).toUpperCase()}
-                </AvatarFallback>
-              </Avatar>
+              <UserAvatar user={assignment.user} size="lg" className="h-12 w-12" />
               <div>
                 <h3 className="font-semibold">{assignment.user.name}</h3>
                 <p className="text-sm text-slate-500">{assignment.user.email}</p>
@@ -115,49 +111,43 @@ export function TeamTab({ project, refetch }: { project: any, refetch: () => voi
         )}
       </div>
 
-      <Dialog open={inviteOpen} onOpenChange={setInviteOpen}>
-        <DialogContent className="p-0">
-          <Card className="pt-8 border-0 shadow-none">
-            <CardHeader>
-              <CardTitle>Invite Team Member</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
-                <div className="space-y-2">
-                  <Label>Select User</Label>
-                  <Select value={selectedUser} onValueChange={setSelectedUser}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Choose a user..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {users.map(u => (
-                        <SelectItem key={u.id} value={String(u.id)}>{u.name} ({u.email})</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>Project Role</Label>
-                  <Select value={selectedRole} onValueChange={setSelectedRole}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Assign a role..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {roles.map(r => (
-                        <SelectItem key={r.id} value={String(r.id)}>{r.name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="flex justify-end gap-3 pt-2">
-                  <Button variant="outline" onClick={() => setInviteOpen(false)}>Cancel</Button>
-                  <Button onClick={handleInvite} disabled={loading}>Invite</Button>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </DialogContent>
-      </Dialog>
+      <FormDialog
+        open={inviteOpen}
+        onOpenChange={setInviteOpen}
+        title="Invite Team Member"
+        description="Add an existing user to this project team"
+        maxWidth="sm"
+        onSubmit={handleInvite}
+        submitLabel="Invite"
+        isSubmitting={loading}
+      >
+        <div className="space-y-2">
+          <Label>Select User</Label>
+          <Select value={selectedUser} onValueChange={setSelectedUser}>
+            <SelectTrigger>
+              <SelectValue placeholder="Choose a user..." />
+            </SelectTrigger>
+            <SelectContent>
+              {users.map(u => (
+                <SelectItem key={u.id} value={String(u.id)}>{u.name} ({u.email})</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-2">
+          <Label>Project Role</Label>
+          <Select value={selectedRole} onValueChange={setSelectedRole}>
+            <SelectTrigger>
+              <SelectValue placeholder="Assign a role..." />
+            </SelectTrigger>
+            <SelectContent>
+              {roles.map(r => (
+                <SelectItem key={r.id} value={String(r.id)}>{r.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </FormDialog>
     </div>
   );
 }

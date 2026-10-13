@@ -17,6 +17,17 @@ import {
   FileText,
   ClipboardCheck,
   Headphones,
+  ShoppingCart,
+  Package,
+  Truck,
+  CreditCard,
+  Building2,
+  ClipboardList,
+  MessageSquare,
+  SlidersHorizontal,
+  Shapes,
+  CalendarDays,
+  Timer,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/hooks/useAuth';
@@ -32,6 +43,7 @@ interface NavItem {
   name: string;
   href: string;
   icon: React.ElementType;
+  adminOnly?: boolean;
 }
 
 interface NavGroup {
@@ -44,6 +56,15 @@ const navigation: NavGroup[] = [
     label: 'Main',
     items: [
       { name: 'Dashboard', href: '/', icon: LayoutDashboard },
+    ],
+  },
+    {
+    label: 'My Work Portal',
+    items: [
+      { name: 'Calendar', href: '/my-work/calendar', icon: CalendarDays },
+      { name: 'Timesheet', href: '/my-work/timesheet', icon: Timer },
+      { name: 'Approvals', href: '/my-work/approvals', icon: ClipboardCheck },
+      { name: 'Timesheet Settings', href: '/settings/timesheet', icon: SlidersHorizontal, adminOnly: true },
     ],
   },
   {
@@ -62,18 +83,27 @@ const navigation: NavGroup[] = [
     ],
   },
   {
-    label: 'Finance',
+    label: 'Finance & Procurement',
     items: [
       { name: 'Budget Control', href: '/budget', icon: DollarSign },
       { name: 'Requisitions', href: '/requisitions', icon: FileText },
-      { name: 'Requisition Manage', href: '/requisitions/manage', icon: ClipboardCheck },
+      { name: 'Requisition Approve', href: '/requisitions/manage', icon: ClipboardCheck },
+      { name: 'RFQ / Tendering', href: '/rfq', icon: MessageSquare },
+      { name: 'Vendors', href: '/vendors', icon: Building2 },
+      { name: 'Purchase Orders', href: '/purchase-orders', icon: ShoppingCart },
+      { name: 'Direct Purchases', href: '/direct-purchases', icon: Package },
+      { name: 'Goods Receipts', href: '/goods-receipts', icon: Truck },
+      { name: 'Payments', href: '/payments', icon: CreditCard },
+      { name: 'Assets', href: '/assets', icon: ClipboardList },
+      { name: 'Internal Projects', href: '/internal-projects', icon: FolderKanban },
+      { name: 'Procurement Settings', href: '/settings/procurement', icon: SlidersHorizontal, adminOnly: true },
     ],
   },
   {
     label: 'Helpdesk',
     items: [
       { name: 'Tickets', href: '/helpdesk', icon: Headphones },
-      { name: 'Manage', href: '/helpdesk/manage', icon: Settings },
+      { name: 'Manage', href: '/helpdesk/manage', icon: Settings, adminOnly: true },
       { name: 'Reports', href: '/helpdesk/reports', icon: BarChart3 },
     ],
   },
@@ -89,12 +119,32 @@ const navigation: NavGroup[] = [
     label: 'Account',
     items: [
       { name: 'Notifications', href: '/notifications', icon: Bell },
-      { name: 'Users', href: '/admin/users', icon: Users },
+      { name: 'Users', href: '/admin/users', icon: Users, adminOnly: true },
       { name: 'Profile', href: '/profile', icon: User },
       { name: 'Settings', href: '/settings', icon: Settings },
     ],
   },
+  {
+    label: 'Developer',
+    items: [{ name: 'Components', href: '/components', icon: Shapes }],
+  },
 ];
+
+/**
+ * A nav item is active only when its href is the longest matching prefix of
+ * the current path — so "/requisitions/manage" activates "Requisition Approve"
+ * without also activating "Requisitions".
+ */
+function isNavActive(pathname: string, href: string, allHrefs: string[]): boolean {
+  const isPrefix = (candidate: string) =>
+    candidate === '/'
+      ? pathname === '/'
+      : pathname === candidate || pathname.startsWith(candidate + '/');
+  if (!isPrefix(href)) return false;
+  return !allHrefs.some(
+    (other) => other !== href && other.length > href.length && isPrefix(other)
+  );
+}
 
 export function Sidebar({ isCollapsed }: SidebarProps) {
   const location = useLocation();
@@ -102,6 +152,7 @@ export function Sidebar({ isCollapsed }: SidebarProps) {
   const { effectiveTheme } = useTheme();
   const isAdmin = user?.roles?.some((r: any) => ['super-admin', 'devops-admin'].includes(r.name));
   const logo = effectiveTheme === 'dark' ? mwpLogoWhite : mwpLogoBlack;
+  const allHrefs = navigation.flatMap((g) => g.items.map((i) => i.href));
 
   return (
     <aside
@@ -140,12 +191,11 @@ export function Sidebar({ isCollapsed }: SidebarProps) {
             <div className="space-y-0.5">
               {group.items
                 .filter((item) => {
-                  if ((item.name === 'Manage' || item.name === 'Users') && !isAdmin) return false;
+                  if (item.adminOnly && !isAdmin) return false;
                   return true;
                 })
                 .map((item) => {
-                  const isActive = location.pathname === item.href ||
-                    (item.href !== '/' && location.pathname.startsWith(item.href));
+                  const isActive = isNavActive(location.pathname, item.href, allHrefs);
                   return (
                     <Link
                       key={item.name}

@@ -1,114 +1,155 @@
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import * as React from 'react';
+import { CalendarDays, ChevronsUpDown, X } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Calendar } from '@/components/ui/calendar';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { cn, toLocalDateStr } from '@/lib/utils';
 
-interface DatePickerProps {
-  value: string; // YYYY-MM-DD format
+export interface DatePickerProps {
+  /** 'YYYY-MM-DD' local date, or '' when unset. */
+  value: string;
   onChange: (value: string) => void;
+  /** Trigger placeholder when value is empty. */
   placeholder?: string;
+  disabled?: boolean;
+  className?: string;
 }
 
-const months = [
-  'January', 'February', 'March', 'April', 'May', 'June',
-  'July', 'August', 'September', 'October', 'November', 'December'
+const MONTHS = [
+  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
 ];
 
-function getDaysInMonth(year: number, month: number): number {
-  return new Date(year, month, 0).getDate();
+/** "13 Oct 2026" — matches DateTimePicker's trigger display. */
+function formatDisplay(dateStr: string): string {
+  if (!dateStr) return '';
+  const [y, m, d] = dateStr.split('-').map(Number);
+  if (!y || !m || !d) return dateStr;
+  const monthName = MONTHS[m - 1] || '';
+  return `${d} ${monthName} ${y}`;
 }
 
-export function DatePicker({ value, onChange, placeholder }: DatePickerProps) {
-  // Parse current value
-  const date = value ? new Date(value + 'T00:00:00') : null;
-  const day = date ? date.getDate() : null;
-  const month = date ? date.getMonth() + 1 : null;
-  const year = date ? date.getFullYear() : null;
+/**
+ * Calendar-popover date picker.
+ *
+ * Keeps the long-standing string contract (`value` is `YYYY-MM-DD`, `''` = unset)
+ * so existing call sites need no changes. Timesheet-safe: parses at local
+ * midnight and emits via `toLocalDateStr`, never `toISOString()`.
+ */
+export function DatePicker({
+  value,
+  onChange,
+  placeholder = 'Select date',
+  disabled = false,
+  className,
+}: DatePickerProps) {
+  const [open, setOpen] = React.useState(false);
 
-  const currentYear = new Date().getFullYear();
-  const years = Array.from({ length: 11 }, (_, i) => currentYear - 5 + i);
-  const daysInMonth = month && year ? getDaysInMonth(year, month) : 31;
-  const days = Array.from({ length: daysInMonth }, (_, i) => i + 1);
+  // Local-midnight Date, so the right cell highlights in every timezone.
+  const selected = React.useMemo(
+    () => (value ? new Date(value + 'T00:00:00') : undefined),
+    [value]
+  );
 
-  const handleChange = (type: 'day' | 'month' | 'year', val: string) => {
-    let newDay = day;
-    let newMonth = month;
-    let newYear = year;
-
-    if (type === 'day') newDay = parseInt(val);
-    if (type === 'month') newMonth = parseInt(val);
-    if (type === 'year') newYear = parseInt(val);
-
-    // Only call onChange when all three values are selected
-    if (newDay && newMonth && newYear) {
-      // Adjust day if it exceeds days in new month
-      const maxDays = getDaysInMonth(newYear, newMonth);
-      if (newDay > maxDays) newDay = maxDays;
-      const dateStr = `${newYear}-${String(newMonth).padStart(2, '0')}-${String(newDay).padStart(2, '0')}`;
-      onChange(dateStr);
-    }
+  const handleSelect = (day: Date | undefined) => {
+    // DayPicker toggles to undefined when re-clicking the selected day —
+    // treat that as a no-op so an accidental double-click can't wipe the field.
+    if (!day) return;
+    onChange(toLocalDateStr(day));
+    setOpen(false);
   };
 
-  const handleClear = () => {
+  const handleToday = () => {
+    onChange(toLocalDateStr(new Date()));
+    setOpen(false);
+  };
+
+  const handleClear = (e?: React.MouseEvent | React.KeyboardEvent) => {
+    e?.stopPropagation();
     onChange('');
+    setOpen(false);
   };
 
   return (
-    <div className="flex gap-2">
-      <Select
-        value={day ? String(day) : undefined}
-        onValueChange={(v) => handleChange('day', v)}
-      >
-        <SelectTrigger className="w-[70px]">
-          <SelectValue placeholder="dd" />
-        </SelectTrigger>
-        <SelectContent>
-          {days.map((d) => (
-            <SelectItem key={d} value={String(d)}>
-              {String(d).padStart(2, '0')}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-
-      <Select
-        value={month ? String(month) : undefined}
-        onValueChange={(v) => handleChange('month', v)}
-      >
-        <SelectTrigger className="w-[110px]">
-          <SelectValue placeholder="mm" />
-        </SelectTrigger>
-        <SelectContent>
-          {months.map((m, i) => (
-            <SelectItem key={i + 1} value={String(i + 1)}>
-              {m}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-
-      <Select
-        value={year ? String(year) : undefined}
-        onValueChange={(v) => handleChange('year', v)}
-      >
-        <SelectTrigger className="w-[85px]">
-          <SelectValue placeholder="yyyy" />
-        </SelectTrigger>
-        <SelectContent>
-          {years.map((y) => (
-            <SelectItem key={y} value={String(y)}>
-              {y}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-
-      {value && (
-        <button
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
           type="button"
-          onClick={handleClear}
-          className="px-2 text-sm text-muted-foreground hover:text-foreground"
+          variant="outline"
+          disabled={disabled}
+          role="combobox"
+          aria-expanded={open}
+          className={cn(
+            // `flex` (not the Button default `inline-flex`): this trigger is a
+            // form control and must be block-level like Input/SelectTrigger.
+            // Inline-level boxes don't collapse margins with the Label above,
+            // so inline-flex would double the label-to-control gap.
+            'flex h-9 w-full justify-between px-3 text-left font-normal',
+            !value && 'text-muted-foreground',
+            className
+          )}
         >
-          ✕
-        </button>
-      )}
-    </div>
+          <div className="flex items-center gap-2 truncate">
+            <CalendarDays className="h-4 w-4 shrink-0 text-muted-foreground" />
+            <span className="truncate">
+              {value ? formatDisplay(value) : placeholder}
+            </span>
+          </div>
+          <div className="flex items-center gap-1 shrink-0 ml-2">
+            {value && !disabled && (
+              <span
+                role="button"
+                tabIndex={0}
+                onClick={handleClear}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    handleClear(e);
+                  }
+                }}
+                className="rounded-sm p-0.5 text-muted-foreground hover:text-foreground hover:bg-accent cursor-pointer"
+                title="Clear date"
+              >
+                <X className="h-3.5 w-3.5" />
+              </span>
+            )}
+            <ChevronsUpDown className="h-4 w-4 opacity-50" />
+          </div>
+        </Button>
+      </PopoverTrigger>
+
+      {/* p-0: the Calendar owns its own p-3, so this would otherwise double up */}
+      <PopoverContent className="z-50 w-[300px] p-0" align="start">
+        <Calendar
+          mode="single"
+          selected={selected}
+          onSelect={handleSelect}
+          defaultMonth={selected ?? new Date()}
+          disabled={disabled}
+        />
+        <div className="flex items-center justify-between pt-2 mt-2 border-t border-border/60">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={handleToday}
+            className="h-7 px-2 text-xs text-primary hover:text-primary"
+          >
+            Today
+          </Button>
+          {value && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={handleClear}
+              className="h-7 px-2 text-xs text-muted-foreground hover:text-destructive"
+            >
+              Clear
+            </Button>
+          )}
+        </div>
+      </PopoverContent>
+    </Popover>
   );
 }

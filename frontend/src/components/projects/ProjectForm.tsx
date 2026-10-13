@@ -1,9 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Loader2 } from 'lucide-react';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import {
   Select,
   SelectContent,
@@ -11,12 +8,17 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { FormDialog } from '@/components/ui/form-dialog';
+import { FormField } from '@/components/ui/form-field';
+import { FormGrid } from '@/components/ui/form-grid';
 import { UserAvatar } from '@/components/ui/UserAvatar';
 import { useAuth } from '@/hooks/useAuth';
 import apiClient from '@/api/client';
 import type { Project } from '@/types';
 
 interface ProjectFormProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
   project?: Project;
   onSubmit: (data: Partial<Project>) => Promise<void>;
   onCancel: () => void;
@@ -29,7 +31,7 @@ interface UserOption {
   email: string;
 }
 
-export function ProjectForm({ project, onSubmit, onCancel, isLoading }: ProjectFormProps) {
+export function ProjectForm({ open, onOpenChange, project, onSubmit, onCancel, isLoading }: ProjectFormProps) {
   const { user } = useAuth();
   const [name, setName] = useState(project?.name || '');
   const [description, setDescription] = useState(project?.description || '');
@@ -91,142 +93,113 @@ export function ProjectForm({ project, onSubmit, onCancel, isLoading }: ProjectF
   };
 
   return (
-    <Card className='pt-8'>
-      <CardHeader>
-        <CardTitle>{project ? 'Edit Project' : 'Create New Project'}</CardTitle>
-        <CardDescription>
-          {project ? 'Update project details' : 'Fill in the details to create a new project'}
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="name">Project Name *</Label>
-            <Input
-              id="name"
-              value={name}
-              onChange={(e) => {
-                setName(e.target.value);
-                if (errors.name) setErrors({ ...errors, name: '' });
-              }}
-              placeholder="e.g., E-Commerce Platform"
-              className={errors.name ? 'border-destructive' : ''}
-            />
-            {errors.name && <p className="text-xs text-destructive">{errors.name}</p>}
-          </div>
+    <FormDialog
+      open={open}
+      onOpenChange={onOpenChange}
+      title={project ? 'Edit Project' : 'Create New Project'}
+      description={project ? 'Update project details' : 'Fill in the details to create a new project'}
+      maxWidth="xl"
+      onSubmit={handleSubmit}
+      onCancel={onCancel}
+      submitLabel={project ? 'Update Project' : 'Create Project'}
+      isSubmitting={isLoading}
+    >
+      <FormField label="Project Name" htmlFor="name" required error={errors.name || undefined}>
+        <Input
+          id="name"
+          value={name}
+          onChange={(e) => {
+            setName(e.target.value);
+            if (errors.name) setErrors({ ...errors, name: '' });
+          }}
+          placeholder="e.g., E-Commerce Platform"
+          className={errors.name ? 'border-destructive' : ''}
+        />
+      </FormField>
 
-          <div className="space-y-2">
-            <Label htmlFor="description">Description</Label>
-            <textarea
-              id="description"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="Brief description of the project"
-              rows={3}
-              className="flex w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-            />
-          </div>
+      <FormField label="Description" htmlFor="description">
+        <Textarea
+          id="description"
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          placeholder="Brief description of the project"
+          rows={3}
+        />
+      </FormField>
 
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div className="space-y-2">
-              <Label>Status</Label>
-              <Select value={status} onValueChange={setStatus}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="planning">Planning</SelectItem>
-                  <SelectItem value="active">Active</SelectItem>
-                  <SelectItem value="inactive">Inactive</SelectItem>
-                  <SelectItem value="archived">Archived</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+      <FormGrid>
+        <FormField label="Status">
+          <Select value={status} onValueChange={(v) => setStatus(v as any)}>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="planning">Planning</SelectItem>
+              <SelectItem value="active">Active</SelectItem>
+              <SelectItem value="inactive">Inactive</SelectItem>
+              <SelectItem value="archived">Archived</SelectItem>
+            </SelectContent>
+          </Select>
+        </FormField>
 
-            <div className="space-y-2">
-              <Label>Priority</Label>
-              <Select value={priority} onValueChange={setPriority}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="low">Low</SelectItem>
-                  <SelectItem value="medium">Medium</SelectItem>
-                  <SelectItem value="high">High</SelectItem>
-                  <SelectItem value="critical">Critical</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
+        <FormField label="Priority">
+          <Select value={priority} onValueChange={(v) => setPriority(v as any)}>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="low">Low</SelectItem>
+              <SelectItem value="medium">Medium</SelectItem>
+              <SelectItem value="high">High</SelectItem>
+              <SelectItem value="critical">Critical</SelectItem>
+            </SelectContent>
+          </Select>
+        </FormField>
+      </FormGrid>
 
-          <div className="space-y-2">
-            <Label htmlFor="repo">Repository URL</Label>
-            <Input
-              id="repo"
-              value={repositoryUrl}
-              onChange={(e) => {
-                setRepositoryUrl(e.target.value);
-                if (errors.repositoryUrl) setErrors({ ...errors, repositoryUrl: '' });
-              }}
-              placeholder="https://github.com/org/repo"
-              className={errors.repositoryUrl ? 'border-destructive' : ''}
-            />
-            {errors.repositoryUrl && <p className="text-xs text-destructive">{errors.repositoryUrl}</p>}
-          </div>
+      <FormField label="Repository URL" htmlFor="repo" error={errors.repositoryUrl || undefined}>
+        <Input
+          id="repo"
+          value={repositoryUrl}
+          onChange={(e) => {
+            setRepositoryUrl(e.target.value);
+            if (errors.repositoryUrl) setErrors({ ...errors, repositoryUrl: '' });
+          }}
+          placeholder="https://github.com/org/repo"
+          className={errors.repositoryUrl ? 'border-destructive' : ''}
+        />
+      </FormField>
 
-          <div className="space-y-2">
-            <Label htmlFor="docs">Documentation URL</Label>
-            <Input
-              id="docs"
-              value={documentationUrl}
-              onChange={(e) => {
-                setDocumentationUrl(e.target.value);
-                if (errors.documentationUrl) setErrors({ ...errors, documentationUrl: '' });
-              }}
-              placeholder="https://docs.example.com"
-              className={errors.documentationUrl ? 'border-destructive' : ''}
-            />
-            {errors.documentationUrl && <p className="text-xs text-destructive">{errors.documentationUrl}</p>}
-          </div>
+      <FormField label="Documentation URL" htmlFor="docs" error={errors.documentationUrl || undefined}>
+        <Input
+          id="docs"
+          value={documentationUrl}
+          onChange={(e) => {
+            setDocumentationUrl(e.target.value);
+            if (errors.documentationUrl) setErrors({ ...errors, documentationUrl: '' });
+          }}
+          placeholder="https://docs.example.com"
+          className={errors.documentationUrl ? 'border-destructive' : ''}
+        />
+      </FormField>
 
-          <div className="space-y-2">
-            <Label>Project Owner</Label>
-            <Select value={ownerId} onValueChange={setOwnerId} disabled={loadingUsers}>
-              <SelectTrigger>
-                <SelectValue placeholder={loadingUsers ? "Loading users..." : "Select owner"} />
-              </SelectTrigger>
-              <SelectContent>
-                {users.map((u) => (
-                  <SelectItem key={u.id} value={u.id.toString()}>
-                    <div className="flex items-center gap-2">
-                      <UserAvatar user={u} size="sm" />
-                      <span>{u.name}</span>
-                    </div>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="flex justify-end gap-3 pt-2">
-            <Button type="button" variant="outline" onClick={onCancel}>
-              Cancel
-            </Button>
-            <Button type="submit" disabled={isLoading}>
-              {isLoading ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Saving...
-                </>
-              ) : project ? (
-                'Update Project'
-              ) : (
-                'Create Project'
-              )}
-            </Button>
-          </div>
-        </form>
-      </CardContent>
-    </Card>
+      <FormField label="Project Owner">
+        <Select value={ownerId} onValueChange={setOwnerId} disabled={loadingUsers}>
+          <SelectTrigger>
+            <SelectValue placeholder={loadingUsers ? "Loading users..." : "Select owner"} />
+          </SelectTrigger>
+          <SelectContent>
+            {users.map((u) => (
+              <SelectItem key={u.id} value={u.id.toString()}>
+                <div className="flex items-center gap-2">
+                  <UserAvatar user={u} size="sm" />
+                  <span>{u.name}</span>
+                </div>
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </FormField>
+    </FormDialog>
   );
 }

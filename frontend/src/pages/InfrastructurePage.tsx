@@ -13,7 +13,6 @@ import {
   Plus,
   Pencil,
   Trash2,
-  Loader2,
   Copy,
   Eye,
   EyeOff,
@@ -39,14 +38,8 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+import { FormDialog } from '@/components/ui/form-dialog';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Skeleton } from '@/components/ui/skeleton';
 import { UserAvatar } from '@/components/ui/UserAvatar';
 import apiClient from '@/api/client';
@@ -71,6 +64,7 @@ interface InfrastructureNode {
   password: string | null;
   createdAt: string;
   project?: { id: number; name: string; slug: string };
+  createdByUser?: { id: number; name: string; email: string } | null;
 }
 
 const nodeTypeIcons: Record<string, React.ReactNode> = {
@@ -105,15 +99,6 @@ function getProjectColor(name: string) {
     hash = name.charCodeAt(i) + ((hash << 5) - hash);
   }
   return projectColors[Math.abs(hash) % projectColors.length];
-}
-
-function ProjectBadge({ name }: { name: string }) {
-  const color = getProjectColor(name);
-  return (
-    <span className={cn('inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-medium', color.bg, color.text, color.border)}>
-      {name}
-    </span>
-  );
 }
 
 const emptyForm = {
@@ -699,139 +684,121 @@ export function InfrastructurePage() {
       )}
 
       {/* Create / Edit Dialog */}
-      <Dialog open={showFormDialog} onOpenChange={setShowFormDialog}>
-        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto py-4 px-6">
-          <DialogHeader>
-            <DialogTitle>{editingNode ? 'Edit Node' : 'Add Node'}</DialogTitle>
-            <DialogDescription>
-              {editingNode ? 'Update the infrastructure node details' : 'Add a new infrastructure node'}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="node-project">Project *</Label>
-              <Select value={String(form.projectId)} onValueChange={(v) => setForm({ ...form, projectId: Number(v) })}>
-                <SelectTrigger id="node-project"><SelectValue placeholder="Select project" /></SelectTrigger>
-                <SelectContent>
-                  {projects.map((p: any) => (
-                    <SelectItem key={p.id} value={String(p.id)}>{p.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="node-name">Name *</Label>
-                <Input id="node-name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g., Web Server 1" />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="node-hostname">Hostname *</Label>
-                <Input id="node-hostname" value={form.hostname} onChange={(e) => setForm({ ...form, hostname: e.target.value })} placeholder="e.g., web01.prod" />
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="node-type">Type</Label>
-                <Select value={form.type} onValueChange={(v) => setForm({ ...form, type: v })}>
-                  <SelectTrigger id="node-type"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="server">Server</SelectItem>
-                    <SelectItem value="database">Database</SelectItem>
-                    <SelectItem value="load-balancer">Load Balancer</SelectItem>
-                    <SelectItem value="cache">Cache</SelectItem>
-                    <SelectItem value="container">Container</SelectItem>
-                    <SelectItem value="kubernetes">Kubernetes</SelectItem>
-                    <SelectItem value="network">Network</SelectItem>
-                    <SelectItem value="storage">Storage</SelectItem>
-                    <SelectItem value="queue">Queue</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="node-status">Status</Label>
-                <Select value={form.status} onValueChange={(v) => setForm({ ...form, status: v })}>
-                  <SelectTrigger id="node-status"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="healthy">Healthy</SelectItem>
-                    <SelectItem value="warning">Warning</SelectItem>
-                    <SelectItem value="critical">Critical</SelectItem>
-                    <SelectItem value="offline">Offline</SelectItem>
-                    <SelectItem value="maintenance">Maintenance</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="node-ip">IP Address</Label>
-              <Input id="node-ip" value={form.ipAddress} onChange={(e) => setForm({ ...form, ipAddress: e.target.value })} placeholder="e.g., 10.0.1.10" />
-            </div>
-            <div className="grid grid-cols-3 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="node-cpu">CPU Cores</Label>
-                <Input id="node-cpu" type="number" value={form.cpuCores} onChange={(e) => setForm({ ...form, cpuCores: e.target.value })} placeholder="8" />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="node-memory">Memory (GB)</Label>
-                <Input id="node-memory" type="number" value={form.memoryGb} onChange={(e) => setForm({ ...form, memoryGb: e.target.value })} placeholder="32" />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="node-storage">Storage (GB)</Label>
-                <Input id="node-storage" type="number" value={form.storageGb} onChange={(e) => setForm({ ...form, storageGb: e.target.value })} placeholder="500" />
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="node-os">Operating System</Label>
-                <Input id="node-os" value={form.operatingSystem} onChange={(e) => setForm({ ...form, operatingSystem: e.target.value })} placeholder="e.g., Ubuntu 22.04" />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="node-provider">Provider</Label>
-                <Input id="node-provider" value={form.provider} onChange={(e) => setForm({ ...form, provider: e.target.value })} placeholder="e.g., AWS, GCP" />
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="node-username">Username</Label>
-                <Input id="node-username" value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })} placeholder="e.g., root, admin" />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="node-password">Password</Label>
-                <Input id="node-password" type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} placeholder="••••••••" />
-              </div>
-            </div>
+      <FormDialog
+        open={showFormDialog}
+        onOpenChange={(open) => {
+          setShowFormDialog(open);
+          if (!open) setEditingNode(null);
+        }}
+        title={editingNode ? 'Edit Node' : 'Add Node'}
+        description={editingNode ? 'Update the infrastructure node details' : 'Add a new infrastructure node'}
+        maxWidth="lg"
+        onSubmit={handleFormSubmit}
+        submitLabel={editingNode ? 'Update' : 'Create'}
+        isSubmitting={isPending}
+      >
+        <div className="space-y-2">
+          <Label htmlFor="node-project">Project *</Label>
+          <Select value={String(form.projectId)} onValueChange={(v) => setForm({ ...form, projectId: Number(v) })}>
+            <SelectTrigger id="node-project"><SelectValue placeholder="Select project" /></SelectTrigger>
+            <SelectContent>
+              {projects.map((p: any) => (
+                <SelectItem key={p.id} value={String(p.id)}>{p.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <Label htmlFor="node-name">Name *</Label>
+            <Input id="node-name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g., Web Server 1" />
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => { setShowFormDialog(false); setEditingNode(null); }}>Cancel</Button>
-            <Button onClick={handleFormSubmit} disabled={isPending}>
-              {isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              {editingNode ? 'Update' : 'Create'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          <div className="space-y-2">
+            <Label htmlFor="node-hostname">Hostname *</Label>
+            <Input id="node-hostname" value={form.hostname} onChange={(e) => setForm({ ...form, hostname: e.target.value })} placeholder="e.g., web01.prod" />
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <Label htmlFor="node-type">Type</Label>
+            <Select value={form.type} onValueChange={(v) => setForm({ ...form, type: v })}>
+              <SelectTrigger id="node-type"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="server">Server</SelectItem>
+                <SelectItem value="database">Database</SelectItem>
+                <SelectItem value="load-balancer">Load Balancer</SelectItem>
+                <SelectItem value="cache">Cache</SelectItem>
+                <SelectItem value="container">Container</SelectItem>
+                <SelectItem value="kubernetes">Kubernetes</SelectItem>
+                <SelectItem value="network">Network</SelectItem>
+                <SelectItem value="storage">Storage</SelectItem>
+                <SelectItem value="queue">Queue</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="node-status">Status</Label>
+            <Select value={form.status} onValueChange={(v) => setForm({ ...form, status: v })}>
+              <SelectTrigger id="node-status"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="healthy">Healthy</SelectItem>
+                <SelectItem value="warning">Warning</SelectItem>
+                <SelectItem value="critical">Critical</SelectItem>
+                <SelectItem value="offline">Offline</SelectItem>
+                <SelectItem value="maintenance">Maintenance</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="node-ip">IP Address</Label>
+          <Input id="node-ip" value={form.ipAddress} onChange={(e) => setForm({ ...form, ipAddress: e.target.value })} placeholder="e.g., 10.0.1.10" />
+        </div>
+        <div className="grid grid-cols-3 gap-4">
+          <div className="space-y-2">
+            <Label htmlFor="node-cpu">CPU Cores</Label>
+            <Input id="node-cpu" type="number" value={form.cpuCores} onChange={(e) => setForm({ ...form, cpuCores: e.target.value })} placeholder="8" />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="node-memory">Memory (GB)</Label>
+            <Input id="node-memory" type="number" value={form.memoryGb} onChange={(e) => setForm({ ...form, memoryGb: e.target.value })} placeholder="32" />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="node-storage">Storage (GB)</Label>
+            <Input id="node-storage" type="number" value={form.storageGb} onChange={(e) => setForm({ ...form, storageGb: e.target.value })} placeholder="500" />
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <Label htmlFor="node-os">Operating System</Label>
+            <Input id="node-os" value={form.operatingSystem} onChange={(e) => setForm({ ...form, operatingSystem: e.target.value })} placeholder="e.g., Ubuntu 22.04" />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="node-provider">Provider</Label>
+            <Input id="node-provider" value={form.provider} onChange={(e) => setForm({ ...form, provider: e.target.value })} placeholder="e.g., AWS, GCP" />
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <Label htmlFor="node-username">Username</Label>
+            <Input id="node-username" value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })} placeholder="e.g., root, admin" />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="node-password">Password</Label>
+            <Input id="node-password" type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} placeholder="••••••••" />
+          </div>
+        </div>
+      </FormDialog>
 
       {/* Delete Dialog */}
-      <Dialog open={!!showDeleteDialog} onOpenChange={() => setShowDeleteDialog(null)}>
-        <DialogContent className='pt-12 pb-6 px-6'>
-          <DialogHeader>
-            <DialogTitle>Delete Node</DialogTitle>
-            <DialogDescription>
-              Are you sure you want to delete "{showDeleteDialog?.name}"? This action cannot be undone.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter className='mt-4'>
-            <Button variant="outline" onClick={() => setShowDeleteDialog(null)}>Cancel</Button>
-            <Button
-              variant="destructive"
-              onClick={() => showDeleteDialog && deleteMutation.mutate(showDeleteDialog.id)}
-              disabled={deleteMutation.isPending}
-            >
-              {deleteMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Delete
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <ConfirmDialog
+        open={!!showDeleteDialog}
+        onOpenChange={() => setShowDeleteDialog(null)}
+        title="Delete Node"
+        description={`Are you sure you want to delete "${showDeleteDialog?.name}"? This action cannot be undone.`}
+        onConfirm={() => showDeleteDialog && deleteMutation.mutate(showDeleteDialog.id)}
+        isConfirming={deleteMutation.isPending}
+      />
     </div>
   );
 }

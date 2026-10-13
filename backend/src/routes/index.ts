@@ -22,7 +22,16 @@ import budgetRoutes from "./budget.routes.js";
 import requisitionRoutes from "./requisition.routes.js";
 import helpdeskRoutes from "./helpdesk.routes.js";
 import taskRoutes from "./task.routes.js";
+import timesheetRoutes from "./timesheet.routes.js";
 import referenceRoutes from "./reference.routes.js";
+import vendorRoutes from "./vendor.routes.js";
+import rfqRoutes from "./rfq.routes.js";
+import purchaseOrderRoutes from "./purchaseOrder.routes.js";
+import directPurchaseRoutes from "./directPurchase.routes.js";
+import goodsReceiptRoutes from "./goodsReceipt.routes.js";
+import assetRoutes from "./asset.routes.js";
+import paymentRoutes from "./payment.routes.js";
+import internalProjectRoutes from "./internalProject.routes.js";
 
 const router = Router();
 
@@ -47,8 +56,17 @@ router.use("/upload", uploadRoutes);
 router.use("/notifications", notificationRoutes);
 router.use("/budget", budgetRoutes);
 router.use("/requisitions", requisitionRoutes);
+router.use("/vendors", vendorRoutes);
+router.use("/rfq", rfqRoutes);
+router.use("/purchase-orders", purchaseOrderRoutes);
+router.use("/direct-purchases", directPurchaseRoutes);
+router.use("/goods-receipts", goodsReceiptRoutes);
+router.use("/assets", assetRoutes);
+router.use("/payments", paymentRoutes);
+router.use("/internal-projects", internalProjectRoutes);
 router.use("/helpdesk", helpdeskRoutes);
 router.use("/tasks", taskRoutes);
+router.use("/timesheet", timesheetRoutes);
 router.use("/references", referenceRoutes);
 
 export default router;

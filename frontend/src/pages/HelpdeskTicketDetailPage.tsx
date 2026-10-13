@@ -9,17 +9,14 @@ import {
   MessageSquare,
   Send,
   User,
-  Tag,
   AlertTriangle,
   Star,
   Lock,
-  Unlock,
   Trash2,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import {
@@ -32,31 +29,13 @@ import {
 import { Separator } from '@/components/ui/separator';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Skeleton } from '@/components/ui/skeleton';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from '@/components/ui/alert-dialog';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+import { FormDialog } from '@/components/ui/form-dialog';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import apiClient from '@/api/client';
 import {
   HelpdeskTicket,
   HelpdeskTicketStatus,
   HelpdeskTicketPriority,
-  HelpdeskComment,
 } from '@/types';
 import { formatDate, formatRelativeTime } from '@/lib/utils';
 import toast from 'react-hot-toast';
@@ -97,7 +76,7 @@ function getStatusBadge(status: HelpdeskTicketStatus) {
 function getPriorityBadge(priority: HelpdeskTicketPriority) {
   switch (priority) {
     case 'urgent':
-      return <Badge className="bg-red-600 text-white">Urgent</Badge>;
+      return <Badge className="bg-red-600 text-gray-100">Urgent</Badge>;
     case 'high':
       return <Badge className="bg-red-100 text-red-700">High</Badge>;
     case 'medium':
@@ -123,6 +102,7 @@ export function HelpdeskTicketDetailPage() {
   const [isInternal, setIsInternal] = useState(false);
   const [showAssignDialog, setShowAssignDialog] = useState(false);
   const [showSatisfactionDialog, setShowSatisfactionDialog] = useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
 
   useEffect(() => {
     if (socket && isConnected && id) {
@@ -168,15 +148,6 @@ export function HelpdeskTicketDetailPage() {
     },
   });
 
-  // Fetch categories
-  const { data: categoriesData } = useQuery({
-    queryKey: ['helpdesk-categories'],
-    queryFn: async () => {
-      const res = await apiClient.get('/helpdesk/categories');
-      return res.data;
-    },
-  });
-
   // Mutations
   const updateStatusMutation = useMutation({
     mutationFn: async ({ status, resolutionNotes }: { status: HelpdeskTicketStatus; resolutionNotes?: string }) => {
@@ -207,20 +178,6 @@ export function HelpdeskTicketDetailPage() {
     },
     onError: (err: any) => {
       toast.error(err.response?.data?.error || 'Failed to assign ticket');
-    },
-  });
-
-  const updateTicketMutation = useMutation({
-    mutationFn: async (data: any) => {
-      const res = await apiClient.put(`/helpdesk/tickets/${id}`, data);
-      return res.data;
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['helpdesk-ticket', id] });
-      toast.success('Ticket updated');
-    },
-    onError: (err: any) => {
-      toast.error(err.response?.data?.error || 'Failed to update ticket');
     },
   });
 
@@ -273,7 +230,6 @@ export function HelpdeskTicketDetailPage() {
 
   const ticket: HelpdeskTicket | undefined = ticketData?.data;
   const users = usersData?.data || [];
-  const categories = categoriesData?.data || [];
 
   if (isLoading) {
     return (
@@ -471,7 +427,7 @@ export function HelpdeskTicketDetailPage() {
                   )}
                   {['in_progress', 'awaiting_response'].includes(ticket.status) && (
                     <Button
-                      className="w-full justify-start bg-green-600 hover:bg-green-700 text-white"
+                      className="w-full justify-start bg-green-600 hover:bg-green-700 text-gray-100"
                       onClick={() => updateStatusMutation.mutate({ status: 'resolved' })}
                     >
                       <CheckCircle className="h-4 w-4 mr-2" />
@@ -523,31 +479,14 @@ export function HelpdeskTicketDetailPage() {
                 </Button>
               )}
               {canDelete && (
-              <AlertDialog>
-                <AlertDialogTrigger asChild>
-                  <Button className="w-full justify-start" variant="outline">
-                    <Trash2 className="h-4 w-4 mr-2 text-red-600" />
-                    <span className="text-red-600">Delete Ticket</span>
-                  </Button>
-                </AlertDialogTrigger>
-                <AlertDialogContent>
-                  <AlertDialogHeader>
-                    <AlertDialogTitle>Delete Ticket</AlertDialogTitle>
-                    <AlertDialogDescription>
-                      Are you sure you want to delete this ticket? This action cannot be undone.
-                    </AlertDialogDescription>
-                  </AlertDialogHeader>
-                  <AlertDialogFooter>
-                    <AlertDialogCancel>Cancel</AlertDialogCancel>
-                    <AlertDialogAction
-                      onClick={() => deleteMutation.mutate()}
-                      className="bg-red-600 hover:bg-red-700"
-                    >
-                      Delete
-                    </AlertDialogAction>
-                  </AlertDialogFooter>
-                </AlertDialogContent>
-              </AlertDialog>
+              <Button
+                className="w-full justify-start"
+                variant="outline"
+                onClick={() => setDeleteConfirmOpen(true)}
+              >
+                <Trash2 className="h-4 w-4 mr-2 text-red-600" />
+                <span className="text-red-600">Delete Ticket</span>
+              </Button>
               )}
             </CardContent>
           </Card>
@@ -711,6 +650,15 @@ export function HelpdeskTicketDetailPage() {
           isSubmitting={satisfactionMutation.isPending}
         />
       )}
+
+      {/* Delete Confirmation Dialog */}
+      <ConfirmDialog
+        open={deleteConfirmOpen}
+        onOpenChange={setDeleteConfirmOpen}
+        title="Delete Ticket"
+        description="Are you sure you want to delete this ticket? This action cannot be undone."
+        onConfirm={() => deleteMutation.mutate()}
+      />
     </div>
   );
 }
@@ -735,13 +683,18 @@ function AssignDialog({
   );
 
   return (
-    <Dialog open onOpenChange={onClose}>
-      <DialogContent className="max-w-md">
-        <DialogHeader>
-          <DialogTitle>Assign Ticket</DialogTitle>
-          <DialogDescription>Select a technician to assign this ticket to</DialogDescription>
-        </DialogHeader>
-
+    <FormDialog
+      open
+      onOpenChange={onClose}
+      title="Assign Ticket"
+      description="Select a technician to assign this ticket to"
+      maxWidth="sm"
+      onSubmit={() => onAssign(selectedUserId === 'unassigned' ? null : Number(selectedUserId))}
+      submitLabel="Assign"
+      isSubmitting={isSubmitting}
+    >
+      <div className="space-y-2">
+        <Label>Assignee</Label>
         <Select
           value={selectedUserId}
           onValueChange={(v) => setSelectedUserId(v)}
@@ -758,19 +711,8 @@ function AssignDialog({
             ))}
           </SelectContent>
         </Select>
-
-        <DialogFooter>
-          <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button
-            onClick={() => onAssign(selectedUserId === 'unassigned' ? null : Number(selectedUserId))}
-            disabled={isSubmitting}
-          >
-            {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            Assign
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+      </div>
+    </FormDialog>
   );
 }
 
@@ -789,54 +731,45 @@ function SatisfactionDialog({
   const [feedback, setFeedback] = useState('');
 
   return (
-    <Dialog open onOpenChange={onClose}>
-      <DialogContent className="max-w-md">
-        <DialogHeader>
-          <DialogTitle>Rate This Resolution</DialogTitle>
-          <DialogDescription>
-            How satisfied are you with the resolution of this ticket?
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="flex justify-center gap-2 py-4">
-          {[1, 2, 3, 4, 5].map((star) => (
-            <button
-              key={star}
-              onClick={() => setRating(star)}
-              className="p-1"
-            >
-              <Star
-                className={`h-8 w-8 ${
-                  star <= rating
-                    ? 'text-yellow-500 fill-yellow-500'
-                    : 'text-gray-300'
-                }`}
-              />
-            </button>
-          ))}
-        </div>
-
-        <div className="space-y-2">
-          <Label>Feedback (Optional)</Label>
-          <Textarea
-            value={feedback}
-            onChange={(e) => setFeedback(e.target.value)}
-            placeholder="Share your experience..."
-            rows={3}
-          />
-        </div>
-
-        <DialogFooter>
-          <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button
-            onClick={() => onSubmit({ satisfaction: rating, feedback: feedback || undefined })}
-            disabled={rating === 0 || isSubmitting}
+    <FormDialog
+      open
+      onOpenChange={onClose}
+      title="Rate This Resolution"
+      description="How satisfied are you with the resolution of this ticket?"
+      maxWidth="sm"
+      onSubmit={() => onSubmit({ satisfaction: rating, feedback: feedback || undefined })}
+      submitLabel="Submit"
+      submitDisabled={rating === 0}
+      isSubmitting={isSubmitting}
+    >
+      <div className="flex justify-center gap-2 py-2">
+        {[1, 2, 3, 4, 5].map((star) => (
+          <button
+            key={star}
+            type="button"
+            onClick={() => setRating(star)}
+            className="p-1"
           >
-            {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            Submit
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+            <Star
+              className={`h-8 w-8 ${
+                star <= rating
+                  ? 'text-yellow-500 fill-yellow-500'
+                  : 'text-gray-300'
+              }`}
+            />
+          </button>
+        ))}
+      </div>
+
+      <div className="space-y-2">
+        <Label>Feedback (Optional)</Label>
+        <Textarea
+          value={feedback}
+          onChange={(e) => setFeedback(e.target.value)}
+          placeholder="Share your experience..."
+          rows={3}
+        />
+      </div>
+    </FormDialog>
   );
 }

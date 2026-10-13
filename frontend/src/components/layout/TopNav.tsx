@@ -90,9 +90,7 @@ export function TopNav({ onMobileMenuToggle, isSidebarCollapsed, onSidebarToggle
       </div>
 
       {/* Notification Bell */}
-      <Button variant="ghost" size="icon" className="h-9 w-9">
-        <NotificationBell />
-      </Button>
+      <NotificationBell />
 
       {/* Theme Toggle */}
       <Button variant="ghost" size="icon" className="h-9 w-9" onClick={toggleTheme} aria-label="Toggle theme">

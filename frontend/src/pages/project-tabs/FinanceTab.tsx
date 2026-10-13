@@ -1,13 +1,16 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent } from '@/components/ui/dialog';
+import { FormDialog } from '@/components/ui/form-dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { PlusCircle, Receipt } from 'lucide-react';
+import { ProgressBar } from '@/components/progress-bar';
+import { StatusBadge } from '@/components/ui/status-badge';
+import { RequisitionFormDialog } from '@/components/requisitions/RequisitionFormDialog';
 import { useAuth } from '@/hooks/useAuth';
 import apiClient from '@/api/client';
 import toast from 'react-hot-toast';
@@ -16,6 +19,7 @@ export function FinanceTab({ project, refetch }: { project: any, refetch: () => 
   const { user } = useAuth();
   const budgets = project.budgetItems || [];
   const requisitions = project.requisitionForms || [];
+  const purchaseOrders = project.purchaseOrders || [];
 
   const [budgetOpen, setBudgetOpen] = useState(false);
   const [reqOpen, setReqOpen] = useState(false);
@@ -25,13 +29,6 @@ export function FinanceTab({ project, refetch }: { project: any, refetch: () => 
     category: '',
     description: '',
     allocatedBudget: '',
-  });
-
-  const [reqForm, setReqForm] = useState({
-    division: '',
-    purpose: '',
-    totalEstimatedCost: '',
-    budgetItemId: '',
   });
 
   const handleAddBudget = async () => {
@@ -56,23 +53,12 @@ export function FinanceTab({ project, refetch }: { project: any, refetch: () => 
     }
   };
 
-  const handleAddReq = async () => {
-    if (!reqForm.division || !reqForm.totalEstimatedCost) return;
+  const handleCreateReq = async (data: any) => {
     try {
       setLoading(true);
-      await apiClient.post('/requisitions', {
-        projectId: project.id,
-        division: reqForm.division,
-        purpose: reqForm.purpose,
-        totalEstimatedCost: parseFloat(reqForm.totalEstimatedCost),
-        budgetItemId: reqForm.budgetItemId ? parseInt(reqForm.budgetItemId) : null,
-        status: 'draft',
-        requestedByName: user?.name,
-        items: [{ description: reqForm.purpose || 'General', qty: 1, unitPrice: parseFloat(reqForm.totalEstimatedCost) }],
-      });
+      await apiClient.post('/requisitions', data);
       toast.success('Requisition drafted successfully');
       setReqOpen(false);
-      setReqForm({ division: '', purpose: '', totalEstimatedCost: '', budgetItemId: '' });
       refetch();
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Failed to request items');
@@ -80,6 +66,13 @@ export function FinanceTab({ project, refetch }: { project: any, refetch: () => 
       setLoading(false);
     }
   };
+
+  const activeOrders = purchaseOrders.filter((po: any) => po.status !== 'cancelled');
+  const poTotal = activeOrders.reduce((sum: number, po: any) => sum + Number(po.grandTotal || 0), 0);
+  const poPaid = purchaseOrders.reduce((sum: number, po: any) =>
+    sum + (po.payments || [])
+      .filter((p: any) => p.status === 'paid')
+      .reduce((ps: number, p: any) => ps + Number(p.totalPaid || 0), 0), 0);
 
   return (
     <div className="space-y-6">
@@ -104,6 +97,7 @@ export function FinanceTab({ project, refetch }: { project: any, refetch: () => 
                   <TableRow>
                     <TableHead>Category</TableHead>
                     <TableHead>Allocated</TableHead>
+                    <TableHead className="min-w-[120px]">Utilization</TableHead>
                     <TableHead>Status</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -112,6 +106,14 @@ export function FinanceTab({ project, refetch }: { project: any, refetch: () => 
                     <TableRow key={b.id}>
                       <TableCell className="font-medium">{b.category}</TableCell>
                       <TableCell>{Number(b.allocatedBudget).toLocaleString()}</TableCell>
+                      <TableCell>
+                        <ProgressBar
+                          value={Number(b.allocatedBudget) > 0
+                            ? Math.round((Number(b.utilizedBudget || 0) / Number(b.allocatedBudget)) * 100)
+                            : 0}
+                          tone="auto"
+                        />
+                      </TableCell>
                       <TableCell><Badge>{b.status}</Badge></TableCell>
                     </TableRow>
                   ))}
@@ -145,7 +147,7 @@ export function FinanceTab({ project, refetch }: { project: any, refetch: () => 
                 <TableBody>
                   {requisitions.map((req: any) => (
                     <TableRow key={req.id}>
-                      <TableCell className="font-medium">REQ-{req.id.toString().padStart(4, '0')}</TableCell>
+                      <TableCell className="font-medium">RF-{req.id.toString().padStart(4, '0')}</TableCell>
                       <TableCell>{req.division}</TableCell>
                       <TableCell>
                         {req.budgetItem ? (
@@ -155,7 +157,7 @@ export function FinanceTab({ project, refetch }: { project: any, refetch: () => 
                         )}
                       </TableCell>
                       <TableCell>{Number(req.totalEstimatedCost).toLocaleString()}</TableCell>
-                      <TableCell><Badge variant="outline">{req.status}</Badge></TableCell>
+                      <TableCell><StatusBadge domain="requisition" value={req.status} /></TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -165,80 +167,84 @@ export function FinanceTab({ project, refetch }: { project: any, refetch: () => 
         </Card>
       </div>
 
-      <Dialog open={budgetOpen} onOpenChange={setBudgetOpen}>
-        <DialogContent className="p-0">
-          <Card className="pt-8 border-0 shadow-none">
-            <CardHeader><CardTitle>Add Project Budget</CardTitle></CardHeader>
-            <CardContent>
-              <div className="space-y-4">
-                <div className="space-y-2">
-                  <Label>Category</Label>
-                  <Input value={budgetForm.category} onChange={e => setBudgetForm({...budgetForm, category: e.target.value})} placeholder="e.g. AWS Hosting, Software Licenses" />
-                </div>
-                <div className="space-y-2">
-                  <Label>Amount (MYR)</Label>
-                  <Input type="number" value={budgetForm.allocatedBudget} onChange={e => setBudgetForm({...budgetForm, allocatedBudget: e.target.value})} placeholder="5000" />
-                </div>
-                <div className="space-y-2">
-                  <Label>Description</Label>
-                  <Input value={budgetForm.description} onChange={e => setBudgetForm({...budgetForm, description: e.target.value})} placeholder="Optional details..." />
-                </div>
-                <div className="flex justify-end gap-3 pt-2">
-                  <Button variant="outline" onClick={() => setBudgetOpen(false)}>Cancel</Button>
-                  <Button onClick={handleAddBudget} disabled={loading}>Allocate</Button>
-                </div>
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle>Purchase Orders</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {purchaseOrders.length === 0 ? (
+            <p className="text-sm text-slate-500 mt-4">No purchase orders recorded for this project.</p>
+          ) : (
+            <>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>PO Number</TableHead>
+                    <TableHead>Vendor</TableHead>
+                    <TableHead>Type</TableHead>
+                    <TableHead>Grand Total</TableHead>
+                    <TableHead>Status</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {purchaseOrders.map((po: any) => (
+                    <TableRow key={po.id}>
+                      <TableCell className="font-medium">
+                        <Link to={`/purchase-orders/${po.id}`} className="font-mono text-primary hover:underline">
+                          {po.poNumber}
+                        </Link>
+                      </TableCell>
+                      <TableCell>{po.vendor?.name || '—'}</TableCell>
+                      <TableCell><Badge variant="outline">{(po.type || 'po').toUpperCase()}</Badge></TableCell>
+                      <TableCell>{Number(po.grandTotal).toLocaleString()}</TableCell>
+                      <TableCell><StatusBadge domain="po" value={po.status} /></TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+              <div className="flex flex-wrap gap-4 justify-end mt-3 text-sm text-muted-foreground">
+                <span>{purchaseOrders.length} order{purchaseOrders.length === 1 ? '' : 's'}</span>
+                <span>Total: <span className="font-medium text-foreground">MYR {poTotal.toLocaleString()}</span></span>
+                <span>Paid: <span className="font-medium text-foreground">MYR {poPaid.toLocaleString()}</span></span>
               </div>
-            </CardContent>
-          </Card>
-        </DialogContent>
-      </Dialog>
+            </>
+          )}
+        </CardContent>
+      </Card>
 
-      <Dialog open={reqOpen} onOpenChange={setReqOpen}>
-        <DialogContent className="p-0">
-          <Card className="pt-8 border-0 shadow-none">
-            <CardHeader><CardTitle>Draft New Requisition</CardTitle></CardHeader>
-            <CardContent>
-              <div className="space-y-4">
-                <div className="space-y-2">
-                  <Label>Division/Department</Label>
-                  <Input value={reqForm.division} onChange={e => setReqForm({...reqForm, division: e.target.value})} placeholder="e.g. Engineering, Marketing" />
-                </div>
-                <div className="space-y-2">
-                  <Label>Budget Allocation</Label>
-                  <Select value={reqForm.budgetItemId} onValueChange={v => setReqForm({...reqForm, budgetItemId: v})}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select a budget (optional)" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {budgets.length === 0 ? (
-                        <SelectItem value="none" disabled>No budgets available</SelectItem>
-                      ) : (
-                        budgets.map((b: any) => (
-                          <SelectItem key={b.id} value={b.id.toString()}>
-                            {b.category} — {Number(b.allocatedBudget).toLocaleString()}
-                          </SelectItem>
-                        ))
-                      )}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>Purpose</Label>
-                  <Input value={reqForm.purpose} onChange={e => setReqForm({...reqForm, purpose: e.target.value})} placeholder="Why is this needed?" />
-                </div>
-                <div className="space-y-2">
-                  <Label>Estimated Total Cost (MYR)</Label>
-                  <Input type="number" value={reqForm.totalEstimatedCost} onChange={e => setReqForm({...reqForm, totalEstimatedCost: e.target.value})} placeholder="0.00" />
-                </div>
-                <div className="flex justify-end gap-3 pt-2">
-                  <Button variant="outline" onClick={() => setReqOpen(false)}>Cancel</Button>
-                  <Button onClick={handleAddReq} disabled={loading}>Create Draft</Button>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </DialogContent>
-      </Dialog>
+      <FormDialog
+        open={budgetOpen}
+        onOpenChange={setBudgetOpen}
+        title="Add Project Budget"
+        description="Allocate budget to a specific category"
+        maxWidth="sm"
+        onSubmit={handleAddBudget}
+        submitLabel="Allocate"
+        isSubmitting={loading}
+      >
+        <div className="space-y-2">
+          <Label>Category</Label>
+          <Input value={budgetForm.category} onChange={e => setBudgetForm({...budgetForm, category: e.target.value})} placeholder="e.g. AWS Hosting, Software Licenses" />
+        </div>
+        <div className="space-y-2">
+          <Label>Amount (MYR)</Label>
+          <Input type="number" value={budgetForm.allocatedBudget} onChange={e => setBudgetForm({...budgetForm, allocatedBudget: e.target.value})} placeholder="5000" />
+        </div>
+        <div className="space-y-2">
+          <Label>Description</Label>
+          <Input value={budgetForm.description} onChange={e => setBudgetForm({...budgetForm, description: e.target.value})} placeholder="Optional details..." />
+        </div>
+      </FormDialog>
+
+      {reqOpen && (
+        <RequisitionFormDialog
+          projectId={project.id}
+          purchaseType="project"
+          onSubmit={handleCreateReq}
+          onClose={() => setReqOpen(false)}
+          isSubmitting={loading}
+        />
+      )}
     </div>
   );
 }

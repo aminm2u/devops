@@ -1,10 +1,6 @@
 import { useState, useEffect } from 'react';
-import { Loader2 } from 'lucide-react';
-import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import {
   Select,
   SelectContent,
@@ -12,10 +8,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import {
-  Dialog,
-  DialogContent,
-} from '@/components/ui/dialog';
+import { FormDialog } from '@/components/ui/form-dialog';
+import { FormField } from '@/components/ui/form-field';
+import { FormGrid } from '@/components/ui/form-grid';
 import apiClient from '@/api/client';
 import toast from 'react-hot-toast';
 
@@ -116,113 +111,92 @@ export function IncidentDialog({
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto p-0">
-        <Card className='pt-8 border-0 shadow-none'>
-          <CardHeader>
-            <CardTitle>{incident ? 'Edit Incident' : 'Report Incident'}</CardTitle>
-            <CardDescription>
-              {incident ? 'Update incident details' : 'Report a new incident'}
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={(e) => { e.preventDefault(); handleSubmit(); }} className="space-y-4">
-          <div className="space-y-2">
-            <Label>Title *</Label>
-            <Input
-              value={form.title}
-              onChange={(e) => setForm({ ...form, title: e.target.value })}
-              placeholder="e.g., API Gateway Timeout"
-            />
-          </div>
+    <FormDialog
+      open={open}
+      onOpenChange={onOpenChange}
+      title={incident ? 'Edit Incident' : 'Report Incident'}
+      description={incident ? 'Update incident details' : 'Report a new incident'}
+      maxWidth="md"
+      onSubmit={handleSubmit}
+      submitLabel={incident ? 'Update' : 'Report'}
+      isSubmitting={isPending}
+    >
+      <FormField label="Title" required>
+        <Input
+          value={form.title}
+          onChange={(e) => setForm({ ...form, title: e.target.value })}
+          placeholder="e.g., API Gateway Timeout"
+        />
+      </FormField>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label>Severity *</Label>
-              <Select value={form.severity} onValueChange={(v) => setForm({ ...form, severity: v })}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="low">Low</SelectItem>
-                  <SelectItem value="medium">Medium</SelectItem>
-                  <SelectItem value="high">High</SelectItem>
-                  <SelectItem value="critical">Critical</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label>Status</Label>
-              <Select value={form.status} onValueChange={(v) => setForm({ ...form, status: v })}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="open">Open</SelectItem>
-                  <SelectItem value="investigating">Investigating</SelectItem>
-                  <SelectItem value="identified">Identified</SelectItem>
-                  <SelectItem value="monitoring">Monitoring</SelectItem>
-                  <SelectItem value="resolved">Resolved</SelectItem>
-                  <SelectItem value="closed">Closed</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
+      <FormGrid>
+        <FormField label="Severity" required>
+          <Select value={form.severity} onValueChange={(v) => setForm({ ...form, severity: v })}>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="low">Low</SelectItem>
+              <SelectItem value="medium">Medium</SelectItem>
+              <SelectItem value="high">High</SelectItem>
+              <SelectItem value="critical">Critical</SelectItem>
+            </SelectContent>
+          </Select>
+        </FormField>
+        <FormField label="Status">
+          <Select value={form.status} onValueChange={(v) => setForm({ ...form, status: v })}>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="open">Open</SelectItem>
+              <SelectItem value="investigating">Investigating</SelectItem>
+              <SelectItem value="identified">Identified</SelectItem>
+              <SelectItem value="monitoring">Monitoring</SelectItem>
+              <SelectItem value="resolved">Resolved</SelectItem>
+              <SelectItem value="closed">Closed</SelectItem>
+            </SelectContent>
+          </Select>
+        </FormField>
+      </FormGrid>
 
-          <div className="space-y-2">
-            <Label>Description</Label>
+      <FormField label="Description">
+        <Textarea
+          value={form.description}
+          onChange={(e) => setForm({ ...form, description: e.target.value })}
+          placeholder="Describe the incident..."
+          rows={3}
+        />
+      </FormField>
+
+      <FormField label="Affected Services">
+        <Input
+          value={form.affectedServices}
+          onChange={(e) => setForm({ ...form, affectedServices: e.target.value })}
+          placeholder="e.g., API, Database, Auth Service"
+        />
+      </FormField>
+
+      {incident && (
+        <>
+          <FormField label="Root Cause">
             <Textarea
-              value={form.description}
-              onChange={(e) => setForm({ ...form, description: e.target.value })}
-              placeholder="Describe the incident..."
-              rows={3}
+              value={form.rootCause}
+              onChange={(e) => setForm({ ...form, rootCause: e.target.value })}
+              placeholder="Root cause analysis"
+              rows={2}
             />
-          </div>
-
-          <div className="space-y-2">
-            <Label>Affected Services</Label>
-            <Input
-              value={form.affectedServices}
-              onChange={(e) => setForm({ ...form, affectedServices: e.target.value })}
-              placeholder="e.g., API, Database, Auth Service"
+          </FormField>
+          <FormField label="Resolution">
+            <Textarea
+              value={form.resolution}
+              onChange={(e) => setForm({ ...form, resolution: e.target.value })}
+              placeholder="How was it resolved?"
+              rows={2}
             />
-          </div>
-
-          {incident && (
-            <>
-              <div className="space-y-2">
-                <Label>Root Cause</Label>
-                <Textarea
-                  value={form.rootCause}
-                  onChange={(e) => setForm({ ...form, rootCause: e.target.value })}
-                  placeholder="Root cause analysis"
-                  rows={2}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Resolution</Label>
-                <Textarea
-                  value={form.resolution}
-                  onChange={(e) => setForm({ ...form, resolution: e.target.value })}
-                  placeholder="How was it resolved?"
-                  rows={2}
-                />
-              </div>
-            </>
-          )}
-              <div className="flex justify-end gap-3 pt-2">
-                <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-                  Cancel
-                </Button>
-                <Button type="submit" disabled={isPending}>
-                  {isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                  {incident ? 'Update' : 'Report'}
-                </Button>
-              </div>
-            </form>
-          </CardContent>
-        </Card>
-      </DialogContent>
-    </Dialog>
+          </FormField>
+        </>
+      )}
+    </FormDialog>
   );
 }

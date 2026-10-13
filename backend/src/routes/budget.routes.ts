@@ -14,6 +14,7 @@ const router = Router();
 
 const createBudgetItemSchema = z.object({
   projectId: z.number().int().positive().optional().nullable(),
+  budgetType: z.string().max(50).optional(),
   division: z.string().max(255).optional(),
   category: z.string().min(1).max(255),
   description: z.string().min(1).max(500),
@@ -24,6 +25,14 @@ const createBudgetItemSchema = z.object({
   currency: z.string().max(10).optional(),
   status: z.string().max(50).optional(),
   fiscalYear: z.string().max(10).optional().nullable(),
+  // Budget type specific fields
+  departmentId: z.number().int().positive().optional().nullable(),
+  eventName: z.string().optional().nullable(),
+  eventStartDate: z.string().datetime().optional().nullable(),
+  eventEndDate: z.string().datetime().optional().nullable(),
+  programmeName: z.string().optional().nullable(),
+  programmeCode: z.string().optional().nullable(),
+  overheadCategory: z.string().optional().nullable(),
   metadata: z.any().optional().nullable(),
 });
 
@@ -163,6 +172,7 @@ router.get(
         division,
         status,
         fiscalYear,
+        budgetType,
         page = "1",
         limit = "50",
       } = req.query;
@@ -184,6 +194,7 @@ router.get(
       if (division) where.division = division as string;
       if (status) where.status = status as string;
       if (fiscalYear) where.fiscalYear = fiscalYear as string;
+      if (budgetType) where.budgetType = budgetType as string;
 
       const [items, total] = await Promise.all([
         prisma.budgetItem.findMany({
@@ -224,6 +235,7 @@ router.post(
       const item = await prisma.budgetItem.create({
         data: {
           projectId: req.body.projectId || null,
+          budgetType: req.body.budgetType || "project",
           division: req.body.division || "Information Technology",
           category: req.body.category,
           description: req.body.description,
@@ -234,6 +246,13 @@ router.post(
           currency: req.body.currency || "MYR",
           status: req.body.status || "active",
           fiscalYear: req.body.fiscalYear || null,
+          departmentId: req.body.departmentId || null,
+          eventName: req.body.eventName || null,
+          eventStartDate: req.body.eventStartDate ? new Date(req.body.eventStartDate) : null,
+          eventEndDate: req.body.eventEndDate ? new Date(req.body.eventEndDate) : null,
+          programmeName: req.body.programmeName || null,
+          programmeCode: req.body.programmeCode || null,
+          overheadCategory: req.body.overheadCategory || null,
           metadata: req.body.metadata || null,
         },
       });
@@ -274,6 +293,7 @@ router.put(
         where: { id: existing.id },
         data: {
           ...(req.body.projectId !== undefined && { projectId: req.body.projectId }),
+          ...(req.body.budgetType !== undefined && { budgetType: req.body.budgetType }),
           ...(req.body.division && { division: req.body.division }),
           ...(req.body.category && { category: req.body.category }),
           ...(req.body.description && { description: req.body.description }),
@@ -286,6 +306,17 @@ router.put(
           ...(req.body.currency && { currency: req.body.currency }),
           ...(req.body.status && { status: req.body.status }),
           ...(req.body.fiscalYear !== undefined && { fiscalYear: req.body.fiscalYear }),
+          ...(req.body.departmentId !== undefined && { departmentId: req.body.departmentId }),
+          ...(req.body.eventName !== undefined && { eventName: req.body.eventName }),
+          ...(req.body.eventStartDate !== undefined && {
+            eventStartDate: req.body.eventStartDate ? new Date(req.body.eventStartDate) : null,
+          }),
+          ...(req.body.eventEndDate !== undefined && {
+            eventEndDate: req.body.eventEndDate ? new Date(req.body.eventEndDate) : null,
+          }),
+          ...(req.body.programmeName !== undefined && { programmeName: req.body.programmeName }),
+          ...(req.body.programmeCode !== undefined && { programmeCode: req.body.programmeCode }),
+          ...(req.body.overheadCategory !== undefined && { overheadCategory: req.body.overheadCategory }),
           ...(req.body.metadata !== undefined && { metadata: req.body.metadata }),
         },
       });

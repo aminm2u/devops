@@ -22,10 +22,26 @@ import { NotificationsPage } from '@/pages/NotificationsPage';
 import { BudgetPage } from '@/pages/BudgetPage';
 import { RequisitionsPage } from '@/pages/RequisitionsPage';
 import { RequisitionManagePage } from '@/pages/RequisitionManagePage';
+import { VendorManagementPage } from '@/pages/VendorManagementPage';
+import { PurchaseOrderListPage } from '@/pages/PurchaseOrderListPage';
+import { DirectPurchaseListPage } from '@/pages/DirectPurchaseListPage';
+import { GoodsReceiptListPage } from '@/pages/GoodsReceiptListPage';
+import { AssetListPage } from '@/pages/AssetListPage';
+import { PaymentListPage } from '@/pages/PaymentListPage';
+import { ProcurementSettingsPage } from '@/pages/ProcurementSettingsPage';
+import { RfqListPage } from '@/pages/RfqListPage';
+import { RfqDetailPage } from '@/pages/RfqDetailPage';
+import { PurchaseOrderDetailPage } from '@/pages/PurchaseOrderDetailPage';
+import { InternalProjectListPage } from '@/pages/InternalProjectListPage';
 import { HelpdeskPage } from '@/pages/HelpdeskPage';
 import { HelpdeskTicketDetailPage } from '@/pages/HelpdeskTicketDetailPage';
 import { HelpdeskReportPage } from '@/pages/HelpdeskReportPage';
 import { HelpdeskManagePage } from '@/pages/HelpdeskManagePage';
+import { ComponentShowcasePage } from '@/pages/ComponentShowcasePage';
+import { TimesheetPage } from '@/pages/TimesheetPage';
+import { TimesheetApprovalsPage } from '@/pages/TimesheetApprovalsPage';
+import { CalendarPage } from '@/pages/CalendarPage';
+import { TimesheetSettingsPage } from '@/pages/TimesheetSettingsPage';
 import { useAuth } from '@/hooks/useAuth';
 import { Loader2 } from 'lucide-react';
 import { LoadingScreen } from '@/components/loading/LoadingScreen';
@@ -168,6 +184,21 @@ function App() {
         <Route path="budget" element={<BudgetPage />} />
         <Route path="requisitions" element={<RequisitionsPage />} />
         <Route path="requisitions/manage" element={<RequisitionManagePage />} />
+        <Route path="vendors" element={<VendorManagementPage />} />
+        <Route path="purchase-orders" element={<PurchaseOrderListPage />} />
+        <Route path="purchase-orders/:id" element={<PurchaseOrderDetailPage />} />
+        <Route path="direct-purchases" element={<DirectPurchaseListPage />} />
+        <Route path="rfq" element={<RfqListPage />} />
+        <Route path="rfq/:id" element={<RfqDetailPage />} />
+        <Route path="goods-receipts" element={<GoodsReceiptListPage />} />
+        <Route path="assets" element={<AssetListPage />} />
+        <Route path="payments" element={<PaymentListPage />} />
+        <Route path="internal-projects" element={<InternalProjectListPage />} />
+        <Route path="my-work/calendar" element={<CalendarPage />} />
+        <Route path="my-work/timesheet" element={<TimesheetPage />} />
+        <Route path="my-work/approvals" element={<TimesheetApprovalsPage />} />
+        <Route path="settings/procurement" element={<AdminRoute><ProcurementSettingsPage /></AdminRoute>} />
+        <Route path="settings/timesheet" element={<AdminRoute><TimesheetSettingsPage /></AdminRoute>} />
         <Route path="helpdesk" element={<HelpdeskPage />} />
         <Route path="helpdesk/manage" element={<AdminRoute><HelpdeskManagePage /></AdminRoute>} />
         <Route path="helpdesk/reports" element={<HelpdeskReportPage />} />
@@ -178,6 +209,7 @@ function App() {
         <Route path="admin/users" element={<UsersPage />} />
         <Route path="notifications" element={<NotificationsPage />} />
         <Route path="grafana" element={<GrafanaPage />} />
+        <Route path="components" element={<ComponentShowcasePage />} />
       </Route>
 
       {/* Catch all - redirect to home */}

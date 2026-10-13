@@ -302,7 +302,7 @@ export function HelpdeskReportPage() {
                           className="h-4 rounded-full bg-primary/80 flex items-center justify-end pr-2"
                           style={{ width: `${Math.max(pct, 5)}%` }}
                         >
-                          <span className="text-[10px] text-white font-medium">{String(count)}</span>
+                          <span className="text-[10px] text-gray-100 font-medium">{String(count)}</span>
                         </div>
                       </div>
                     </div>

@@ -580,6 +580,17 @@ export interface RequisitionItem {
   updatedAt?: string;
 }
 
+export interface RequisitionApprovalStep {
+  id: number;
+  requisitionId: number;
+  approverId: number;
+  status: string;
+  order: number;
+  comments: string | null;
+  respondedAt: string | null;
+  approver?: { id: number; name: string; email: string };
+}
+
 export interface RequisitionForm {
   id: number;
   division: string;
@@ -598,6 +609,7 @@ export interface RequisitionForm {
   createdAt: string;
   updatedAt: string;
   items?: RequisitionItem[];
+  approvals?: RequisitionApprovalStep[];
   budgetItem?: {
     id: number;
     description: string;
@@ -713,4 +725,89 @@ export interface HelpdeskStats {
 }
 
 export type HelpdeskTicketForm = Omit<HelpdeskTicket, 'id' | 'isActive' | 'createdAt' | 'updatedAt' | 'slug'>;
+
+// ==================== My Work Portal (Timesheet / Calendar) ====================
+
+export type TimeEntryStatus = 'draft' | 'submitted' | 'approved' | 'rejected';
+
+export interface TimeEntry {
+  id: number;
+  userId: number;
+  workDate: string; // YYYY-MM-DD
+  hours: number;
+  description: string;
+  taskId: number | null;
+  subtaskId: number | null;
+  projectId: number | null;
+  categoryValue: string;
+  status: TimeEntryStatus;
+  submittedAt: string | null;
+  decidedAt: string | null;
+  approverId: number | null;
+  approvalRuleId: number | null;
+  rejectReason: string | null;
+  createdAt: string;
+  updatedAt: string;
+  user?: { id: number; name: string; email: string };
+  approver?: { id: number; name: string; email: string } | null;
+  task?: { id: number; title: string; projectId?: number } | null;
+  subtask?: { id: number; title: string; status?: string } | null;
+  project?: { id: number; name: string } | null;
+  sourceLabel?: string;
+  kind?: 'entry';
+}
+
+export interface TaskSubtask {
+  id: number;
+  taskId: number;
+  title: string;
+  description: string | null;
+  assigneeId: number | null;
+  dueDate: string | null;
+  status: 'open' | 'in_progress' | 'done';
+  position: number;
+  assignee?: { id: number; name: string; email: string } | null;
+}
+
+export type TimesheetApproverType = 'project_role' | 'users' | 'direct_manager' | 'app_role';
+
+export interface TimesheetApprovalRule {
+  id: number;
+  name: string;
+  isActive: boolean;
+  sortOrder: number;
+  categoryValue: string | null;
+  projectId: number | null;
+  approverType: TimesheetApproverType;
+  projectRoleId: number | null;
+  appRole: string | null;
+  users?: { userId: number; user?: { id: number; name: string; email: string } }[];
+  projectRole?: { id: number; name: string } | null;
+}
+
+export interface CalendarTaskEvent {
+  kind: 'task' | 'subtask';
+  id: number;
+  title: string;
+  dueDate: string | null;
+  projectId: number;
+  projectName: string;
+  priority: string;
+  column: string | null;
+  isOverdue: boolean;
+  parentTaskId: number | null;
+}
+
+export interface CalendarEventsResponse {
+  tasks: CalendarTaskEvent[];
+  entries: TimeEntry[];
+}
+
+export interface MyTaskOption {
+  id: number;
+  title: string;
+  projectId: number;
+  projectName: string;
+  subtasks: { id: number; title: string; status: string; assigneeId: number | null }[];
+}
 
