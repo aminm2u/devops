@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { DatePicker } from '@/components/ui/date-picker';
+import { todayLocal } from '@/lib/utils';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
   CheckSquare, Square, Plus, Trash2, Timer, Send,
@@ -99,7 +100,7 @@ export function SubtaskChecklist({ taskId, subtasks, members, timeEntries = [], 
       if (hours > 0) {
         // Shared work log: same TimeEntry record as the timesheet page
         await apiClient.post('/timesheet/entries', {
-          workDate: new Date().toISOString().split('T')[0],
+          workDate: todayLocal(),
           hours,
           description: logDescription.trim(),
           taskId,

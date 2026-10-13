@@ -58,6 +58,15 @@ const navigation: NavGroup[] = [
       { name: 'Dashboard', href: '/', icon: LayoutDashboard },
     ],
   },
+    {
+    label: 'My Work Portal',
+    items: [
+      { name: 'Calendar', href: '/my-work/calendar', icon: CalendarDays },
+      { name: 'Timesheet', href: '/my-work/timesheet', icon: Timer },
+      { name: 'Approvals', href: '/my-work/approvals', icon: ClipboardCheck },
+      { name: 'Timesheet Settings', href: '/settings/timesheet', icon: SlidersHorizontal, adminOnly: true },
+    ],
+  },
   {
     label: 'Projects & Assets',
     items: [
@@ -96,15 +105,6 @@ const navigation: NavGroup[] = [
       { name: 'Tickets', href: '/helpdesk', icon: Headphones },
       { name: 'Manage', href: '/helpdesk/manage', icon: Settings, adminOnly: true },
       { name: 'Reports', href: '/helpdesk/reports', icon: BarChart3 },
-    ],
-  },
-  {
-    label: 'My Work Portal',
-    items: [
-      { name: 'Calendar', href: '/my-work/calendar', icon: CalendarDays },
-      { name: 'Timesheet', href: '/my-work/timesheet', icon: Timer },
-      { name: 'Approvals', href: '/my-work/approvals', icon: ClipboardCheck },
-      { name: 'Timesheet Settings', href: '/settings/timesheet', icon: SlidersHorizontal, adminOnly: true },
     ],
   },
   {

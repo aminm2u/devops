@@ -15,12 +15,10 @@ import {
 import apiClient from '@/api/client';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '@/hooks/useAuth';
+import { toLocalDateStr } from '@/lib/utils';
 import type { TimeEntry } from '@/types';
 
 // Local date helpers (no date lib — calendar dates as YYYY-MM-DD strings)
-function fmt(d: Date): string {
-  return d.toISOString().split('T')[0];
-}
 function startOfWeek(date: Date): Date {
   const d = new Date(date);
   const day = d.getDay(); // 0=Sun
@@ -46,7 +44,7 @@ export function TimesheetPage() {
   const [defaultDate, setDefaultDate] = useState<string | undefined>();
 
   const weekDays = useMemo(
-    () => Array.from({ length: 7 }, (_, i) => fmt(addDays(anchor, i))),
+    () => Array.from({ length: 7 }, (_, i) => toLocalDateStr(addDays(anchor, i))),
     [anchor]
   );
   const weekFrom = weekDays[0];
@@ -98,7 +96,7 @@ export function TimesheetPage() {
             Log work against assigned tasks or your daily activities
           </p>
         </div>
-        <Button onClick={() => handleAdd(fmt(new Date()))}>
+        <Button onClick={() => handleAdd(toLocalDateStr(new Date()))}>
           <Plus className="h-4 w-4 mr-2" /> Add Entry
         </Button>
       </div>

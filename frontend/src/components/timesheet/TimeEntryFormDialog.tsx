@@ -9,6 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { DatePicker } from '@/components/ui/date-picker';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Trash2, Timer, ListTodo, CheckCircle2 } from 'lucide-react';
+import { todayLocal } from '@/lib/utils';
 import { useReferenceData, toSelectOptions } from '@/hooks/useReferenceData';
 import {
   useMyTasks,
@@ -72,7 +73,7 @@ export function TimeEntryFormDialog({
       setSubtaskId(entry.subtaskId ? String(entry.subtaskId) : '');
       setCategoryValue(entry.categoryValue);
     } else {
-      setWorkDate(defaultDate || new Date().toISOString().split('T')[0]);
+      setWorkDate(defaultDate || todayLocal());
       setHours('');
       setDescription('');
       setSource('adhoc');
@@ -156,7 +157,7 @@ export function TimeEntryFormDialog({
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label>Date</Label>
-              <DatePicker value={workDate} onChange={setWorkDate} />
+              <DatePicker value={workDate} onChange={setWorkDate} disabled={locked} />
             </div>
             <div className="space-y-2">
               <Label className="flex items-center gap-1"><Timer className="h-3 w-3" /> Hours</Label>
@@ -213,6 +214,10 @@ export function TimeEntryFormDialog({
                 Ad-hoc activity
               </Button>
             </div>
+            <p className="text-xs text-muted-foreground">
+              Task-linked entries are always "project". For ad-hoc work, the category
+              you pick decides which approval rule applies.
+            </p>
           </div>
 
           {source === 'task' && (

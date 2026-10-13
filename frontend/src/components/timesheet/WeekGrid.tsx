@@ -1,5 +1,6 @@
 import { Plus, Timer } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { todayLocal } from '@/lib/utils';
 import { EntryCard } from './EntryCard';
 import type { TimeEntry } from '@/types';
 
@@ -16,7 +17,7 @@ interface WeekGridProps {
  * in the footer, "+ Add" affordance on empty space.
  */
 export function WeekGrid({ days, entries, onAddEntry, onOpenEntry, showUser = false }: WeekGridProps) {
-  const today = new Date().toISOString().split('T')[0];
+  const today = todayLocal();
 
   const byDay = (day: string) => entries.filter((e) => e.workDate === day);
   const dayTotal = (day: string) =>

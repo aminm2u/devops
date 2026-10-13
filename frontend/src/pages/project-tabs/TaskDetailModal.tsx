@@ -14,6 +14,7 @@ import {
   ChevronDown, ChevronRight, Timer
 } from 'lucide-react';
 import { DatePicker } from '@/components/ui/date-picker';
+import { todayLocal } from '@/lib/utils';
 import apiClient from '@/api/client';
 import toast from 'react-hot-toast';
 import { useSocket } from '@/hooks/useSocket';
@@ -124,7 +125,7 @@ export function TaskDetailModal({ taskId, open, onClose, onDelete, members }: Ta
       if (hours > 0) {
         // Shared work log — same TimeEntry record as the Timesheet page
         const res = await apiClient.post('/timesheet/entries', {
-          workDate: new Date().toISOString().split('T')[0],
+          workDate: todayLocal(),
           hours,
           description: comment.trim(),
           taskId,
