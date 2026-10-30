@@ -3,7 +3,6 @@ import {
   LayoutDashboard,
   FolderKanban,
   Settings,
-  User,
   Server,
   AlertTriangle,
   Rocket,
@@ -120,7 +119,6 @@ const navigation: NavGroup[] = [
     items: [
       { name: 'Notifications', href: '/notifications', icon: Bell },
       { name: 'Users', href: '/admin/users', icon: Users, adminOnly: true },
-      { name: 'Profile', href: '/profile', icon: User },
       { name: 'Settings', href: '/settings', icon: Settings },
     ],
   },

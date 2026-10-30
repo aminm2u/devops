@@ -8,7 +8,6 @@ import { RegisterPage } from '@/pages/auth/RegisterPage';
 import { DashboardPage } from '@/pages/DashboardPage';
 import { ProjectsPage } from '@/pages/ProjectsPage';
 import { ProjectDetailPage } from '@/pages/ProjectDetailPage';
-import { ProfilePage } from '@/pages/ProfilePage';
 import { InfrastructurePage } from '@/pages/InfrastructurePage';
 import { SettingsPage } from '@/pages/SettingsPage';
 import { IncidentsPage } from '@/pages/IncidentsPage';
@@ -176,8 +175,8 @@ function App() {
         <Route index element={<DashboardPage />} />
         <Route path="projects" element={<ProjectsPage />} />
         <Route path="projects/:id" element={<ProjectDetailPage />} />
-        <Route path="profile" element={<ProfilePage />} />
         <Route path="settings" element={<SettingsPage />} />
+        <Route path="profile" element={<Navigate to="/settings" replace />} />
         <Route path="infrastructure" element={<InfrastructurePage />} />
         <Route path="ssl" element={<SslCertificatesPage />} />
         <Route path="domains" element={<DomainsPage />} />

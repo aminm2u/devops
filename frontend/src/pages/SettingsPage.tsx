@@ -1,4 +1,6 @@
 import { useState, useEffect } from 'react';
+import { useMutation } from '@tanstack/react-query';
+import { useNavigate } from 'react-router-dom';
 import {
   User,
   Bell,
@@ -16,6 +18,11 @@ import {
   Unlink,
   Download,
   FileText,
+  Mail,
+  Calendar,
+  Trash2,
+  AlertTriangle,
+  Video,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -25,10 +32,13 @@ import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Switch } from '@/components/ui/switch';
+import { FormDialog } from '@/components/ui/form-dialog';
 import { useAuth } from '@/hooks/useAuth';
 import { useTheme } from '@/hooks/useTheme';
 import apiClient from '@/api/client';
-import { cn } from '@/lib/utils';
+import { profileApi } from '@/api/profile';
+import { MicrosoftIntegration } from '@/components/settings/MicrosoftIntegration';
+import { cn, formatDate } from '@/lib/utils';
 import toast from 'react-hot-toast';
 import * as notificationsApi from '@/api/notifications';
 
@@ -86,11 +96,104 @@ function saveSettings(settings: SettingsData) {
 }
 
 // ── Main Component ────────────────────────────────────────────────────────────
-export function SettingsPage({ embedded = false }: { embedded?: boolean }) {
-  const { user, hasRole } = useAuth();
+export function SettingsPage() {
+  const { user, setUser, logout, hasRole } = useAuth();
+  const navigate = useNavigate();
   const { setTheme: setCurrentTheme } = useTheme();
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+
+  // ── Profile state ──────────────────────────────────────────────────────
+  const [name, setName] = useState(user?.name || '');
+  const [email, setEmail] = useState(user?.email || '');
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [deletePassword, setDeletePassword] = useState('');
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+
+  useEffect(() => {
+    if (user) {
+      setName(user.name);
+      setEmail(user.email);
+    }
+  }, [user]);
+
+  const updateProfileMutation = useMutation({
+    mutationFn: profileApi.updateProfile,
+    onSuccess: (response) => {
+      setUser(response.data);
+      toast.success('Profile updated successfully');
+    },
+    onError: () => {
+      toast.error('Failed to update profile');
+    },
+  });
+
+  const updatePasswordMutation = useMutation({
+    mutationFn: profileApi.updatePassword,
+    onSuccess: () => {
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+      toast.success('Password updated successfully');
+    },
+    onError: () => {
+      toast.error('Failed to update password');
+    },
+  });
+
+  const deleteAccountMutation = useMutation({
+    mutationFn: profileApi.deleteAccount,
+    onSuccess: async () => {
+      toast.success('Account deleted successfully');
+      await logout();
+      navigate('/login');
+    },
+    onError: () => {
+      toast.error('Failed to delete account');
+    },
+  });
+
+  const handleUpdateProfile = (e: React.FormEvent) => {
+    e.preventDefault();
+    updateProfileMutation.mutate({ name, email });
+  };
+
+  const handleUpdatePassword = (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (newPassword !== confirmPassword) {
+      toast.error('Passwords do not match');
+      return;
+    }
+
+    if (newPassword.length < 8) {
+      toast.error('Password must be at least 8 characters');
+      return;
+    }
+
+    updatePasswordMutation.mutate({
+      current_password: currentPassword,
+      password: newPassword,
+      password_confirmation: confirmPassword,
+    });
+  };
+
+  const handleDeleteAccount = () => {
+    if (!deletePassword) {
+      toast.error('Please enter your password');
+      return;
+    }
+    deleteAccountMutation.mutate(deletePassword);
+  };
+
+  const userInitials = user?.name
+    ?.split(' ')
+    .map((n) => n[0])
+    .join('')
+    .toUpperCase()
+    .slice(0, 2) || 'U';
 
   // Load persisted settings
   const [settings, setSettings] = useState<SettingsData>(loadSettings);
@@ -167,17 +270,21 @@ export function SettingsPage({ embedded = false }: { embedded?: boolean }) {
     { value: 'system' as const, label: 'System', icon: Monitor },
   ];
 
-  return (
-    <div className={embedded ? 'space-y-6' : 'max-w-3xl mx-auto space-y-6 animate-fade-in'}>
-      {!embedded && (
-        <div>
-          <h1 className="text-2xl font-bold">Settings</h1>
-          <p className="text-muted-foreground">Manage your workspace preferences</p>
-        </div>
-      )}
+  const msQuery = new URLSearchParams(window.location.search).get('msconnect');
 
-      <Tabs defaultValue="general" className="space-y-6">
+  return (
+    <div className="max-w-4xl mx-auto space-y-6 animate-fade-in">
+      <div>
+        <h1 className="text-2xl font-bold">Settings</h1>
+        <p className="text-muted-foreground">Manage your account, preferences and integrations</p>
+      </div>
+
+      <Tabs defaultValue="profile" className="space-y-6">
         <TabsList>
+          <TabsTrigger value="profile" className="gap-2">
+            <User className="h-4 w-4" />
+            Profile
+          </TabsTrigger>
           <TabsTrigger value="general" className="gap-2">
             <User className="h-4 w-4" />
             General
@@ -189,6 +296,10 @@ export function SettingsPage({ embedded = false }: { embedded?: boolean }) {
           <TabsTrigger value="appearance" className="gap-2">
             <Palette className="h-4 w-4" />
             Appearance
+          </TabsTrigger>
+          <TabsTrigger value="microsoft" className="gap-2">
+            <Video className="h-4 w-4" />
+            Microsoft Teams
           </TabsTrigger>
           {(hasRole('super-admin') || hasRole('devops-admin')) && (
             <TabsTrigger value="npm" className="gap-2">
@@ -204,31 +315,179 @@ export function SettingsPage({ embedded = false }: { embedded?: boolean }) {
           )}
         </TabsList>
 
-        {/* ── General Settings ──────────────────────────────────────────── */}
-        <TabsContent value="general" className="space-y-6">
+        {/* ── Profile tab ─────────────────────────────────────────────── */}
+        <TabsContent value="profile" className="space-y-6">
+          {/* User Info Card */}
           <Card>
             <CardHeader>
-              <CardTitle>Account Information</CardTitle>
-              <CardDescription>Your account details and preferences</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
               <div className="flex items-center gap-4">
                 <div className="flex h-16 w-16 items-center justify-center rounded-full bg-primary text-primary-foreground text-xl font-bold">
-                  {user?.name?.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2) || 'U'}
+                  {userInitials}
                 </div>
                 <div>
-                  <p className="font-medium">{user?.name}</p>
-                  <p className="text-sm text-muted-foreground">{user?.email}</p>
-                  <div className="flex gap-2 mt-1">
-                    {user?.roles && (user.roles as any[]).map((role: any) => (
-                      <Badge key={typeof role === 'string' ? role : role.id} variant="secondary" className="text-xs">
+                  <CardTitle>{user?.name}</CardTitle>
+                  <CardDescription>{user?.email}</CardDescription>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex items-center gap-3">
+                <Mail className="h-4 w-4 text-muted-foreground" />
+                <span className="text-sm">{user?.email}</span>
+              </div>
+              <div className="flex items-center gap-3">
+                <Calendar className="h-4 w-4 text-muted-foreground" />
+                <span className="text-sm">
+                  Member since {user?.createdAt ? formatDate(user.createdAt) : 'Unknown'}
+                </span>
+              </div>
+              {user?.roles && user.roles.length > 0 && (
+                <div className="flex items-start gap-3">
+                  <Shield className="h-4 w-4 text-muted-foreground mt-0.5" />
+                  <div className="flex flex-wrap gap-2">
+                    {user.roles.map((role) => (
+                      <Badge key={typeof role === 'string' ? role : role.id} variant="secondary">
                         {typeof role === 'string' ? role : role.name}
                       </Badge>
                     ))}
                   </div>
                 </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Edit Profile */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Edit Profile</CardTitle>
+              <CardDescription>Update your personal information</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <form onSubmit={handleUpdateProfile} className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="name">Full Name</Label>
+                  <Input
+                    id="name"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder="Your name"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="email">Email</Label>
+                  <Input
+                    id="email"
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="Your email"
+                  />
+                </div>
+                <Button type="submit" disabled={updateProfileMutation.isPending}>
+                  {updateProfileMutation.isPending ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Saving...
+                    </>
+                  ) : (
+                    <>
+                      <Save className="mr-2 h-4 w-4" />
+                      Save Changes
+                    </>
+                  )}
+                </Button>
+              </form>
+            </CardContent>
+          </Card>
+
+          {/* Change Password */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Change Password</CardTitle>
+              <CardDescription>Update your password to keep your account secure</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <form onSubmit={handleUpdatePassword} className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="currentPassword">Current Password</Label>
+                  <Input
+                    id="currentPassword"
+                    type="password"
+                    value={currentPassword}
+                    onChange={(e) => setCurrentPassword(e.target.value)}
+                    placeholder="Enter current password"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="newPassword">New Password</Label>
+                  <Input
+                    id="newPassword"
+                    type="password"
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    placeholder="Enter new password"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="confirmPassword">Confirm New Password</Label>
+                  <Input
+                    id="confirmPassword"
+                    type="password"
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    placeholder="Confirm new password"
+                  />
+                </div>
+                <Button type="submit" disabled={updatePasswordMutation.isPending}>
+                  {updatePasswordMutation.isPending ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Updating...
+                    </>
+                  ) : (
+                    'Update Password'
+                  )}
+                </Button>
+              </form>
+            </CardContent>
+          </Card>
+
+          {/* Danger Zone */}
+          <Card className="border-destructive">
+            <CardHeader>
+              <CardTitle className="text-destructive">Danger Zone</CardTitle>
+              <CardDescription>
+                Irreversible actions. Please be careful.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="font-medium">Delete Account</p>
+                  <p className="text-sm text-muted-foreground">
+                    Permanently delete your account and all associated data
+                  </p>
+                </div>
+                <Button
+                  variant="destructive"
+                  onClick={() => setShowDeleteDialog(true)}
+                >
+                  <Trash2 className="mr-2 h-4 w-4" />
+                  Delete Account
+                </Button>
               </div>
-              <Separator />
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── General Settings ──────────────────────────────────────────── */}
+        <TabsContent value="general" className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>Regional</CardTitle>
+              <CardDescription>Language and timezone preferences</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
                   <Label>Language</Label>
@@ -371,6 +630,20 @@ export function SettingsPage({ embedded = false }: { embedded?: boolean }) {
           </Card>
         </TabsContent>
 
+        {/* ── Microsoft Teams integration ──────────────────────────────── */}
+        <TabsContent value="microsoft" className="space-y-6">
+          <MicrosoftIntegration canManageApp={hasRole('super-admin')} />
+          {msQuery && msQuery !== 'success' && (
+            <Card className="border-destructive">
+              <CardContent className="pt-6 text-sm text-destructive">
+                Microsoft sign-in failed
+                {msQuery === 'invalid_state' && ' (the link request expired — please try again)'}
+                . Check the Entra ID app registration and redirect URI, then try connecting again.
+              </CardContent>
+            </Card>
+          )}
+        </TabsContent>
+
         {/* ── Nginx Proxy Manager Settings ─────────────────────────────── */}
         {(hasRole('super-admin') || hasRole('devops-admin')) && (
           <TabsContent value="npm" className="space-y-6">
@@ -421,6 +694,37 @@ export function SettingsPage({ embedded = false }: { embedded?: boolean }) {
           )}
         </Button>
       </div>
+
+      <FormDialog
+        open={showDeleteDialog}
+        onOpenChange={(open) => {
+          setShowDeleteDialog(open);
+          if (!open) setDeletePassword('');
+        }}
+        title="Are you absolutely sure?"
+        description="This action cannot be undone. This will permanently delete your account and remove all your data from our servers."
+        onSubmit={handleDeleteAccount}
+        submitLabel="Delete Account"
+        isSubmitting={deleteAccountMutation.isPending}
+        submitDisabled={!deletePassword}
+      >
+        <div className="flex items-center gap-2 rounded-lg border border-destructive/50 bg-destructive/5 p-3">
+          <AlertTriangle className="h-4 w-4 text-destructive" />
+          <p className="text-sm text-destructive">
+            This action is irreversible. All your projects, settings, and data will be permanently deleted.
+          </p>
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="deletePassword">Enter your password to confirm</Label>
+          <Input
+            id="deletePassword"
+            type="password"
+            value={deletePassword}
+            onChange={(e) => setDeletePassword(e.target.value)}
+            placeholder="Enter your password"
+          />
+        </div>
+      </FormDialog>
     </div>
   );
 }

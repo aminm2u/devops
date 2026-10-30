@@ -330,7 +330,7 @@ model Project {
   description      String? @db.Text
   status           String  @default("active")
   priority         String  @default("medium")
-  ownerId          Int     @map("owner_id")
+  ownerId          Int?    @map("owner_id")
   repositoryUrl    String? @map("repository_url")
   documentationUrl String? @map("documentation_url")
 
@@ -349,7 +349,7 @@ model Project {
   deletedAt DateTime? @map("deleted_at")
 
   // Relations
-  owner                 User                   @relation(fields: [ownerId], references: [id])
+  owner                 User?                  @relation(fields: [ownerId], references: [id], onDelete: SetNull)
   projectType           ProjectType?           @relation(fields: [projectTypeId], references: [id])
   environments          Environment[]
   teamAssignments       TeamAssignment[]
@@ -1701,7 +1701,7 @@ model GoodsReceipt {
   purchaseOrderId Int      @map("po_id")
   vendorId        Int      @map("vendor_id")
   receivedDate    DateTime @default(now()) @map("received_date")
-  receivedById    Int      @map("received_by_id")
+  receivedById    Int?     @map("received_by_id")
   status          String   @default("pending")
   deliveryNote    String?  @map("delivery_note") @db.Text
   inspectionNotes String?  @map("inspection_notes") @db.Text
@@ -1715,7 +1715,7 @@ model GoodsReceipt {
 
   purchaseOrder PurchaseOrder      @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
   vendor        Vendor             @relation(fields: [vendorId], references: [id], onDelete: Restrict)
-  receivedBy    User               @relation("GRNReceivedBy", fields: [receivedById], references: [id], onDelete: Restrict)
+  receivedBy    User?              @relation("GRNReceivedBy", fields: [receivedById], references: [id], onDelete: SetNull)
   items         GoodsReceiptItem[]
   assets        Asset[]
 
