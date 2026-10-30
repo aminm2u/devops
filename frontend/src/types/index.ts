@@ -741,6 +741,8 @@ export interface TimeEntry {
   projectId: number | null;
   categoryValue: string;
   status: TimeEntryStatus;
+  startTime?: string | null; // actual work period start (e.g. meeting from Teams)
+  endTime?: string | null; // actual work period end
   submittedAt: string | null;
   decidedAt: string | null;
   approverId: number | null;
@@ -798,8 +800,23 @@ export interface CalendarTaskEvent {
   parentTaskId: number | null;
 }
 
+export interface CalendarMeetingEvent {
+  kind: 'meeting';
+  id: number;
+  msEventId: string;
+  title: string;
+  startAt: string; // ISO datetime
+  endAt: string; // ISO datetime
+  isOnlineMeeting: boolean;
+  joinUrl: string | null;
+  organizer: string | null;
+  attended: boolean;
+  timeEntryId: number | null;
+}
+
 export interface CalendarEventsResponse {
   tasks: CalendarTaskEvent[];
+  meetings?: CalendarMeetingEvent[];
   entries: TimeEntry[];
 }
 

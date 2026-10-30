@@ -32,6 +32,7 @@ import goodsReceiptRoutes from "./goodsReceipt.routes.js";
 import assetRoutes from "./asset.routes.js";
 import paymentRoutes from "./payment.routes.js";
 import internalProjectRoutes from "./internalProject.routes.js";
+import microsoftRoutes from "./microsoft.routes.js";
 
 const router = Router();
 
@@ -67,6 +68,7 @@ router.use("/internal-projects", internalProjectRoutes);
 router.use("/helpdesk", helpdeskRoutes);
 router.use("/tasks", taskRoutes);
 router.use("/timesheet", timesheetRoutes);
+router.use("/microsoft", microsoftRoutes);
 router.use("/references", referenceRoutes);
 
 export default router;

@@ -45,6 +45,8 @@ function serializeEntry(entry: any) {
     workDate: fmtDate(entry.workDate),
     submittedAt: entry.submittedAt?.toISOString?.() ?? entry.submittedAt,
     decidedAt: entry.decidedAt?.toISOString?.() ?? entry.decidedAt,
+    startTime: entry.startTime?.toISOString?.() ?? entry.startTime ?? null,
+    endTime: entry.endTime?.toISOString?.() ?? entry.endTime ?? null,
   };
 }
 
@@ -727,13 +729,46 @@ router.get(
         },
       });
 
+      // Microsoft Teams meetings cached for this user (auto sync setting
+      // governs whether new ones are pulled; cached ones always render).
+      let meetings: any[] = [];
+      const msAccount = await prisma.microsoftAccount.findUnique({
+        where: { userId },
+      });
+      if (msAccount?.calendarSyncEnabled) {
+        const calendarEvents = await prisma.calendarEvent.findMany({
+          where: {
+            userId,
+            startAt: { lte: parseWorkDate(to) },
+            endAt: { gte: parseWorkDate(from) },
+          },
+          orderBy: { startAt: "asc" },
+        });
+        meetings = calendarEvents.map((e) => ({
+          kind: "meeting" as const,
+          id: e.id,
+          msEventId: e.msEventId,
+          title: e.subject,
+          startAt: e.startAt.toISOString(),
+          endAt: e.endAt.toISOString(),
+          isOnlineMeeting: e.isOnlineMeeting,
+          joinUrl: e.joinUrl,
+          organizer: e.organizer,
+          attended: e.attended,
+          timeEntryId: e.timeEntryId,
+        }));
+      }
+
       res.status(200).json({
         success: true,
         data: {
           tasks: [...taskEvents, ...subEvents],
+          meetings,
           entries: entries.map((e) => ({
             ...serializeEntry(e),
             kind: "entry" as const,
+            startTime: e.startTime?.toISOString() ?? null,
+            endTime: e.endTime?.toISOString() ?? null,
             sourceLabel: e.subtask
               ? `${e.task?.title ?? ""} › ${e.subtask.title}`
               : e.task

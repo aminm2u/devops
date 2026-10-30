@@ -1041,7 +1041,8 @@ async function main() {
       { value: "project", label: "Project", sortOrder: 1 },
       { value: "management", label: "Management", sortOrder: 2 },
       { value: "programme", label: "Programme", sortOrder: 3 },
-      { value: "others", label: "Others", sortOrder: 4 },
+      { value: "meeting", label: "Meeting", sortOrder: 4 },
+      { value: "others", label: "Others", sortOrder: 5 },
     ],
   };
 

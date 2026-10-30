@@ -105,6 +105,7 @@ model User {
   taskActivities             TaskActivity[]
   // Timesheet & work log relations
   timeEntries                TimeEntry[]                   @relation("TimeEntryUser")
+  microsoftAccount           MicrosoftAccount?
   timesheetToApprove         TimeEntry[]                   @relation("TimesheetApprover")
   subtasksAssigned           TaskSubtask[]                 @relation("SubtaskAssignee")
   timesheetRuleUsers         TimesheetApprovalRuleUser[]
@@ -547,6 +548,13 @@ model TimeEntry {
   approvalRuleId Int?      @map("approval_rule_id")
   rejectReason   String?   @map("reject_reason") @db.Text
 
+  // Actual work period (optional; e.g. meeting start/end imported from MS Teams)
+  startTime      DateTime? @map("start_time")
+  endTime        DateTime? @map("end_time")
+
+  // Microsoft Teams calendar integration
+  msEventId      String?   @map("ms_event_id") // source Graph event when entry was created from a meeting
+
   createdAt      DateTime  @default(now()) @map("created_at")
   updatedAt      DateTime  @updatedAt @map("updated_at")
   deletedAt      DateTime? @map("deleted_at")
@@ -557,6 +565,7 @@ model TimeEntry {
   project      Project?                @relation(fields: [projectId], references: [id], onDelete: SetNull)
   approver     User?                   @relation("TimesheetApprover", fields: [approverId], references: [id], onDelete: SetNull)
   approvalRule TimesheetApprovalRule?  @relation(fields: [approvalRuleId], references: [id], onDelete: SetNull)
+  calendarEvent CalendarEvent?         @relation("CalendarEventTimeEntry")
 
   @@index([userId, workDate])
   @@index([taskId])
@@ -564,7 +573,65 @@ model TimeEntry {
   @@index([projectId])
   @@index([status])
   @@index([approverId, status])
+  @@index([msEventId])
   @@map("time_entries")
+}
+
+// ==================== Microsoft Teams / Entra ID Integration ====================
+
+// Per-user Microsoft account link (OAuth tokens + sync preferences)
+model MicrosoftAccount {
+  id             Int       @id @default(autoincrement())
+  userId         Int       @unique @map("user_id")
+  msUserId       String    @map("ms_user_id") // Entra ID object id (oid claim)
+  email          String // Microsoft account email (mail / UPN)
+  displayName    String?   @map("display_name")
+  accessToken    String    @map("access_token") // AES-256-CBC encrypted
+  refreshToken   String?   @map("refresh_token") // AES-256-CBC encrypted
+  tokenExpiresAt DateTime  @map("token_expires_at")
+  // Calendar sync: meetings auto-appear in My Work Portal calendar
+  calendarSyncEnabled Boolean @default(true) @map("calendar_sync_enabled")
+  // Timesheet sync mode: manual = log attendance on click; auto = draft entry per meeting
+  timesheetAutoSync   Boolean @default(false) @map("timesheet_auto_sync")
+  // Minimum meeting duration (minutes) eligible for auto timesheet entries
+  minMeetingMinutes   Int     @default(15) @map("min_meeting_minutes")
+  // Default category used for meeting-derived time entries
+  timesheetCategory   String  @default("meeting") @map("timesheet_category")
+  lastSyncedAt   DateTime? @map("last_synced_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  user           User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  calendarEvents CalendarEvent[]
+
+  @@index([userId])
+  @@map("microsoft_accounts")
+}
+
+// Cached Microsoft calendar event (meeting) per user
+model CalendarEvent {
+  id              Int       @id @default(autoincrement())
+  userId          Int       @map("user_id")
+  msEventId       String    @map("ms_event_id") // Graph event id
+  subject         String
+  startAt         DateTime  @map("start_at") @db.Timestamptz(3)
+  endAt           DateTime  @map("end_at") @db.Timestamptz(3)
+  isOnlineMeeting Boolean   @default(false) @map("is_online_meeting")
+  joinUrl         String?   @map("join_url")
+  organizer       String?
+  // Timesheet linkage
+  attended        Boolean   @default(false)
+  timeEntryId     Int?      @unique @map("time_entry_id")
+  syncSource      String    @default("manual") // manual | auto
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  account    MicrosoftAccount @relation(fields: [userId], references: [userId], onDelete: Cascade)
+  timeEntry  TimeEntry?       @relation("CalendarEventTimeEntry", fields: [timeEntryId], references: [id], onDelete: SetNull)
+
+  @@unique([userId, msEventId])
+  @@index([userId, startAt])
+  @@map("calendar_events")
 }
 
 // ==================== Timesheet Approval Rules ====================

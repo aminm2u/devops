@@ -10,6 +10,7 @@ export function useAuth() {
     register,
     logout,
     fetchUser,
+    setUser,
     hasRole,
     hasPermission,
   } = useAuthStore();
@@ -23,6 +24,7 @@ export function useAuth() {
     register,
     logout,
     fetchUser,
+    setUser,
     hasRole,
     hasPermission,
   };

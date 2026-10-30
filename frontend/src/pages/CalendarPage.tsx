@@ -1,14 +1,18 @@
 import { useState, useMemo, useCallback } from 'react';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Calendar as BigCalendar, dateFnsLocalizer, Event as RbcEvent } from 'react-big-calendar';
 import { format, parse, startOfWeek, getDay, addDays, addMonths, addWeeks, subDays, subMonths, subWeeks, endOfWeek, endOfDay, startOfDay } from 'date-fns';
 import { enUS } from 'date-fns/locale';
+import { Video } from 'lucide-react';
 import 'react-big-calendar/lib/css/react-big-calendar.css';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { CalendarToolbar, CalendarView } from '@/components/calendar/CalendarToolbar';
 import { TaskDetailModal } from '@/pages/project-tabs/TaskDetailModal';
 import { TimeEntryFormDialog } from '@/components/timesheet/TimeEntryFormDialog';
 import { useCalendarEvents } from '@/hooks/useTimeEntries';
-import type { TimeEntry, CalendarTaskEvent } from '@/types';
+import { microsoftApi } from '@/api/microsoft';
+import type { TimeEntry, CalendarTaskEvent, CalendarMeetingEvent } from '@/types';
+import toast from 'react-hot-toast';
 
 const localizer = dateFnsLocalizer({
   format,
@@ -29,12 +33,16 @@ function loadDefaultView(): CalendarView {
 }
 
 type CalEvent = RbcEvent & {
-  kind: 'task' | 'subtask' | 'entry';
-  payload: CalendarTaskEvent | TimeEntry;
+  kind: 'task' | 'subtask' | 'entry' | 'meeting';
+  payload: CalendarTaskEvent | TimeEntry | CalendarMeetingEvent;
   isOverdue: boolean;
 };
 
-function toCalEvents(tasks: CalendarTaskEvent[], entries: TimeEntry[]): CalEvent[] {
+function toCalEvents(
+  tasks: CalendarTaskEvent[],
+  entries: TimeEntry[],
+  meetings: CalendarMeetingEvent[] = []
+): CalEvent[] {
   const events: CalEvent[] = [];
 
   for (const t of tasks) {
@@ -52,16 +60,45 @@ function toCalEvents(tasks: CalendarTaskEvent[], entries: TimeEntry[]): CalEvent
   }
 
   for (const e of entries) {
+    // Timed entries (e.g. logged meetings) render in their actual slot;
+    // plain all-day entries stay on the day grid.
     const day = new Date(e.workDate + 'T00:00:00');
     const label = e.sourceLabel
       ?? (e.subtask ? `${e.task?.title ?? ''} › ${e.subtask.title}` : e.task ? e.task.title : 'Ad-hoc');
+    if (e.startTime && e.endTime) {
+      events.push({
+        title: `⏱ ${Number(e.hours)}h · ${label}`,
+        start: new Date(e.startTime),
+        end: new Date(e.endTime),
+        allDay: false,
+        kind: 'entry',
+        payload: e,
+        isOverdue: false,
+      });
+    } else {
+      events.push({
+        title: `⏱ ${Number(e.hours)}h · ${label}`,
+        start: day,
+        end: day,
+        allDay: true,
+        kind: 'entry',
+        payload: e,
+        isOverdue: false,
+      });
+    }
+  }
+
+  for (const m of meetings) {
+    const start = new Date(m.startAt);
+    const end = new Date(m.endAt);
+    const logged = m.attended || m.timeEntryId != null;
     events.push({
-      title: `⏱ ${Number(e.hours)}h · ${label}`,
-      start: day,
-      end: day,
-      allDay: true,
-      kind: 'entry',
-      payload: e,
+      title: `${logged ? '🎥' : '📹'} ${m.title}${logged ? ' ✓' : ''}`,
+      start,
+      end,
+      allDay: false,
+      kind: 'meeting',
+      payload: m,
       isOverdue: false,
     });
   }
@@ -70,6 +107,7 @@ function toCalEvents(tasks: CalendarTaskEvent[], entries: TimeEntry[]): CalEvent
 }
 
 export function CalendarPage() {
+  const queryClient = useQueryClient();
   const [view, setView] = useState<CalendarView>(loadDefaultView);
   const [date, setDate] = useState<Date>(new Date());
 
@@ -84,7 +122,21 @@ export function CalendarPage() {
   }, [date]);
 
   const { data, isLoading } = useCalendarEvents(range.from, range.to);
-  const events = useMemo(() => toCalEvents(data?.tasks ?? [], data?.entries ?? []), [data]);
+  const meetings = useMemo(() => data?.meetings ?? [], [data]);
+  const events = useMemo(
+    () => toCalEvents(data?.tasks ?? [], data?.entries ?? [], meetings),
+    [data, meetings]
+  );
+
+  const logAttendanceMutation = useMutation({
+    mutationFn: (meeting: CalendarMeetingEvent) => microsoftApi.logAttendance(meeting.id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['timesheet-calendar'] });
+      queryClient.invalidateQueries({ queryKey: ['microsoft-events'] });
+      toast.success('Meeting logged as timesheet draft');
+    },
+    onError: () => toast.error('Failed to log meeting attendance'),
+  });
 
   const handleView = useCallback((v: CalendarView) => {
     setView(v);
@@ -103,13 +155,22 @@ export function CalendarPage() {
 
   const handleSelectEvent = useCallback((event: RbcEvent) => {
     const e = event as CalEvent;
+    if (e.kind === 'meeting') {
+      const m = e.payload as CalendarMeetingEvent;
+      if (m.attended || m.timeEntryId != null) {
+        toast('This meeting is already logged in your timesheet');
+      } else {
+        logAttendanceMutation.mutate(m);
+      }
+      return;
+    }
     if (e.kind === 'entry') {
       setEntryDialog({ entry: e.payload as TimeEntry, open: true });
     } else {
       const t = e.payload as CalendarTaskEvent;
       setTaskModal({ taskId: t.kind === 'subtask' ? (t.parentTaskId ?? t.id) : t.id, open: true });
     }
-  }, []);
+  }, [logAttendanceMutation]);
 
   const eventPropGetter = useCallback((event: RbcEvent) => {
     const e = event as CalEvent;
@@ -120,6 +181,20 @@ export function CalendarPage() {
           backgroundColor: 'hsl(var(--destructive) / 0.15)',
           border: '1px solid hsl(var(--destructive) / 0.4)',
           color: 'hsl(var(--destructive))',
+          borderRadius: '6px',
+          fontSize: '11px',
+          padding: '1px 4px',
+        },
+      };
+    }
+    if (e.kind === 'meeting') {
+      const m = e.payload as CalendarMeetingEvent;
+      const logged = m.attended || m.timeEntryId != null;
+      return {
+        style: {
+          backgroundColor: logged ? 'hsl(252 60% 55% / 0.18)' : 'hsl(252 60% 55% / 0.32)',
+          border: '1px solid hsl(252 60% 45% / 0.5)',
+          color: 'hsl(252 60% 40%)',
           borderRadius: '6px',
           fontSize: '11px',
           padding: '1px 4px',
@@ -154,7 +229,7 @@ export function CalendarPage() {
     <div className="space-y-4">
       <PageHeader
         title="Calendar"
-        description="Task due dates and your timesheet entries"
+        description="Task due dates, your timesheet entries and Microsoft Teams meetings"
       />
 
       <div className="bg-card border border-border/50 rounded-xl p-4 my-calendar">
@@ -199,6 +274,10 @@ export function CalendarPage() {
         <span className="flex items-center gap-1.5">
           <span className="inline-block h-2.5 w-2.5 rounded" style={{ background: 'hsl(var(--primary) / 0.35)' }} />
           Timesheet entry
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="inline-block h-2.5 w-2.5 rounded" style={{ background: 'hsl(252 60% 55% / 0.32)' }} />
+          <Video className="h-3 w-3" /> Teams meeting (click to log attendance)
         </span>
         <span className="flex items-center gap-1.5">
           <span className="inline-block h-2.5 w-2.5 rounded" style={{ background: 'hsl(var(--destructive) / 0.45)' }} />

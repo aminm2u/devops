@@ -86,9 +86,9 @@ function saveSettings(settings: SettingsData) {
 }
 
 // ── Main Component ────────────────────────────────────────────────────────────
-export function SettingsPage() {
+export function SettingsPage({ embedded = false }: { embedded?: boolean }) {
   const { user, hasRole } = useAuth();
-  const { theme: currentTheme, setTheme: setCurrentTheme } = useTheme();
+  const { setTheme: setCurrentTheme } = useTheme();
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
 
@@ -168,11 +168,13 @@ export function SettingsPage() {
   ];
 
   return (
-    <div className="max-w-3xl mx-auto space-y-6 animate-fade-in">
-      <div>
-        <h1 className="text-2xl font-bold">Settings</h1>
-        <p className="text-muted-foreground">Manage your workspace preferences</p>
-      </div>
+    <div className={embedded ? 'space-y-6' : 'max-w-3xl mx-auto space-y-6 animate-fade-in'}>
+      {!embedded && (
+        <div>
+          <h1 className="text-2xl font-bold">Settings</h1>
+          <p className="text-muted-foreground">Manage your workspace preferences</p>
+        </div>
+      )}
 
       <Tabs defaultValue="general" className="space-y-6">
         <TabsList>
