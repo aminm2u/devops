@@ -5,7 +5,7 @@ import {
   Moon,
   Sun,
   LogOut,
-  Settings,
+  UserCog,
   PanelLeftClose,
   PanelLeftOpen,
 } from 'lucide-react';
@@ -120,14 +120,14 @@ export function TopNav({ onMobileMenuToggle, isSidebarCollapsed, onSidebarToggle
             </div>
           </DropdownMenuLabel>
           <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={() => navigate('/settings')}>
-            <Settings className="mr-2 h-4 w-4" />
-            <span>Settings</span>
+          <DropdownMenuItem onClick={() => navigate('/settings')} className="cursor-pointer py-2">
+            <UserCog className="mr-2 h-4 w-4" />
+            <span>Digital Me</span>
           </DropdownMenuItem>
           <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={handleLogout}>
-            <LogOut className="mr-2 h-4 w-4" />
-            <span>Log out</span>
+          <DropdownMenuItem onClick={handleLogout} className="cursor-pointer py-2">
+            <LogOut className="mr-2 h-4 w-4 text-red-500" />
+            <span className="text-red-500">Log out</span>
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>

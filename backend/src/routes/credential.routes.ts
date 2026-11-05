@@ -73,7 +73,7 @@ const updateCredentialSchema = z.object({
 router.get(
   "/:projectId/credentials",
   authenticate,
-  requirePermission("view-projects"),
+  requirePermission("project.record.view"),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const projectId = parseInt(req.params.projectId, 10);
@@ -120,7 +120,7 @@ router.get(
 router.post(
   "/:projectId/credentials",
   authenticate,
-  requirePermission("update-projects"),
+  requirePermission("project.record.manage"),
   validate(createCredentialSchema),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
@@ -183,7 +183,7 @@ router.post(
 router.put(
   "/:projectId/credentials/:credentialId",
   authenticate,
-  requirePermission("update-projects"),
+  requirePermission("project.record.manage"),
   validate(updateCredentialSchema),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
@@ -249,7 +249,7 @@ router.put(
 router.delete(
   "/:projectId/credentials/:credentialId",
   authenticate,
-  requirePermission("update-projects"),
+  requirePermission("project.record.manage"),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const projectId = parseInt(req.params.projectId, 10);
@@ -284,7 +284,7 @@ router.delete(
 router.get(
   "/:projectId/credentials/:credentialId/raw",
   authenticate,
-  requirePermission("update-projects"),
+  requirePermission("project.record.manage"),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const projectId = parseInt(req.params.projectId, 10);

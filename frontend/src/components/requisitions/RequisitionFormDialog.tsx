@@ -26,12 +26,10 @@ import { FormDialog } from '@/components/ui/form-dialog';
 import { StatusBadge } from '@/components/ui/status-badge';
 import apiClient from '@/api/client';
 import { useAuth } from '@/hooks/useAuth';
+import { useReferenceData, toSelectOptions } from '@/hooks/useReferenceData';
 import { RequisitionForm, RequisitionItem } from '@/types';
 import { formatDate } from '@/lib/utils';
 import toast from 'react-hot-toast';
-
-const DIVISIONS = ['IT', 'DMA', 'HR', 'BD', 'DI', 'ADMIN'];
-const UOMS = ['Unit', 'Set', 'Box', 'Piece', 'Lot', 'Month', 'Year', 'License'];
 
 const emptyItem: RequisitionItem = {
   description: '',
@@ -70,6 +68,13 @@ export function RequisitionFormDialog({
   isSubmitting: boolean;
 }) {
   const { user } = useAuth();
+  // Divisions and units of measure are master data (Settings → Reference Data),
+  // not literals: the old arrays here had drifted to 6 of 8 divisions and 8 of
+  // 12 UoMs, so a requisition could not be raised against Finance or Operations.
+  const { data: divisionData } = useReferenceData('division');
+  const { data: uomData } = useReferenceData('uom');
+  const divisions = toSelectOptions(divisionData);
+  const uoms = toSelectOptions(uomData);
 
   const { data: budgetData } = useQuery({
     queryKey: ['budget-items-for-requisition'],
@@ -173,8 +178,8 @@ export function RequisitionFormDialog({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {DIVISIONS.map((d) => (
-                  <SelectItem key={d} value={d}>{d}</SelectItem>
+                {divisions.map((d) => (
+                  <SelectItem key={d.value} value={d.value}>{d.label}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -290,8 +295,8 @@ export function RequisitionFormDialog({
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          {UOMS.map((u) => (
-                            <SelectItem key={u} value={u}>{u}</SelectItem>
+                          {uoms.map((u) => (
+                            <SelectItem key={u.value} value={u.value}>{u.label}</SelectItem>
                           ))}
                         </SelectContent>
                       </Select>

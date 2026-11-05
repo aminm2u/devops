@@ -55,7 +55,7 @@ async function checkProjectAccess(
 router.get(
   "/",
   authenticate,
-  requirePermission("view-environments"),
+  requirePermission("project.environment.manage"),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const projectId = parseInt(req.params.projectId, 10);
@@ -91,7 +91,7 @@ router.get(
 router.post(
   "/",
   authenticate,
-  requirePermission("create-environments"),
+  requirePermission("project.environment.manage"),
   validate(createEnvironmentSchema),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
@@ -148,7 +148,7 @@ router.post(
 router.get(
   "/:id",
   authenticate,
-  requirePermission("view-environments"),
+  requirePermission("project.environment.manage"),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const projectId = parseInt(req.params.projectId, 10);
@@ -194,7 +194,7 @@ router.get(
 router.put(
   "/:id",
   authenticate,
-  requirePermission("update-environments"),
+  requirePermission("project.environment.manage"),
   validate(updateEnvironmentSchema),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
@@ -267,7 +267,7 @@ router.put(
 router.delete(
   "/:id",
   authenticate,
-  requirePermission("delete-environments"),
+  requirePermission("project.environment.manage"),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const projectId = parseInt(req.params.projectId, 10);

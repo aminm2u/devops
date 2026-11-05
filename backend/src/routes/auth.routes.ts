@@ -151,9 +151,26 @@ router.get(
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const user = await authService.getMe(req.user!.id);
+      // `access` is the resolved, authoritative permission set. The frontend
+      // renders nav and gates from this — it must never re-derive permissions
+      // from role names, or the two would drift.
+      const access = req.access!;
       res.status(200).json({
         success: true,
-        data: user,
+        data: {
+          ...user,
+          access: {
+            isSuperAdmin: access.isSuperAdmin,
+            level: access.level,
+            roles: access.roles,
+            teamIds: access.teamIds,
+            departmentIds: access.departmentIds,
+            directManagerId: access.directManagerId,
+            permissions: Object.values(access.permissions)
+              .filter((perm) => !perm.denied)
+              .map((perm) => ({ name: perm.name, scope: perm.scope })),
+          },
+        },
         message: "User retrieved successfully",
       });
     } catch (error) {

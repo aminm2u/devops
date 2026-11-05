@@ -12,6 +12,7 @@ import { FormDialog } from '@/components/ui/form-dialog';
 import { FormField } from '@/components/ui/form-field';
 import { FormGrid } from '@/components/ui/form-grid';
 import apiClient from '@/api/client';
+import { useReferenceData, toSelectOptions } from '@/hooks/useReferenceData';
 import toast from 'react-hot-toast';
 
 interface Incident {
@@ -51,6 +52,11 @@ export function IncidentDialog({
   incident,
   onSuccess,
 }: IncidentDialogProps) {
+  // Severity and lifecycle come from master data.
+  const { data: severityData } = useReferenceData('incident_severity');
+  const severities = toSelectOptions(severityData);
+  const { data: statusData } = useReferenceData('status_incident');
+  const incidentStatuses = toSelectOptions(statusData);
   const [form, setForm] = useState(emptyForm);
   const [isPending, setIsPending] = useState(false);
 
@@ -136,10 +142,9 @@ export function IncidentDialog({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="low">Low</SelectItem>
-              <SelectItem value="medium">Medium</SelectItem>
-              <SelectItem value="high">High</SelectItem>
-              <SelectItem value="critical">Critical</SelectItem>
+              {severities.map((option) => (
+                <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </FormField>
@@ -149,12 +154,9 @@ export function IncidentDialog({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="open">Open</SelectItem>
-              <SelectItem value="investigating">Investigating</SelectItem>
-              <SelectItem value="identified">Identified</SelectItem>
-              <SelectItem value="monitoring">Monitoring</SelectItem>
-              <SelectItem value="resolved">Resolved</SelectItem>
-              <SelectItem value="closed">Closed</SelectItem>
+              {incidentStatuses.map((option) => (
+                <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </FormField>

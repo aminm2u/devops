@@ -1,14 +1,23 @@
 import { Router, Response, NextFunction } from "express";
 import { authenticate } from "../middleware/auth.js";
+import { authorize } from "../rbac/authorize.js";
 import { RequestWithUser } from "../types/index.js";
 import prisma from "../config/database.js";
 
 const router = Router();
 
-// GET /api/activity-log - List all activity logs
+/**
+ * GET /api/activity-log — the full audit trail.
+ *
+ * The frontend route is super-admin only, but that was the *only* guard: the
+ * API itself answered any signed-in caller, so the whole audit trail was one
+ * `curl` away from every employee. `scope: "all"` because an audit view that
+ * silently narrowed to the caller's own team would be worse than no audit view.
+ */
 router.get(
   "/",
   authenticate,
+  authorize({ permission: "admin.activity.view", scope: "all" }),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const { search, event, userId, page = "1", limit = "30" } = req.query;

@@ -1,13 +1,14 @@
 import { Router, Response, NextFunction } from "express";
 import { z } from "zod";
 import { authenticate } from "../middleware/auth.js";
-import { requireRole } from "../middleware/rbac.js";
+import { requirePermission } from "../middleware/rbac.js";
 import { validate } from "../middleware/validate.js";
 import { RequestWithUser } from "../types/index.js";
 import { NotFoundError } from "../lib/errors.js";
 import { logActivity } from "../middleware/activity.js";
 import prisma from "../config/database.js";
 import { generateReferenceNumber } from "../lib/numberGenerator.js";
+import { openRequest, settleSubject } from "../services/approvalRequest.service.js";
 
 const router = Router();
 
@@ -123,7 +124,7 @@ router.get(
 router.post(
   "/",
   authenticate,
-  requireRole("super-admin", "devops-admin"),
+  requirePermission("procurement.po.manage"),
   validate(createPoSchema),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
@@ -181,7 +182,7 @@ router.post(
 router.put(
   "/:id",
   authenticate,
-  requireRole("super-admin", "devops-admin"),
+  requirePermission("procurement.po.manage"),
   validate(updatePoSchema),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
@@ -266,6 +267,25 @@ router.put(
         data: { status: "submitted" },
       });
 
+      // Purchase orders have no team, so the approver comes from the global
+      // capability chain. When nobody resolves, the PO stays submitted and the
+      // procurement page still shows it — the ledger is an extra surface, not
+      // the only one, so a missing approver must not block the submission.
+      if (existing.requestedById) {
+        await openRequest({
+          module: "purchase-order",
+          subjectType: "PurchaseOrder",
+          subjectId: id,
+          title: `PO ${existing.poNumber} — ${existing.currency} ${Number(
+            existing.grandTotal
+          ).toFixed(2)}`,
+          requesterId: existing.requestedById,
+          approvalPermission: "procurement.po.approve",
+          link: "/procurement/purchase-orders",
+          metadata: { vendorId: existing.vendorId, projectId: existing.projectId },
+        });
+      }
+
       res.json({ success: true, data: updated });
     } catch (error) {
       res.status(500).json({ error: "Internal server error" });
@@ -277,7 +297,10 @@ router.put(
 router.put(
   "/:id/approve",
   authenticate,
-  requireRole("super-admin", "devops-admin"),
+  // Approving used to require `.manage`, the same grant as creating — so the
+  // person who raised the PO could also sign it off. The catalog has had a
+  // separate `procurement.po.approve` capability all along.
+  requirePermission("procurement.po.approve"),
   async (req: Request, res: Response) => {
     try {
       const id = parseInt(req.params.id);
@@ -301,6 +324,8 @@ router.put(
         },
       });
 
+      await settleSubject({ subjectType: "PurchaseOrder", subjectId: id, status: "approved" });
+
       res.json({ success: true, data: updated });
     } catch (error) {
       res.status(500).json({ error: "Internal server error" });
@@ -312,7 +337,7 @@ router.put(
 router.delete(
   "/:id",
   authenticate,
-  requireRole("super-admin", "devops-admin"),
+  requirePermission("procurement.po.manage"),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const { id } = req.params;

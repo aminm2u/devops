@@ -1,7 +1,7 @@
 import { Router, Response, NextFunction } from "express";
 import { z } from "zod";
 import { authenticate } from "../middleware/auth.js";
-import { requireRole } from "../middleware/rbac.js";
+import { requirePermission } from "../middleware/rbac.js";
 import { validate } from "../middleware/validate.js";
 import { RequestWithUser } from "../types/index.js";
 import { NotFoundError } from "../lib/errors.js";
@@ -98,7 +98,7 @@ router.get(
 router.post(
   "/",
   authenticate,
-  requireRole("super-admin", "devops-admin"),
+  requirePermission("procurement.vendor.manage"),
   validate(createVendorSchema),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
@@ -124,7 +124,7 @@ router.post(
 router.put(
   "/:id",
   authenticate,
-  requireRole("super-admin", "devops-admin"),
+  requirePermission("procurement.vendor.manage"),
   validate(updateVendorSchema),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
@@ -159,7 +159,7 @@ router.put(
 router.delete(
   "/:id",
   authenticate,
-  requireRole("super-admin", "devops-admin"),
+  requirePermission("procurement.vendor.manage"),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const { id } = req.params;

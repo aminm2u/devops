@@ -1,7 +1,7 @@
 import { Router, Request, Response, NextFunction } from "express";
 import { z } from "zod";
 import { authenticate } from "../middleware/auth.js";
-import { requireRole } from "../middleware/rbac.js";
+import { requirePermission } from "../middleware/rbac.js";
 import { validate } from "../middleware/validate.js";
 import { RequestWithUser } from "../types/index.js";
 import { logActivity } from "../middleware/activity.js";
@@ -191,7 +191,7 @@ router.get(
 router.put(
   "/config",
   authenticate,
-  requireRole("super-admin"),
+  requirePermission("admin.integration.manage"),
   validate(appConfigSchema),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
@@ -496,7 +496,7 @@ router.post(
 router.post(
   "/sync-all",
   authenticate,
-  requireRole("super-admin"),
+  requirePermission("admin.integration.manage"),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const accounts = await prisma.microsoftAccount.findMany();

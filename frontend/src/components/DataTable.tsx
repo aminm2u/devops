@@ -252,7 +252,7 @@ export function DataTable<T>({
       )}
 
       {/* Table Container */}
-      <div className="rounded-md border border-border bg-card shadow-sm overflow-hidden p-2">
+      <div className="rounded-md border border-border bg-card shadow-sm overflow-hidden p-2 dark:text-gray-300 text-gray-500">
         <Table>
           <TableHeader
             className={cn(

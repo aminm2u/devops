@@ -37,6 +37,19 @@ export function useMyTasks() {
   });
 }
 
+/**
+ * The enrolled work this user may log against. Shared cache key so the entry
+ * drawer, any legacy form still on `my-tasks`, and future pickers agree.
+ */
+export function useEnrollable(enabled = true) {
+  return useQuery({
+    queryKey: ['timesheet-enrollable'],
+    queryFn: () => timesheetApi.enrollable(),
+    staleTime: 60 * 1000,
+    enabled,
+  });
+}
+
 export function useCalendarEvents(from: string, to: string) {
   return useQuery({
     queryKey: ['timesheet-calendar', from, to],

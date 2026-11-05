@@ -1,36 +1,10 @@
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import {
-  LayoutDashboard,
-  FolderKanban,
-  Settings,
-  Server,
-  AlertTriangle,
-  Rocket,
-  Activity,
-  Users,
-  BarChart3,
-  Shield,
-  Globe,
-  Bell,
-  DollarSign,
-  FileText,
-  ClipboardCheck,
-  Headphones,
-  ShoppingCart,
-  Package,
-  Truck,
-  CreditCard,
-  Building2,
-  ClipboardList,
-  MessageSquare,
-  SlidersHorizontal,
-  Shapes,
-  CalendarDays,
-  Timer,
-} from 'lucide-react';
+import { ChevronDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/hooks/useAuth';
 import { useTheme } from '@/hooks/useTheme';
+import { navGroupsFromRoutes, type NavRoute } from '@/app/routes.config';
 import mwpLogoWhite from '@/assets/mwp_logo_white.png';
 import mwpLogoBlack from '@/assets/mwp_logo_black.png';
 
@@ -38,100 +12,27 @@ interface SidebarProps {
   isCollapsed: boolean;
 }
 
-interface NavItem {
-  name: string;
-  href: string;
-  icon: React.ElementType;
-  adminOnly?: boolean;
-}
-
-interface NavGroup {
-  label: string;
-  items: NavItem[];
-}
-
-const navigation: NavGroup[] = [
-  {
-    label: 'Main',
-    items: [
-      { name: 'Dashboard', href: '/', icon: LayoutDashboard },
-    ],
-  },
-    {
-    label: 'My Work Portal',
-    items: [
-      { name: 'Calendar', href: '/my-work/calendar', icon: CalendarDays },
-      { name: 'Timesheet', href: '/my-work/timesheet', icon: Timer },
-      { name: 'Approvals', href: '/my-work/approvals', icon: ClipboardCheck },
-      { name: 'Timesheet Settings', href: '/settings/timesheet', icon: SlidersHorizontal, adminOnly: true },
-    ],
-  },
-  {
-    label: 'Projects & Assets',
-    items: [
-      { name: 'Projects', href: '/projects', icon: FolderKanban },
-      { name: 'Infrastructure', href: '/infrastructure', icon: Server },
-      { name: 'Deployments', href: '/deployments', icon: Rocket },
-    ],
-  },
-  {
-    label: 'Network & Security',
-    items: [
-      { name: 'SSL Certificates', href: '/ssl', icon: Shield },
-      { name: 'Domains', href: '/domains', icon: Globe },
-    ],
-  },
-  {
-    label: 'Finance & Procurement',
-    items: [
-      { name: 'Budget Control', href: '/budget', icon: DollarSign },
-      { name: 'Requisitions', href: '/requisitions', icon: FileText },
-      { name: 'Requisition Approve', href: '/requisitions/manage', icon: ClipboardCheck },
-      { name: 'RFQ / Tendering', href: '/rfq', icon: MessageSquare },
-      { name: 'Vendors', href: '/vendors', icon: Building2 },
-      { name: 'Purchase Orders', href: '/purchase-orders', icon: ShoppingCart },
-      { name: 'Direct Purchases', href: '/direct-purchases', icon: Package },
-      { name: 'Goods Receipts', href: '/goods-receipts', icon: Truck },
-      { name: 'Payments', href: '/payments', icon: CreditCard },
-      { name: 'Assets', href: '/assets', icon: ClipboardList },
-      { name: 'Internal Projects', href: '/internal-projects', icon: FolderKanban },
-      { name: 'Procurement Settings', href: '/settings/procurement', icon: SlidersHorizontal, adminOnly: true },
-    ],
-  },
-  {
-    label: 'Helpdesk',
-    items: [
-      { name: 'Tickets', href: '/helpdesk', icon: Headphones },
-      { name: 'Manage', href: '/helpdesk/manage', icon: Settings, adminOnly: true },
-      { name: 'Reports', href: '/helpdesk/reports', icon: BarChart3 },
-    ],
-  },
-  {
-    label: 'Operations',
-    items: [
-      { name: 'Incidents', href: '/incidents', icon: AlertTriangle },
-      { name: 'Grafana', href: '/grafana', icon: BarChart3 },
-      { name: 'Activity Log', href: '/activity-log', icon: Activity },
-    ],
-  },
-  {
-    label: 'Account',
-    items: [
-      { name: 'Notifications', href: '/notifications', icon: Bell },
-      { name: 'Users', href: '/admin/users', icon: Users, adminOnly: true },
-      { name: 'Settings', href: '/settings', icon: Settings },
-    ],
-  },
-  {
-    label: 'Developer',
-    items: [{ name: 'Components', href: '/components', icon: Shapes }],
-  },
-];
+/**
+ * Navigation.
+ *
+ * The list is not written here — it is derived from `app/routes.config.tsx`,
+ * which is also what the router guards. That is the point: a nav item cannot
+ * exist for a page the guard would bounce, and a new page cannot be added
+ * without deciding, in one place, who may see it.
+ *
+ * Visibility is then filtered against the caller's *resolved* access, the same
+ * payload `useAuth().can` reads, so this is consistent with the server rather
+ * than a second guess at it.
+ *
+ * Large groups (DevOps Operations carries nine destinations) fold away. A
+ * folded group re-opens itself whenever the current page is inside it, so
+ * collapsing can never hide where you are.
+ */
 
 /**
  * A nav item is active only when its href is the longest matching prefix of
- * the current path — so "/requisitions/manage" activates "Requisition Approve"
- * without also activating "Requisitions".
+ * the current path — so "/devops/helpdesk/reports" activates "Helpdesk
+ * Reports" without also activating "Helpdesk Queue".
  */
 function isNavActive(pathname: string, href: string, allHrefs: string[]): boolean {
   const isPrefix = (candidate: string) =>
@@ -144,13 +45,60 @@ function isNavActive(pathname: string, href: string, allHrefs: string[]): boolea
   );
 }
 
+const NAV_GROUPS = navGroupsFromRoutes();
+
+/** Groups above this size fold by default. */
+const FOLD_THRESHOLD = 5;
+
 export function Sidebar({ isCollapsed }: SidebarProps) {
   const location = useLocation();
-  const { user } = useAuth();
+  const { can, isSuperAdmin, user } = useAuth();
   const { effectiveTheme } = useTheme();
-  const isAdmin = user?.roles?.some((r: any) => ['super-admin', 'devops-admin'].includes(r.name));
   const logo = effectiveTheme === 'dark' ? mwpLogoWhite : mwpLogoBlack;
-  const allHrefs = navigation.flatMap((g) => g.items.map((i) => i.href));
+
+  const hrefOf = (route: NavRoute) => `/${route.path}`;
+  const allHrefs = NAV_GROUPS.flatMap((group) => group.items.map(hrefOf));
+
+  const isVisible = (route: NavRoute): boolean => {
+    const { meta } = route;
+    if (meta.superAdminOnly) return isSuperAdmin;
+    if (meta.permission) return can(meta.permission);
+    if (meta.anyOf?.length) return meta.anyOf.some((perm) => can(perm));
+    return true;
+  };
+
+  const visibleGroups = useMemo(
+    () =>
+      NAV_GROUPS.map((group) => ({ ...group, items: group.items.filter(isVisible) })).filter(
+        (group) => group.items.length > 0
+      ),
+    // `can` is a stable Zustand action, so it never changes identity — the
+    // real dependency is the resolved access payload. Keying the memo on
+    // `user?.access` is what makes a mid-session grant (or a revoke) re-filter
+    // the nav without a reload.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [user?.access, isSuperAdmin, can]
+  );
+
+  // `open` records the groups the user explicitly opened or closed. Anything
+  // absent uses the default, so a role change does not leave stale state.
+  const [open, setOpen] = useState<Record<string, boolean>>({});
+
+  /** The group containing the current page is always open. */
+  const activeGroup = visibleGroups.find((group) =>
+    group.items.some((route) =>
+      isNavActive(location.pathname, hrefOf(route), allHrefs)
+    )
+  )?.key;
+
+  // Re-opened on navigation rather than in render, so the user can still close
+  // it while staying on the page.
+  useEffect(() => {
+    if (activeGroup) setOpen((prev) => ({ ...prev, [activeGroup]: true }));
+  }, [activeGroup]);
+
+  const isOpen = (key: string, size: number) =>
+    open[key] ?? size <= FOLD_THRESHOLD;
 
   return (
     <aside
@@ -160,61 +108,82 @@ export function Sidebar({ isCollapsed }: SidebarProps) {
       )}
     >
       {/* Logo — same height as navbar */}
-      <div className="flex h-14 mt-2 shrink-0 items-center border-b border-border/40 justify-center">
+      <div className="mt-2 flex h-14 shrink-0 items-center justify-center border-b border-border/40">
         {!isCollapsed ? (
-          <img
-            src={logo}
-            alt="MyWorkPortal2.0"
-            className="h-12 w-auto object-contain px-12"
-          />
+          <img src={logo} alt="MyWorkPortal2.0" className="h-12 w-auto object-contain px-12" />
         ) : (
-          <div className="mx-auto flex h-8 w-8 items-center justify-center rounded-md bg-primary text-primary-foreground font-bold text-[11px] p-4">
+          <div className="mx-auto flex h-8 w-8 items-center justify-center rounded-md bg-primary p-4 text-[11px] font-bold text-primary-foreground">
             MWP
           </div>
         )}
       </div>
 
-      {/* Navigation */}
-      <nav className="flex-1 overflow-y-auto px-2 py-3 scrollbar-none">
-        {navigation.map((group, gi) => (
-          <div key={group.label} className={cn(gi > 0 && 'mt-4')}>
-            {!isCollapsed && (
-              <div className="mb-1 px-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/50">
-                {group.label}
-              </div>
-            )}
-            {isCollapsed && gi > 0 && (
-              <div className="mx-3 my-2 border-t border-border/40" />
-            )}
-            <div className="space-y-0.5">
-              {group.items
-                .filter((item) => {
-                  if (item.adminOnly && !isAdmin) return false;
-                  return true;
-                })
-                .map((item) => {
-                  const isActive = isNavActive(location.pathname, item.href, allHrefs);
-                  return (
-                    <Link
-                      key={item.name}
-                      to={item.href}
-                      className={cn(
-                        'flex items-center gap-3 rounded-lg px-3 py-[7px] text-[13px] font-medium transition-colors',
-                        isActive
-                          ? 'bg-primary/10 text-primary'
-                          : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground',
-                        isCollapsed && 'justify-center px-2'
-                      )}
-                      title={isCollapsed ? item.name : undefined}
-                    >
-                      <item.icon className="h-[18px] w-[18px] shrink-0" />
-                      {!isCollapsed && <span>{item.name}</span>}
-                    </Link>
-                  );
-                })}
+      <nav className="scrollbar-none flex-1 overflow-y-auto px-2 py-3">
+        {visibleGroups.map((group, gi) => {
+          const folded = group.items.length > FOLD_THRESHOLD;
+          const expanded = isOpen(group.key, group.items.length);
+          const hasActive = group.items.some((route) =>
+            isNavActive(location.pathname, hrefOf(route), allHrefs)
+          );
+
+          return (
+            <div key={group.key} className={cn(gi > 0 && 'mt-4')}>
+              {!isCollapsed &&
+                (folded ? (
+                  <button
+                    type="button"
+                    onClick={() => setOpen((prev) => ({ ...prev, [group.key]: !expanded }))}
+                    className="mb-1 flex w-full items-center justify-between rounded px-3 py-0.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/50 transition-colors hover:text-muted-foreground"
+                    aria-expanded={expanded}
+                  >
+                    <span>{group.label}</span>
+                    <ChevronDown
+                      className={cn('h-3 w-3 transition-transform', !expanded && '-rotate-90')}
+                    />
+                  </button>
+                ) : (
+                  <div className="mb-1 px-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/50">
+                    {group.label}
+                  </div>
+                ))}
+              {isCollapsed && gi > 0 && <div className="mx-3 my-2 border-t border-border/40" />}
+
+              {expanded && (
+                <div className="space-y-0.5">
+                  {group.items.map((route) => {
+                    const href = hrefOf(route);
+                    const isActive = isNavActive(location.pathname, href, allHrefs);
+                    const { nav } = route.meta;
+                    const Icon = nav.icon;
+                    return (
+                      <Link
+                        key={route.path}
+                        to={href}
+                        className={cn(
+                          'flex items-center gap-3 rounded-lg px-3 py-[7px] text-[13px] font-medium transition-colors',
+                          isActive
+                            ? 'bg-primary/10 text-primary'
+                            : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground',
+                          isCollapsed && 'justify-center px-2'
+                        )}
+                        title={isCollapsed ? nav.label : undefined}
+                      >
+                        <Icon className="h-[18px] w-[18px] shrink-0" />
+                        {!isCollapsed && <span>{nav.label}</span>}
+                      </Link>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* A folded group with the current page inside it still shows
+                  where you are — the folder button alone would lose that. */}
+              {!expanded && !isCollapsed && hasActive && (
+                <div className="mx-3 h-0.5 rounded-full bg-primary/40" />
+              )}
             </div>
-          </div>
-        ))}
+          );
+        })}
       </nav>
     </aside>
   );

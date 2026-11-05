@@ -1,7 +1,7 @@
 import { Router, Response, NextFunction } from "express";
 import { z } from "zod";
 import { authenticate } from "../middleware/auth.js";
-import { requireRole } from "../middleware/rbac.js";
+import { requirePermission } from "../middleware/rbac.js";
 import { validate } from "../middleware/validate.js";
 import { RequestWithUser } from "../types/index.js";
 import { NotFoundError } from "../lib/errors.js";
@@ -138,7 +138,7 @@ router.get(
 router.post(
   "/",
   authenticate,
-  requireRole("super-admin", "devops-admin"),
+  requirePermission("procurement.rfq.manage"),
   validate(createRfqSchema),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
@@ -186,7 +186,7 @@ router.post(
 router.put(
   "/:id",
   authenticate,
-  requireRole("super-admin", "devops-admin"),
+  requirePermission("procurement.rfq.manage"),
   validate(updateRfqSchema),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
@@ -247,7 +247,7 @@ router.put(
 router.put(
   "/:id/send",
   authenticate,
-  requireRole("super-admin", "devops-admin"),
+  requirePermission("procurement.rfq.manage"),
   async (req: Request, res: Response) => {
     try {
       const id = parseInt(req.params.id);
@@ -276,7 +276,7 @@ router.put(
 router.post(
   "/:id/quotations",
   authenticate,
-  requireRole("super-admin", "devops-admin"),
+  requirePermission("procurement.rfq.manage"),
   validate(submitQuotationSchema),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
@@ -324,7 +324,7 @@ router.post(
 router.put(
   "/:rfqId/quotations/:quoteId/award",
   authenticate,
-  requireRole("super-admin", "devops-admin"),
+  requirePermission("procurement.rfq.manage"),
   async (req: Request, res: Response) => {
     try {
       const { rfqId, quoteId } = req.params;
@@ -365,7 +365,7 @@ router.put(
 router.delete(
   "/:id",
   authenticate,
-  requireRole("super-admin", "devops-admin"),
+  requirePermission("procurement.rfq.manage"),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const { id } = req.params;

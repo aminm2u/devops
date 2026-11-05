@@ -8,6 +8,7 @@ import {
   weeklyReportEmail,
 } from "./email.service.js";
 import { gatherWeeklyReportData } from "./pdf.service.js";
+import { emitToUser } from "../lib/socket.js";
 
 // ── Create Notification ─────────────────────────────────────────────────────
 
@@ -19,7 +20,7 @@ export async function createNotification(
   link?: string
 ): Promise<void> {
   try {
-    await prisma.notification.create({
+    const notification = await prisma.notification.create({
       data: {
         userId,
         type,
@@ -28,6 +29,11 @@ export async function createNotification(
         link: link || null,
       },
     });
+
+    // Push it to any open tab for this person. The bell previously learned
+    // about new notifications only by polling every 30 s, so a "you have been
+    // assigned" alert could sit invisible for half a minute.
+    emitToUser(userId, "notification:new", notification);
   } catch (error) {
     console.error("[Notification] Failed to create notification:", error);
   }
@@ -35,22 +41,24 @@ export async function createNotification(
 
 // ── Check if user wants email for this type ─────────────────────────────────
 
+/**
+ * Email is opt-out, and the preference now lives in its own table.
+ *
+ * It used to be a JSON blob in `settings` keyed `notification_prefs_<id>`,
+ * which nothing wrote and no UI showed — so "turn off incident emails" was
+ * never actually possible. `NotificationPreference.types` holds the per-type
+ * overrides; an absent row means "defaults", which is every channel on.
+ */
 async function wantsEmail(userId: number, type: string): Promise<boolean> {
   try {
-    const pref = await prisma.setting.findUnique({
-      where: { key: `notification_prefs_${userId}` },
+    const pref = await prisma.notificationPreference.findUnique({
+      where: { userId },
     });
-    if (!pref) return true; // default: enabled
+    if (!pref) return true;
+    if (!pref.email) return false;
 
-    const prefs = JSON.parse(pref.value as string);
-    if (prefs.email === false) return false;
-
-    const typeMap: Record<string, string> = {
-      incident: "incidentAlerts",
-      deployment: "deploymentUpdates",
-    };
-    const prefKey = typeMap[type];
-    if (prefKey && prefs[prefKey] === false) return false;
+    const types = (pref.types ?? {}) as Record<string, { email?: boolean }>;
+    if (types[type]?.email === false) return false;
 
     return true;
   } catch {

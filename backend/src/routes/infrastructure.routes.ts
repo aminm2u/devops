@@ -1,7 +1,9 @@
 import { Router, Response, NextFunction } from "express";
 import { z } from "zod";
 import { authenticate } from "../middleware/auth.js";
-import { requireRole, requirePermission } from "../middleware/rbac.js";
+import { requirePermission } from "../middleware/rbac.js";
+import { scopeFilter, withScope } from "../rbac/authorize.js";
+import { resolveTeamId, assertRecordInScope } from "../lib/teamScope.js";
 import { validate } from "../middleware/validate.js";
 import { RequestWithUser } from "../types/index.js";
 import { NotFoundError } from "../lib/errors.js";
@@ -14,13 +16,10 @@ const router = Router();
 router.get(
   "/",
   authenticate,
+  requirePermission("devops.infrastructure.view"),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
-      const userId = req.user!.id;
-      const userRoles = req.user!.roles.map((r) => r.name);
-      const isViewer = userRoles.includes("viewer");
-
-      const { search, type, status, projectId, page = "1", limit = "50" } = req.query;
+      const { search, type, status, projectId, teamId, page = "1", limit = "50" } = req.query;
       const pageNum = Math.max(1, parseInt(page as string, 10) || 1);
       const limitNum = Math.min(100, Math.max(1, parseInt(limit as string, 10) || 30));
       const skip = (pageNum - 1) * limitNum;
@@ -29,16 +28,6 @@ router.get(
       const where: any = {
         deletedAt: null,
       };
-
-      // Viewers only see nodes from assigned projects
-      if (isViewer) {
-        const assignments = await prisma.teamAssignment.findMany({
-          where: { userId },
-          select: { projectId: true },
-        });
-        const assignedProjectIds = assignments.map((a) => a.projectId);
-        where.projectId = { in: assignedProjectIds };
-      }
 
       if (search) {
         where.OR = [
@@ -61,9 +50,15 @@ router.get(
         where.projectId = parseInt(projectId as string, 10);
       }
 
+      // An explicit team filter narrows further; it can never widen the scope
+      // the server already decided on, because both land in the same `where`.
+      if (teamId && teamId !== "all") where.teamId = parseInt(teamId as string, 10);
+
+      const scoped = withScope(where, scopeFilter(req.access!, "devops.infrastructure.view"));
+
       const [nodes, total] = await Promise.all([
         prisma.infrastructureNode.findMany({
-          where,
+          where: scoped,
           include: {
             project: {
               select: { id: true, name: true, slug: true },
@@ -71,12 +66,13 @@ router.get(
             createdByUser: {
               select: { id: true, name: true, email: true },
             },
+            team: { select: { id: true, name: true } },
           },
           orderBy: { createdAt: "desc" },
           skip,
           take: limitNum,
         }),
-        prisma.infrastructureNode.count({ where }),
+        prisma.infrastructureNode.count({ where: scoped }),
       ]);
 
       res.status(200).json({
@@ -98,6 +94,7 @@ router.get(
 
 const createNodeSchema = z.object({
   projectId: z.number().int().positive(),
+  teamId: z.number().int().positive().optional().nullable(),
   name: z.string().min(1).max(255),
   type: z.enum(["server", "database", "load-balancer", "cache", "queue", "storage", "network", "container", "kubernetes"]).optional(),
   hostname: z.string().max(255).optional().nullable(),
@@ -120,13 +117,14 @@ const updateNodeSchema = createNodeSchema.partial();
 router.post(
   "/",
   authenticate,
-  requireRole("super-admin", "devops-admin"),
+  requirePermission("devops.infrastructure.manage"),
   validate(createNodeSchema),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const node = await prisma.infrastructureNode.create({
         data: {
           projectId: req.body.projectId,
+          teamId: await resolveTeamId(req.access!, req.body.teamId),
           name: req.body.name,
           type: req.body.type || "server",
           hostname: req.body.hostname,
@@ -169,15 +167,17 @@ router.post(
 router.put(
   "/:id",
   authenticate,
-  requireRole("super-admin", "devops-admin"),
+  requirePermission("devops.infrastructure.manage"),
   validate(updateNodeSchema),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const { id } = req.params;
       const existing = await prisma.infrastructureNode.findFirst({
-        where: { id: parseInt(id, 10), deletedAt: null },
+        where: { id: parseInt(id as string, 10), deletedAt: null },
       });
       if (!existing) throw new NotFoundError("Node not found");
+
+      assertRecordInScope(req.access!, existing.teamId);
 
       const node = await prisma.infrastructureNode.update({
         where: { id: existing.id },
@@ -221,14 +221,16 @@ router.put(
 router.delete(
   "/:id",
   authenticate,
-  requireRole("super-admin", "devops-admin"),
+  requirePermission("devops.infrastructure.manage"),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const { id } = req.params;
       const existing = await prisma.infrastructureNode.findFirst({
-        where: { id: parseInt(id, 10), deletedAt: null },
+        where: { id: parseInt(id as string, 10), deletedAt: null },
       });
       if (!existing) throw new NotFoundError("Node not found");
+
+      assertRecordInScope(req.access!, existing.teamId);
 
       await prisma.infrastructureNode.update({
         where: { id: existing.id },

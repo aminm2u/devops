@@ -2,6 +2,8 @@ import { Router, Response, NextFunction } from "express";
 import { z } from "zod";
 import { authenticate } from "../middleware/auth.js";
 import { requirePermission } from "../middleware/rbac.js";
+import { scopeFilter, withScope } from "../rbac/authorize.js";
+import { resolveTeamId, assertRecordInScope } from "../lib/teamScope.js";
 import { validate } from "../middleware/validate.js";
 import { RequestWithUser } from "../types/index.js";
 import { NotFoundError } from "../lib/errors.js";
@@ -12,6 +14,7 @@ const router = Router();
 
 const createSslSchema = z.object({
   projectId: z.number().int().positive(),
+  teamId: z.number().int().positive().optional().nullable(),
   domainId: z.number().int().positive().optional().nullable(),
   name: z.string().min(1).max(255),
   type: z.enum(["letsencrypt", "self-signed", "commercial", "internal"]).optional(),
@@ -32,10 +35,10 @@ const updateSslSchema = createSslSchema.partial().omit({ projectId: true });
 router.get(
   "/",
   authenticate,
-  requirePermission("view-ssl-certificates"),
+  requirePermission("devops.ssl.view"),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
-      const { projectId, status, expiringSoon, page = "1", limit = "20" } = req.query;
+      const { projectId, status, expiringSoon, teamId, page = "1", limit = "20" } = req.query;
       const pageNum = Math.max(1, parseInt(page as string, 10) || 1);
       const limitNum = Math.min(100, Math.max(1, parseInt(limit as string, 10) || 30));
       const skip = (pageNum - 1) * limitNum;
@@ -72,18 +75,25 @@ router.get(
         where.notAfter = { lte: thirtyDaysFromNow, gte: new Date() };
       }
 
+      // An explicit team filter narrows further; it can never widen the scope
+      // the server already decided on, because both land in the same `where`.
+      if (teamId && teamId !== "all") where.teamId = parseInt(teamId as string, 10);
+
+      const scoped = withScope(where, scopeFilter(req.access!, "devops.ssl.view"));
+
       const [certificates, total] = await Promise.all([
         prisma.sslCertificate.findMany({
-          where,
+          where: scoped,
           include: {
             project: { select: { id: true, name: true, slug: true } },
+            team: { select: { id: true, name: true } },
             domain: { select: { id: true, name: true } },
           },
           orderBy: { notAfter: "asc" },
           skip,
           take: limitNum,
         }),
-        prisma.sslCertificate.count({ where }),
+        prisma.sslCertificate.count({ where: scoped }),
       ]);
 
       // Calculate days until expiry for each certificate
@@ -116,12 +126,12 @@ router.get(
 router.get(
   "/:id",
   authenticate,
-  requirePermission("view-ssl-certificates"),
+  requirePermission("devops.ssl.view"),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const { id } = req.params;
       const certificate = await prisma.sslCertificate.findFirst({
-        where: { id: parseInt(id, 10), deletedAt: null },
+        where: { id: parseInt(id as string, 10), deletedAt: null },
         include: {
           project: { select: { id: true, name: true, slug: true } },
           domain: { select: { id: true, name: true } },
@@ -129,6 +139,7 @@ router.get(
       });
 
       if (!certificate) throw new NotFoundError("SSL certificate not found");
+      assertRecordInScope(req.access!, certificate.teamId);
 
       const now = new Date();
       const daysUntilExpiry = certificate.notAfter
@@ -150,13 +161,14 @@ router.get(
 router.post(
   "/",
   authenticate,
-  requirePermission("create-ssl-certificates"),
+  requirePermission("devops.ssl.manage"),
   validate(createSslSchema),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const certificate = await prisma.sslCertificate.create({
         data: {
           projectId: req.body.projectId,
+          teamId: await resolveTeamId(req.access!, req.body.teamId),
           domainId: req.body.domainId,
           name: req.body.name,
           type: req.body.type || "letsencrypt",
@@ -196,15 +208,16 @@ router.post(
 router.put(
   "/:id",
   authenticate,
-  requirePermission("update-ssl-certificates"),
+  requirePermission("devops.ssl.manage"),
   validate(updateSslSchema),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const { id } = req.params;
       const existing = await prisma.sslCertificate.findFirst({
-        where: { id: parseInt(id, 10), deletedAt: null },
+        where: { id: parseInt(id as string, 10), deletedAt: null },
       });
       if (!existing) throw new NotFoundError("SSL certificate not found");
+      assertRecordInScope(req.access!, existing.teamId);
 
       const certificate = await prisma.sslCertificate.update({
         where: { id: existing.id },
@@ -252,14 +265,15 @@ router.put(
 router.delete(
   "/:id",
   authenticate,
-  requirePermission("delete-ssl-certificates"),
+  requirePermission("devops.ssl.manage"),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const { id } = req.params;
       const existing = await prisma.sslCertificate.findFirst({
-        where: { id: parseInt(id, 10), deletedAt: null },
+        where: { id: parseInt(id as string, 10), deletedAt: null },
       });
       if (!existing) throw new NotFoundError("SSL certificate not found");
+      assertRecordInScope(req.access!, existing.teamId);
 
       await prisma.sslCertificate.update({
         where: { id: existing.id },
@@ -286,14 +300,15 @@ router.delete(
 router.post(
   "/:id/renew",
   authenticate,
-  requirePermission("update-ssl-certificates"),
+  requirePermission("devops.ssl.manage"),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const { id } = req.params;
       const existing = await prisma.sslCertificate.findFirst({
-        where: { id: parseInt(id, 10), deletedAt: null },
+        where: { id: parseInt(id as string, 10), deletedAt: null },
       });
       if (!existing) throw new NotFoundError("SSL certificate not found");
+      assertRecordInScope(req.access!, existing.teamId);
 
       // In a real implementation, this would trigger the renewal process
       // For now, we'll just update the status to indicate renewal is pending

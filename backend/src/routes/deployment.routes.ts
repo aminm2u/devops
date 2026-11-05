@@ -2,6 +2,9 @@ import { Router, Response, NextFunction } from "express";
 import { z } from "zod";
 import { authenticate } from "../middleware/auth.js";
 import { requirePermission } from "../middleware/rbac.js";
+import { scopeFilter, withScope } from "../rbac/authorize.js";
+import { resolveTeamId, assertRecordInScope } from "../lib/teamScope.js";
+import { openRequest, settleSubject } from "../services/approvalRequest.service.js";
 import { validate } from "../middleware/validate.js";
 import { RequestWithUser } from "../types/index.js";
 import { NotFoundError } from "../lib/errors.js";
@@ -15,6 +18,8 @@ const createDeploymentSchema = z.object({
   projectId: z.number().int().positive(),
   environmentId: z.number().int().positive().optional().nullable(),
   applicationId: z.number().int().positive().optional().nullable(),
+  /** Omit to file under your only team. Required when you belong to several. */
+  teamId: z.number().int().positive().optional().nullable(),
   name: z.string().min(1).max(255),
   version: z.string().min(1).max(50),
   status: z.enum(["pending", "in_progress", "completed", "failed", "rolled_back"]).optional(),
@@ -42,40 +47,17 @@ const updateDeploymentSchema = z.object({
 router.get(
   "/",
   authenticate,
-  requirePermission("view-deployments"),
+  requirePermission("devops.deployment.view"),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
-      const userId = req.user!.id;
-      const userRoles = req.user!.roles.map((r) => r.name);
-      const isViewer = userRoles.includes("viewer");
-
-      const { search, status, projectId, page = "1", limit = "20" } = req.query;
+      const { search, status, projectId, teamId, page = "1", limit = "20" } = req.query;
       const pageNum = Math.max(1, parseInt(page as string, 10) || 1);
       const limitNum = Math.min(100, Math.max(1, parseInt(limit as string, 10) || 30));
       const skip = (pageNum - 1) * limitNum;
 
       const where: any = {};
 
-      if (isViewer) {
-        const assignments = await prisma.teamAssignment.findMany({
-          where: { userId },
-          select: { projectId: true },
-        });
-        const allowedProjectIds = assignments.map((a) => a.projectId);
-
-        if (projectId) {
-          // Validate viewer has access to the requested project
-          const requestedId = parseInt(projectId as string, 10);
-          if (!allowedProjectIds.includes(requestedId)) {
-            return res.status(200).json({ success: true, data: [], meta: { currentPage: 1, lastPage: 0, perPage: limitNum, total: 0 } });
-          }
-          where.projectId = requestedId;
-        } else {
-          where.projectId = { in: allowedProjectIds };
-        }
-      } else {
-        if (projectId) where.projectId = parseInt(projectId as string, 10);
-      }
+      if (projectId) where.projectId = parseInt(projectId as string, 10);
 
       if (search) {
         where.OR = [
@@ -86,18 +68,26 @@ router.get(
       }
       if (status) where.status = status;
 
+      // Team scope last, so the filter always applies to the finished clause.
+      // An explicit team filter narrows further; it can never widen the scope
+      // the server already decided on, because both land in the same `where`.
+      if (teamId && teamId !== "all") where.teamId = parseInt(teamId as string, 10);
+
+      const scoped = withScope(where, scopeFilter(req.access!, "devops.deployment.view"));
+
       const [deployments, total] = await Promise.all([
         prisma.deployment.findMany({
-          where,
+          where: scoped,
           include: {
             project: { select: { id: true, name: true, slug: true } },
             deployedByUser: { select: { id: true, name: true, email: true } },
+            team: { select: { id: true, name: true } },
           },
           orderBy: { createdAt: "desc" },
           skip,
           take: limitNum,
         }),
-        prisma.deployment.count({ where }),
+        prisma.deployment.count({ where: scoped }),
       ]);
 
       res.status(200).json({
@@ -121,21 +111,52 @@ router.get(
 router.post(
   "/",
   authenticate,
-  requirePermission("create-deployments"),
+  requirePermission("devops.deployment.create"),
   validate(createDeploymentSchema),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const now = new Date();
       const isCompleted = req.body.status === "completed";
 
+      const teamId = await resolveTeamId(req.access!, req.body.teamId);
+
+      // A production environment answers the question "does this need
+      // sign-off", so it is read from the environment rather than trusted from
+      // the request body.
+      const environment = req.body.environmentId
+        ? await prisma.environment.findUnique({
+            where: { id: req.body.environmentId },
+            select: { type: true },
+          })
+        : null;
+      const needsApproval = environment?.type === "production";
+
+      // Nobody deploys to production and signs it off themselves: if the
+      // approver chain resolves back to the requester, the delivery is filed as
+      // pending and waits for someone else.
+      const approval = needsApproval
+        ? await openRequest({
+            module: "deployment",
+            subjectType: "Deployment",
+            subjectId: 0, // replaced below once the row exists
+            title: `Deploy ${req.body.name} v${req.body.version} to production`,
+            requesterId: req.user!.id,
+            teamId,
+            approvalPermission: "devops.deployment.approve",
+            link: "/deployments",
+            metadata: { projectId: req.body.projectId, environmentId: req.body.environmentId },
+          })
+        : null;
+
       const deployment = await prisma.deployment.create({
         data: {
           projectId: req.body.projectId,
+          teamId,
           environmentId: req.body.environmentId || null,
           applicationId: req.body.applicationId || null,
           name: req.body.name,
           version: req.body.version,
-          status: req.body.status || "pending",
+          status: approval ? "pending" : req.body.status || "pending",
           branch: req.body.branch || null,
           commitHash: req.body.commitHash || null,
           commitMessage: req.body.commitMessage || null,
@@ -143,14 +164,24 @@ router.post(
           isRollback: req.body.isRollback || false,
           rollbackFromId: req.body.rollbackFromId || null,
           deployedBy: req.user!.id,
-          deployedAt: isCompleted ? now : null,
-          completedAt: isCompleted ? now : null,
+          deployedAt: !approval && isCompleted ? now : null,
+          completedAt: !approval && isCompleted ? now : null,
         },
         include: {
           project: { select: { id: true, name: true, slug: true } },
           deployedByUser: { select: { id: true, name: true, email: true } },
+          team: { select: { id: true, name: true } },
         },
       });
+
+      // The ledger key needs the real id, so the placeholder row is repointed
+      // rather than creating the request twice.
+      if (approval) {
+        await prisma.approvalRequest.update({
+          where: { id: approval.id },
+          data: { subjectId: deployment.id },
+        });
+      }
 
       await logActivity({
         description: `Deployment "${deployment.name}" v${deployment.version} created`,
@@ -177,15 +208,19 @@ router.post(
 router.put(
   "/:id",
   authenticate,
-  requirePermission("update-deployments"),
+  requirePermission("devops.deployment.update"),
   validate(updateDeploymentSchema),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const { id } = req.params;
       const existing = await prisma.deployment.findUnique({
-        where: { id: parseInt(id, 10) },
+        where: { id: parseInt(id as string, 10) },
       });
       if (!existing) throw new NotFoundError("Deployment not found");
+
+      // Team scope is a record-level rule, so it has to be checked here — the
+      // listing filter does not run on a single-record route.
+      assertRecordInScope(req.access!, existing.teamId);
 
       const now = new Date();
       const newStatus = req.body.status;
@@ -227,6 +262,21 @@ router.put(
         properties: { attributes: deployment },
       });
 
+      // A deployment that leaves `pending` has been decided somewhere else.
+      // Mirror that into the ledger so the inbox does not keep asking.
+      if (existing.status === "pending" && deployment.status !== "pending") {
+        const settled =
+          deployment.status === "rolled_back" || deployment.status === "failed"
+            ? "rejected"
+            : "approved";
+        await settleSubject({
+          subjectType: "Deployment",
+          subjectId: deployment.id,
+          status: settled,
+          comment: `Marked ${deployment.status}`,
+        });
+      }
+
       // Send deployment status notification
       const deployEvent = deployment.status === "completed" ? "completed" : deployment.status === "failed" ? "failed" : "created";
       sendDeploymentNotification(deployment, deployEvent).catch((err) =>
@@ -244,14 +294,16 @@ router.put(
 router.delete(
   "/:id",
   authenticate,
-  requirePermission("delete-deployments"),
+  requirePermission("devops.deployment.delete"),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const { id } = req.params;
       const existing = await prisma.deployment.findUnique({
-        where: { id: parseInt(id, 10) },
+        where: { id: parseInt(id as string, 10) },
       });
       if (!existing) throw new NotFoundError("Deployment not found");
+
+      assertRecordInScope(req.access!, existing.teamId);
 
       await prisma.deployment.delete({
         where: { id: existing.id },

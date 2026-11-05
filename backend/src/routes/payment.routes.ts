@@ -1,13 +1,14 @@
 import { Router, Response, NextFunction } from "express";
 import { z } from "zod";
 import { authenticate } from "../middleware/auth.js";
-import { requireRole } from "../middleware/rbac.js";
+import { requirePermission } from "../middleware/rbac.js";
 import { validate } from "../middleware/validate.js";
 import { RequestWithUser } from "../types/index.js";
 import { NotFoundError } from "../lib/errors.js";
 import { logActivity } from "../middleware/activity.js";
 import prisma from "../config/database.js";
 import { generateReferenceNumber } from "../lib/numberGenerator.js";
+import { openRequest, settleSubject } from "../services/approvalRequest.service.js";
 
 const router = Router();
 
@@ -110,7 +111,7 @@ router.get(
 router.post(
   "/",
   authenticate,
-  requireRole("super-admin", "devops-admin"),
+  requirePermission("procurement.payment.manage"),
   validate(createPaymentSchema),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
@@ -158,7 +159,7 @@ router.post(
 router.put(
   "/:id",
   authenticate,
-  requireRole("super-admin", "devops-admin"),
+  requirePermission("procurement.payment.manage"),
   validate(updatePaymentSchema),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
@@ -213,6 +214,23 @@ router.put(
         data: { status: "submitted" },
       });
 
+      // `paidById` is whoever recorded the payment, which is the natural
+      // requester for the ledger — payments have no createdBy column.
+      if (existing.paidById) {
+        await openRequest({
+          module: "payment",
+          subjectType: "Payment",
+          subjectId: id,
+          title: `Payment ${existing.referenceNumber} — ${existing.currency} ${Number(
+            existing.totalPaid
+          ).toFixed(2)}`,
+          requesterId: existing.paidById,
+          approvalPermission: "procurement.payment.approve",
+          link: "/procurement/payments",
+          metadata: { vendorId: existing.vendorId, purchaseOrderId: existing.purchaseOrderId },
+        });
+      }
+
       res.json({ success: true, data: updated });
     } catch (error) {
       res.status(500).json({ error: "Internal server error" });
@@ -224,7 +242,9 @@ router.put(
 router.put(
   "/:id/approve",
   authenticate,
-  requireRole("super-admin", "devops-admin"),
+  // Same separation as POs: recording a payment and approving it are different
+  // capabilities, or one person can both spend and authorise the spend.
+  requirePermission("procurement.payment.approve"),
   async (req: Request, res: Response) => {
     try {
       const id = parseInt(req.params.id);
@@ -249,6 +269,8 @@ router.put(
         },
       });
 
+      await settleSubject({ subjectType: "Payment", subjectId: id, status: "approved" });
+
       res.json({ success: true, data: updated });
     } catch (error) {
       res.status(500).json({ error: "Internal server error" });
@@ -260,7 +282,7 @@ router.put(
 router.delete(
   "/:id",
   authenticate,
-  requireRole("super-admin", "devops-admin"),
+  requirePermission("procurement.payment.manage"),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const { id } = req.params;

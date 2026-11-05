@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { useAuth } from '@/hooks/useAuth';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
@@ -35,6 +36,7 @@ const STATUS_OPTIONS = [
  * TimeEntry work log.
  */
 export function SubtaskChecklist({ taskId, subtasks, members, timeEntries = [], onUpdate }: SubtaskChecklistProps) {
+  const { can } = useAuth();
   const [newTitle, setNewTitle] = useState('');
   const [adding, setAdding] = useState(false);
   const [expandedId, setExpandedId] = useState<number | null>(null);
@@ -277,16 +279,18 @@ export function SubtaskChecklist({ taskId, subtasks, members, timeEntries = [], 
                     </div>
                   )}
 
-                  <div className="flex justify-end">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-6 text-[11px] text-destructive hover:text-destructive"
-                      onClick={() => setDeleteTarget(s)}
-                    >
-                      <Trash2 className="h-3 w-3 mr-1" /> Delete
-                    </Button>
-                  </div>
+                  {can('task.delete') && (
+                    <div className="flex justify-end">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 text-[11px] text-destructive hover:text-destructive"
+                        onClick={() => setDeleteTarget(s)}
+                      >
+                        <Trash2 className="h-3 w-3 mr-1" /> Delete
+                      </Button>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -295,6 +299,7 @@ export function SubtaskChecklist({ taskId, subtasks, members, timeEntries = [], 
       </div>
 
       {/* Add subtask */}
+      {can('task.create') && (
       <div className="flex gap-1.5 mt-2">
         <Input
           value={newTitle}
@@ -312,6 +317,7 @@ export function SubtaskChecklist({ taskId, subtasks, members, timeEntries = [], 
           <Plus className="h-3.5 w-3.5" />
         </Button>
       </div>
+      )}
 
       <ConfirmDialog
         open={!!deleteTarget}

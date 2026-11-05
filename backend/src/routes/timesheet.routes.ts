@@ -1,7 +1,7 @@
 import { Router, Response, NextFunction } from "express";
 import { z } from "zod";
 import { authenticate } from "../middleware/auth.js";
-import { requireRole } from "../middleware/rbac.js";
+import { requirePermission } from "../middleware/rbac.js";
 import { validate } from "../middleware/validate.js";
 import { RequestWithUser } from "../types/index.js";
 import { NotFoundError, ValidationError, ForbiddenError } from "../lib/errors.js";
@@ -9,7 +9,9 @@ import prisma from "../config/database.js";
 import { getIO } from "../lib/socket.js";
 import { logTaskActivity } from "../lib/task-activity.js";
 import { resolveTimesheetApprover } from "../services/timesheetApproval.js";
+import { openRequest, settleSubject } from "../services/approvalRequest.service.js";
 import { createNotification } from "../services/notification.service.js";
+import { can } from "../rbac/effective.js";
 
 const router = Router();
 
@@ -17,9 +19,41 @@ const router = Router();
 
 const MODEL_USER = "App\\Models\\User";
 
-function isAdmin(req: RequestWithUser): boolean {
-  const roles = (req.user?.roles || []).map((r) => r.name);
-  return roles.includes("super-admin") || roles.includes("devops-admin");
+/**
+ * Capability helpers.
+ *
+ * These replace the old `isAdmin()`, which hard-coded two role names and so
+ * could not express the difference between *reading* everyone's entries,
+ * *writing* someone else's entries, and *approving* them. Each capability is
+ * now a separate permission from the catalog, granted to whatever role the
+ * super admin decides.
+ */
+
+/** May read any user's time entries. */
+function canReadAll(req: RequestWithUser): boolean {
+  return !!req.access && can(req.access, "timesheet.entry.read.all");
+}
+
+/** May create, edit or delete entries on behalf of others. */
+function canManageOthers(req: RequestWithUser): boolean {
+  return !!req.access && can(req.access, "timesheet.entry.manage.other");
+}
+
+/**
+ * May approve entries they are not the named approver for.
+ * Requires the approval capability at `all` scope — a team lead whose grant is
+ * `team`-scoped must not be able to sign off on another team's week.
+ */
+function canApproveAny(req: RequestWithUser): boolean {
+  return !!req.access && can(req.access, "timesheet.entry.approve", "all");
+}
+
+/**
+ * Supervisor access used by the approve/reject endpoints: the named approver
+ * always wins; otherwise an org-wide approver may step in.
+ */
+function isApprover(req: RequestWithUser, entry: { approverId: number | null }): boolean {
+  return entry.approverId === req.user!.id || canApproveAny(req);
 }
 
 function snapHours(h: number): number {
@@ -64,6 +98,25 @@ async function assertCategoryExists(value: string): Promise<void> {
   });
   if (!cat) {
     throw new ValidationError({ categoryValue: ["Unknown or inactive timesheet category"] });
+  }
+}
+
+/**
+ * Server-side enrollment check.
+ *
+ * `GET /enrollable` only shapes the picker — a caller can still POST any task
+ * id it likes. Logging time against a project is what feeds that project's
+ * contribution numbers, so the write path has to verify membership itself.
+ * Elevated users (logging on behalf of somebody else) are checked against the
+ * *target* user's membership, not the actor's.
+ */
+async function assertEnrolled(userId: number, projectId: number, elevated: boolean) {
+  const assignment = await prisma.teamAssignment.findFirst({
+    where: { userId, projectId, isActive: true, project: { deletedAt: null } },
+    select: { id: true },
+  });
+  if (!assignment && !elevated) {
+    throw new ForbiddenError("You are not enrolled on this project");
   }
 }
 
@@ -121,10 +174,10 @@ router.get(
       }
       if (status) where.status = status;
 
-      if (all && isAdmin(req)) {
+      if (all && canReadAll(req)) {
         if (userId) where.userId = userId;
       } else {
-        where.userId = userId && isAdmin(req) ? userId : req.user!.id;
+        where.userId = userId && canReadAll(req) ? userId : req.user!.id;
       }
 
       const entries = await prisma.timeEntry.findMany({
@@ -150,10 +203,13 @@ router.post(
       const body = req.body;
       const hours = snapHours(body.hours);
 
-      // Admin may log on behalf of another user; everyone else logs their own.
+      // Elevated users may log on behalf of another user; everyone else logs
+      // their own time.
       let targetUserId = req.user!.id;
       if (body.userId && body.userId !== req.user!.id) {
-        if (!isAdmin(req)) throw new ForbiddenError("Only admins can log time for other users");
+        if (!canManageOthers(req)) {
+          throw new ForbiddenError("You cannot log time for other users");
+        }
         targetUserId = body.userId;
       }
 
@@ -170,6 +226,10 @@ router.post(
         if (!subtask) throw new NotFoundError("Subtask not found");
         if (body.taskId && body.taskId !== subtask.taskId) {
           throw new ValidationError({ subtaskId: ["Subtask does not belong to the given task"] });
+        }
+        // A subtask claimed by a colleague is not yours to bill hours to.
+        if (subtask.assigneeId !== null && subtask.assigneeId !== targetUserId) {
+          throw new ForbiddenError("That subtask is assigned to someone else");
         }
         taskId = subtask.taskId;
         subtaskId = subtask.id;
@@ -190,6 +250,10 @@ router.post(
         }
         await assertCategoryExists(body.categoryValue);
         categoryValue = body.categoryValue;
+      }
+
+      if (projectId) {
+        await assertEnrolled(targetUserId, projectId, canManageOthers(req));
       }
 
       const entry = await prisma.timeEntry.create({
@@ -281,6 +345,21 @@ async function submitEntry(entry: any, actorId: number) {
   });
 
   if (approverId) {
+    // Mirror the assignment into the unified ledger so the entry also appears
+    // in `/approvals`. `openRequest` is idempotent per (subject, approver), so
+    // a resubmission after rejection updates the existing row rather than
+    // stacking a second one.
+    await openRequest({
+      module: "timesheet",
+      subjectType: "TimeEntry",
+      subjectId: updated.id,
+      title: `${updated.user.name} — ${Number(updated.hours)}h on ${fmtDate(updated.workDate)}`,
+      requesterId: updated.userId,
+      approverId,
+      link: "/my-work/approvals",
+      metadata: { workDate: updated.workDate, hours: Number(updated.hours) },
+    });
+
     await createNotification(
       approverId,
       "timesheet",
@@ -336,6 +415,9 @@ router.post(
         include: entryInclude,
       });
 
+      // The approver's queue must lose the item the moment it is recalled.
+      await settleSubject({ subjectType: "TimeEntry", subjectId: id, status: "cancelled" });
+
       try { getIO().emit("timesheet-entry-updated", { entry: serializeEntry(updated) }); } catch (e) {}
       res.status(200).json({ success: true, data: serializeEntry(updated) });
     } catch (error) {
@@ -359,7 +441,7 @@ router.post(
       if (entry.status !== "submitted") {
         throw new ValidationError({ status: ["Only submitted entries can be approved"] });
       }
-      if (entry.approverId !== req.user!.id && !isAdmin(req)) {
+      if (!isApprover(req, entry)) {
         throw new ForbiddenError("You are not the approver for this entry");
       }
 
@@ -367,6 +449,14 @@ router.post(
         where: { id },
         data: { status: "approved", decidedAt: new Date() },
         include: entryInclude,
+      });
+
+      // Close the inbox row too, or the entry sits in /approvals forever and
+      // can be "approved" a second time from there.
+      await settleSubject({
+        subjectType: "TimeEntry",
+        subjectId: id,
+        status: "approved",
       });
 
       await createNotification(
@@ -401,7 +491,7 @@ router.post(
       if (entry.status !== "submitted") {
         throw new ValidationError({ status: ["Only submitted entries can be rejected"] });
       }
-      if (entry.approverId !== req.user!.id && !isAdmin(req)) {
+      if (!isApprover(req, entry)) {
         throw new ForbiddenError("You are not the approver for this entry");
       }
 
@@ -413,6 +503,13 @@ router.post(
           rejectReason: req.body.reason.trim(),
         },
         include: entryInclude,
+      });
+
+      await settleSubject({
+        subjectType: "TimeEntry",
+        subjectId: id,
+        status: "rejected",
+        comment: req.body.reason.trim(),
       });
 
       await createNotification(
@@ -442,11 +539,11 @@ router.put(
       const entry = await prisma.timeEntry.findUnique({ where: { id } });
       if (!entry || entry.deletedAt) throw new NotFoundError("Time entry not found");
 
-      const admin = isAdmin(req);
-      if (entry.userId !== req.user!.id && !admin) {
+      const elevated = canManageOthers(req);
+      if (entry.userId !== req.user!.id && !elevated) {
         throw new ForbiddenError("You can only edit your own entries");
       }
-      if (!["draft", "rejected"].includes(entry.status) && !admin) {
+      if (!["draft", "rejected"].includes(entry.status) && !elevated) {
         throw new ValidationError({ status: ["Only draft or rejected entries can be edited"] });
       }
       if (entry.status === "approved") {
@@ -468,6 +565,9 @@ router.put(
             include: { task: { select: { id: true, projectId: true } } },
           });
           if (!subtask) throw new NotFoundError("Subtask not found");
+          if (subtask.assigneeId !== null && subtask.assigneeId !== entry.userId) {
+            throw new ForbiddenError("That subtask is assigned to someone else");
+          }
           data.taskId = subtask.taskId;
           data.subtaskId = subtask.id;
           data.projectId = subtask.task.projectId;
@@ -491,6 +591,12 @@ router.put(
           }
           await assertCategoryExists(body.categoryValue);
           data.categoryValue = body.categoryValue;
+        }
+
+        // Re-linking an entry to a project is the one edit that can smuggle work
+        // into a project the person was never on, so it is checked here too.
+        if (data.projectId) {
+          await assertEnrolled(entry.userId, data.projectId, elevated);
         }
       } else if (body.categoryValue !== undefined && !entry.taskId && !entry.subtaskId) {
         await assertCategoryExists(body.categoryValue);
@@ -521,11 +627,11 @@ router.delete(
       const entry = await prisma.timeEntry.findUnique({ where: { id } });
       if (!entry || entry.deletedAt) throw new NotFoundError("Time entry not found");
 
-      const admin = isAdmin(req);
-      if (entry.userId !== req.user!.id && !admin) {
+      const elevated = canManageOthers(req);
+      if (entry.userId !== req.user!.id && !elevated) {
         throw new ForbiddenError("You can only delete your own entries");
       }
-      if (entry.status === "approved" && !admin) {
+      if (entry.status === "approved" && !elevated) {
         throw new ValidationError({ status: ["Approved entries cannot be deleted"] });
       }
 
@@ -548,7 +654,8 @@ router.get(
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const status = (req.query.status as string) || "pending";
-      const all = req.query.all === "true" && isAdmin(req);
+      // "all" is an audit view across every approver's queue.
+      const all = req.query.all === "true" && canReadAll(req);
 
       const where: any = { deletedAt: null };
       if (all) {
@@ -582,7 +689,7 @@ router.get(
     try {
       const { from, to } = req.query as any;
       const userId = req.query.userId ? parseInt(req.query.userId as string, 10) : req.user!.id;
-      if (userId !== req.user!.id && !isAdmin(req)) {
+      if (userId !== req.user!.id && !canReadAll(req)) {
         throw new ForbiddenError("You can only view your own summary");
       }
 
@@ -783,6 +890,109 @@ router.get(
   }
 );
 
+// GET /api/timesheet/enrollable
+/**
+ * What this person is actually allowed to log time against.
+ *
+ * The form's three pickers used to be fed from `/my-tasks` (any task you are
+ * assigned) plus the whole category list, which silently allowed a task from a
+ * project the person had since been removed from. The server is still the
+ * authority — `POST /entries` validates the task exists — but the picker
+ * should not offer work the person cannot legitimately claim.
+ *
+ * Rules:
+ *   projects → active `TeamAssignment` for this user
+ *   tasks    → tasks assigned to them, on a project they are enrolled in
+ *   subtasks → subtasks of those tasks, assigned to them or unassigned
+ *   events   → their own calendar events
+ *   categories → active `timesheet_category` reference rows
+ */
+router.get(
+  "/enrollable",
+  authenticate,
+  async (req: RequestWithUser, res: Response, next: NextFunction) => {
+    try {
+      const userId = req.user!.id;
+
+      const [assignments, mine, categories, events] = await Promise.all([
+        prisma.teamAssignment.findMany({
+          where: { userId, isActive: true, project: { deletedAt: null } },
+          include: {
+            projectRole: { select: { id: true, name: true } },
+            project: { select: { id: true, name: true, slug: true } },
+          },
+          orderBy: { project: { name: "asc" } },
+        }),
+        // A task can name someone as assignee on a project they are not on the
+        // team for (reassignment leftovers). Filtering by the enrolled project
+        // list keeps the two dropdowns consistent with each other.
+        prisma.projectTask.findMany({
+          where: {
+            OR: [
+              { assignees: { array_contains: [userId] } },
+              { subtasks: { some: { assigneeId: userId } } },
+            ],
+          },
+          include: {
+            project: { select: { id: true, name: true } },
+            subtasks: {
+              where: { status: { not: "done" } },
+              orderBy: { position: "asc" },
+              select: { id: true, title: true, status: true, assigneeId: true },
+            },
+          },
+          orderBy: { updatedAt: "desc" },
+          take: 200,
+        }),
+        prisma.referenceData.findMany({
+          where: { group: "timesheet_category", isActive: true },
+          orderBy: { sortOrder: "asc" },
+          select: { value: true, label: true },
+        }),
+        prisma.calendarEvent.findMany({
+          where: { userId, timeEntryId: null },
+          orderBy: { startAt: "asc" },
+          take: 50,
+          select: { id: true, subject: true, startAt: true, endAt: true, attended: true },
+        }),
+      ]);
+
+      const projectIds = new Set(assignments.map((a) => a.projectId));
+
+      res.status(200).json({
+        success: true,
+        data: {
+          projects: assignments.map((a) => ({
+            id: a.project.id,
+            name: a.project.name,
+            slug: a.project.slug,
+            role: a.projectRole.name,
+          })),
+          tasks: mine
+            .filter((task) => projectIds.has(task.projectId))
+            .map((task) => ({
+              id: task.id,
+              title: task.title,
+              projectId: task.projectId,
+              projectName: task.project.name,
+              subtasks: task.subtasks.map((s) => ({
+                id: s.id,
+                title: s.title,
+                status: s.status,
+                // `null` means unassigned — anyone on the project may claim it.
+                claimable: s.assigneeId === null || s.assigneeId === userId,
+              })),
+            })),
+          categories,
+          events,
+        },
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
 // GET /api/timesheet/my-tasks
 router.get(
   "/my-tasks",
@@ -832,7 +1042,7 @@ router.get(
 router.get(
   "/approval-rules",
   authenticate,
-  requireRole("super-admin", "devops-admin"),
+  requirePermission("timesheet.settings.manage"),
   async (_req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const rules = await prisma.timesheetApprovalRule.findMany({
@@ -853,7 +1063,7 @@ router.get(
 router.post(
   "/approval-rules",
   authenticate,
-  requireRole("super-admin", "devops-admin"),
+  requirePermission("timesheet.settings.manage"),
   validate(createRuleSchema),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
@@ -888,7 +1098,7 @@ router.post(
 router.put(
   "/approval-rules/:id",
   authenticate,
-  requireRole("super-admin", "devops-admin"),
+  requirePermission("timesheet.settings.manage"),
   validate(updateRuleSchema),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
@@ -932,7 +1142,7 @@ router.put(
 router.delete(
   "/approval-rules/:id",
   authenticate,
-  requireRole("super-admin", "devops-admin"),
+  requirePermission("timesheet.settings.manage"),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const id = parseInt(req.params.id, 10);

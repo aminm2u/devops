@@ -1,7 +1,9 @@
 import { Router, Response, NextFunction } from "express";
 import { z } from "zod";
 import { authenticate } from "../middleware/auth.js";
-import { requireRole, requirePermission } from "../middleware/rbac.js";
+import { requirePermission } from "../middleware/rbac.js";
+import { scopeFilter, withScope } from "../rbac/authorize.js";
+import { resolveTeamId, assertRecordInScope } from "../lib/teamScope.js";
 import { validate } from "../middleware/validate.js";
 import { RequestWithUser } from "../types/index.js";
 import { NotFoundError } from "../lib/errors.js";
@@ -12,6 +14,7 @@ const router = Router();
 
 const createServiceSchema = z.object({
   projectId: z.number().int().positive(),
+  teamId: z.number().int().positive().optional().nullable(),
   environmentId: z.number().int().positive().optional().nullable(),
   infrastructureNodeId: z.number().int().positive().optional().nullable(),
   name: z.string().min(1).max(255),
@@ -30,17 +33,17 @@ const updateServiceSchema = createServiceSchema.partial().omit({ projectId: true
 router.get(
   "/project/:projectId",
   authenticate,
-  requirePermission("view-services"),
+  requirePermission("devops.service.view"),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const { projectId } = req.params;
-      const { search, type, status, page = "1", limit = "50" } = req.query;
+      const { search, type, status, teamId, page = "1", limit = "50" } = req.query;
       const pageNum = Math.max(1, parseInt(page as string, 10) || 1);
       const limitNum = Math.min(100, Math.max(1, parseInt(limit as string, 10) || 30));
       const skip = (pageNum - 1) * limitNum;
 
       const where: any = {
-        projectId: parseInt(projectId, 10),
+        projectId: parseInt(projectId as string, 10),
         deletedAt: null,
       };
 
@@ -54,18 +57,26 @@ router.get(
       if (type) where.type = type;
       if (status) where.status = status;
 
+      // Team scope last, so it always lands on the finished clause.
+      // An explicit team filter narrows further; it can never widen the scope
+      // the server already decided on, because both land in the same `where`.
+      if (teamId && teamId !== "all") where.teamId = parseInt(teamId as string, 10);
+
+      const scoped = withScope(where, scopeFilter(req.access!, "devops.service.view"));
+
       const [services, total] = await Promise.all([
         prisma.service.findMany({
-          where,
+          where: scoped,
           include: {
             environment: { select: { id: true, name: true } },
             infrastructureNode: { select: { id: true, name: true } },
+            team: { select: { id: true, name: true } },
           },
           orderBy: { createdAt: "desc" },
           skip,
           take: limitNum,
         }),
-        prisma.service.count({ where }),
+        prisma.service.count({ where: scoped }),
       ]);
 
       res.status(200).json({
@@ -88,7 +99,7 @@ router.get(
 router.post(
   "/",
   authenticate,
-  requireRole("super-admin", "devops-admin"),
+  requirePermission("devops.service.manage"),
   validate(createServiceSchema),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
@@ -96,6 +107,7 @@ router.post(
       const service = await prisma.service.create({
         data: {
           projectId: req.body.projectId,
+          teamId: await resolveTeamId(req.access!, req.body.teamId),
           environmentId: req.body.environmentId || null,
           infrastructureNodeId: req.body.infrastructureNodeId || null,
           name: req.body.name,
@@ -134,15 +146,16 @@ router.post(
 router.put(
   "/:id",
   authenticate,
-  requireRole("super-admin", "devops-admin"),
+  requirePermission("devops.service.manage"),
   validate(updateServiceSchema),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const { id } = req.params;
       const existing = await prisma.service.findFirst({
-        where: { id: parseInt(id, 10), deletedAt: null },
+        where: { id: parseInt(id as string, 10), deletedAt: null },
       });
       if (!existing) throw new NotFoundError("Service not found");
+      assertRecordInScope(req.access!, existing.teamId);
 
       const { generateSlug } = await import("../lib/slug.js");
       const service = await prisma.service.update({
@@ -185,14 +198,15 @@ router.put(
 router.delete(
   "/:id",
   authenticate,
-  requireRole("super-admin", "devops-admin"),
+  requirePermission("devops.service.manage"),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const { id } = req.params;
       const existing = await prisma.service.findFirst({
-        where: { id: parseInt(id, 10), deletedAt: null },
+        where: { id: parseInt(id as string, 10), deletedAt: null },
       });
       if (!existing) throw new NotFoundError("Service not found");
+      assertRecordInScope(req.access!, existing.teamId);
 
       await prisma.service.update({
         where: { id: existing.id },

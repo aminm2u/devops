@@ -1,5 +1,7 @@
 import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcryptjs";
+import { PERMISSION_CATALOG, ROLE_PRESETS, resolvePresetPermissions } from "../src/rbac/catalog.js";
+import { MODEL_USER } from "../src/rbac/effective.js";
 
 const prisma = new PrismaClient();
 
@@ -7,6 +9,10 @@ async function main() {
   console.log("Seeding database...");
 
   // Clean existing data (order matters for foreign keys)
+  await prisma.approvalRequest.deleteMany();
+  await prisma.notificationPreference.deleteMany();
+  await prisma.teamMember.deleteMany();
+  await prisma.team.deleteMany();
   await prisma.projectTask.deleteMany();
   await prisma.taskColumn.deleteMany();
   // Procurement tables (new)
@@ -62,13 +68,37 @@ async function main() {
 
   // ==================== Reference Data ====================
   console.log("Creating reference data...");
+  //
+  // Departments start life as a mirror of the `division` master data: the two
+  // must agree, otherwise the org chart lets you invent a department that the
+  // procurement/budget division dropdown knows nothing about. Extra departments
+  // can be added later under any of these roots.
   const deptIT = await prisma.department.create({ data: { code: 'IT', name: 'Information Technology' } });
   const deptHR = await prisma.department.create({ data: { code: 'HR', name: 'Human Resources' } });
   const deptFIN = await prisma.department.create({ data: { code: 'FIN', name: 'Finance' } });
+  // Project Management Office sits under IT rather than beside it: the PMO
+  // reports into the technology function here, and `parentId` is what makes the
+  // org chart show that rather than two unrelated boxes.
+  const deptPMO = await prisma.department.create({
+    data: { code: 'PMO', name: 'Project Management Office', parentId: deptIT.id },
+  });
+  await prisma.department.createMany({
+    data: [
+      { code: 'DMA', name: 'Digital Marketing & Analytics' },
+      { code: 'BD', name: 'Business Development' },
+      { code: 'DI', name: 'Digital Innovation' },
+      { code: 'ADMIN', name: 'Administration' },
+      { code: 'OPS', name: 'Operations' },
+    ],
+    skipDuplicates: true,
+  });
 
   const posDev = await prisma.position.create({ data: { name: 'Software Engineer', gradeLevel: 3 } });
   const posDevOps = await prisma.position.create({ data: { name: 'DevOps Engineer', gradeLevel: 4 } });
   const posManager = await prisma.position.create({ data: { name: 'IT Manager', gradeLevel: 6 } });
+  const posDeptHead = await prisma.position.create({ data: { name: 'Department Manager', gradeLevel: 6 } });
+  const posTeamLead = await prisma.position.create({ data: { name: 'Team Lead', gradeLevel: 5 } });
+  const posProjMgr = await prisma.position.create({ data: { name: 'Project Manager', gradeLevel: 5 } });
 
   const empPerm = await prisma.employmentType.create({ data: { name: 'Permanent' } });
   const empContract = await prisma.employmentType.create({ data: { name: 'Contract' } });
@@ -80,372 +110,398 @@ async function main() {
   const prLead = await prisma.projectRole.create({ data: { name: 'Team Lead' } });
   const prDeveloper = await prisma.projectRole.create({ data: { name: 'Developer' } });
 
-  // ==================== Create Roles ====================
-  console.log("Creating roles...");
+  // ==================== Roles & Permissions (from catalog) ====================
+  //
+  // The catalog in src/rbac/catalog.ts is the single source of truth. Every
+  // permission row and every role preset is derived from it, so the seeder can
+  // never drift from what the Access Control API and the UI matrix expose.
+  console.log("Creating permissions and roles...");
 
-  const superAdminRole = await prisma.role.create({
-    data: {
-      name: "super-admin",
-      guardName: "web",
-      description: "Full system access",
-    },
-  });
-
-  const devopsAdminRole = await prisma.role.create({
-    data: {
-      name: "devops-admin",
-      guardName: "web",
-      description: "Manage projects and operational information",
-    },
-  });
-
-  const devopsEngineerRole = await prisma.role.create({
-    data: {
-      name: "devops-engineer",
-      guardName: "web",
-      description: "Manage assigned projects and operational records",
-    },
-  });
-
-  const viewerRole = await prisma.role.create({
-    data: {
-      name: "viewer",
-      guardName: "web",
-      description: "Read-only access",
-    },
-  });
-
-  // ==================== Create Permissions ====================
-  console.log("Creating permissions...");
-
-  const permissionNames = [
-    // Project permissions
-    "view-projects",
-    "create-projects",
-    "update-projects",
-    "delete-projects",
-    // Environment permissions
-    "view-environments",
-    "create-environments",
-    "update-environments",
-    "delete-environments",
-    // Infrastructure permissions
-    "view-infrastructure",
-    "create-infrastructure",
-    "update-infrastructure",
-    "delete-infrastructure",
-    // Service permissions
-    "view-services",
-    "create-services",
-    "update-services",
-    "delete-services",
-    // Application permissions
-    "view-applications",
-    "create-applications",
-    "update-applications",
-    "delete-applications",
-    // Domain permissions
-    "view-domains",
-    "create-domains",
-    "update-domains",
-    "delete-domains",
-    // SSL permissions
-    "view-ssl-certificates",
-    "create-ssl-certificates",
-    "update-ssl-certificates",
-    "delete-ssl-certificates",
-    // Deployment permissions
-    "view-deployments",
-    "create-deployments",
-    "update-deployments",
-    "delete-deployments",
-    // Incident permissions
-    "view-incidents",
-    "create-incidents",
-    "update-incidents",
-    "delete-incidents",
-    // Change management permissions
-    "view-changes",
-    "create-changes",
-    "update-changes",
-    "delete-changes",
-    // Backup permissions
-    "view-backup-jobs",
-    "create-backup-jobs",
-    "update-backup-jobs",
-    "delete-backup-jobs",
-    // Security finding permissions
-    "view-security-findings",
-    "create-security-findings",
-    "update-security-findings",
-    "delete-security-findings",
-    // Document permissions
-    "view-documents",
-    "create-documents",
-    "update-documents",
-    "delete-documents",
-    // User management permissions
-    "view-users",
-    "create-users",
-    "update-users",
-    "delete-users",
-    // Role management permissions
-    "view-roles",
-    "create-roles",
-    "update-roles",
-    "delete-roles",
-    // Integration permissions
-    "view-integrations",
-    "create-integrations",
-    "update-integrations",
-    "delete-integrations",
-    // Settings permissions
-    "view-settings",
-    "update-settings",
-    // Activity log permissions
-    "view-activity-logs",
-    // Budget permissions
-    "view-budget",
-    "create-budget",
-    "update-budget",
-    "delete-budget",
-    // Requisition permissions
-    "view-requisitions",
-    "create-requisitions",
-    "update-requisitions",
-    "delete-requisitions",
-  ];
-
-  const permissions = [];
-  for (const name of permissionNames) {
-    const perm = await prisma.permission.create({
-      data: {
-        name,
-        guardName: "web",
-      },
-    });
-    permissions.push(perm);
-  }
-
-  // ==================== Assign Permissions to Roles ====================
-  console.log("Assigning permissions to roles...");
-
-  // Super-admin gets all permissions
-  for (const perm of permissions) {
-    await prisma.roleHasPermission.create({
-      data: {
-        roleId: superAdminRole.id,
-        permissionId: perm.id,
-      },
-    });
-  }
-
-  // DevOps Admin permissions
-  const devopsAdminPermissions = permissionNames.filter(
-    (p) =>
-      !p.startsWith("create-users") &&
-      !p.startsWith("update-users") &&
-      !p.startsWith("delete-users") &&
-      !p.startsWith("create-roles") &&
-      !p.startsWith("update-roles") &&
-      !p.startsWith("delete-roles") &&
-      !p.startsWith("create-integrations") &&
-      !p.startsWith("update-integrations") &&
-      !p.startsWith("delete-integrations") &&
-      !p.startsWith("view-settings") &&
-      !p.startsWith("update-settings")
+  const permissionRows = await Promise.all(
+    PERMISSION_CATALOG.map((perm) =>
+      prisma.permission.create({
+        data: {
+          name: perm.name,
+          guardName: "web",
+          group: perm.group,
+          description: perm.description,
+          isDangerous: perm.isDangerous ?? false,
+          supportsScope: perm.supportsScope ?? true,
+        },
+      })
+    )
   );
+  const permissionByName = new Map(permissionRows.map((p) => [p.name, p]));
 
-  for (const permName of devopsAdminPermissions) {
-    const perm = permissions.find((p) => p.name === permName);
-    if (perm) {
-      await prisma.roleHasPermission.create({
-        data: {
-          roleId: devopsAdminRole.id,
-          permissionId: perm.id,
-        },
-      });
-    }
+  const roleByName = new Map<string, { id: number; name: string }>();
+
+  for (const preset of ROLE_PRESETS) {
+    const role = await prisma.role.create({
+      data: {
+        name: preset.name,
+        guardName: "web",
+        description: preset.description,
+        isSystem: preset.isSystem ?? false,
+        isAssignable: preset.isAssignable ?? true,
+        level: preset.level,
+        color: preset.color,
+      },
+    });
+    roleByName.set(preset.name, role);
+
+    const grants = resolvePresetPermissions(preset);
+    const rows = grants
+      .map((grant) => {
+        const permission = permissionByName.get(grant.name);
+        if (!permission) {
+          console.warn(`  ! preset ${preset.name} references unknown permission ${grant.name}`);
+          return null;
+        }
+        return {
+          roleId: role.id,
+          permissionId: permission.id,
+          scope: grant.scope,
+        };
+      })
+      .filter((row): row is { roleId: number; permissionId: number; scope: string } => row !== null);
+
+    if (rows.length) await prisma.roleHasPermission.createMany({ data: rows });
+    console.log(
+      `  ${preset.name.padEnd(30)} level ${String(preset.level).padEnd(4)} ${rows.length} permissions`
+    );
   }
 
-  // DevOps Engineer permissions
-  const devopsEngineerPermissions = [
-    "view-projects",
-    "view-environments",
-    "create-environments",
-    "update-environments",
-    "view-infrastructure",
-    "create-infrastructure",
-    "update-infrastructure",
-    "view-services",
-    "create-services",
-    "update-services",
-    "view-applications",
-    "create-applications",
-    "update-applications",
-    "view-domains",
-    "create-domains",
-    "update-domains",
-    "view-ssl-certificates",
-    "create-ssl-certificates",
-    "update-ssl-certificates",
-    "view-deployments",
-    "create-deployments",
-    "update-deployments",
-    "view-incidents",
-    "create-incidents",
-    "update-incidents",
-    "view-changes",
-    "create-changes",
-    "update-changes",
-    "view-backup-jobs",
-    "create-backup-jobs",
-    "update-backup-jobs",
-    "view-security-findings",
-    "create-security-findings",
-    "update-security-findings",
-    "view-documents",
-    "create-documents",
-    "update-documents",
-    "view-activity-logs",
-  ];
+  const superAdminRole = roleByName.get("super-admin")!;
 
-  for (const permName of devopsEngineerPermissions) {
-    const perm = permissions.find((p) => p.name === permName);
-    if (perm) {
-      await prisma.roleHasPermission.create({
-        data: {
-          roleId: devopsEngineerRole.id,
-          permissionId: perm.id,
-        },
-      });
-    }
-  }
-
-  // Viewer permissions
-  const viewerPermissions = [
-    "view-projects",
-    "view-environments",
-    "view-infrastructure",
-    "view-services",
-    "view-applications",
-    "view-domains",
-    "view-ssl-certificates",
-    "view-deployments",
-    "view-incidents",
-    "view-changes",
-    "view-backup-jobs",
-    "view-security-findings",
-    "view-documents",
-    "view-activity-logs",
-  ];
-
-  for (const permName of viewerPermissions) {
-    const perm = permissions.find((p) => p.name === permName);
-    if (perm) {
-      await prisma.roleHasPermission.create({
-        data: {
-          roleId: viewerRole.id,
-          permissionId: perm.id,
-        },
-      });
-    }
-  }
-
-  // ==================== Create Users ====================
+  // ==================== Users ====================
   console.log("Creating users...");
 
   const hashedPassword = await bcrypt.hash("password", 12);
 
-  const admin = await prisma.user.create({
+  // The governing account. Exactly one super-admin may exist; the invariant is
+  // asserted at the end of this seed and enforced by the transfer endpoint.
+  const superAdminPassword = process.env.SEED_SUPERADMIN_PASSWORD || "ChangeMe!2026";
+  const itAdmin = await prisma.user.create({
     data: {
-      name: "Ahmad Faiz",
-      email: "admin@devops-platform.local",
-      password: hashedPassword,
+      name: "IT Administrator",
+      email: "it@map2u.com.my",
+      password: await bcrypt.hash(superAdminPassword, 12),
       isActive: true,
       emailVerifiedAt: new Date(),
       employeeId: "EMP-001",
       departmentId: deptIT.id,
       positionId: posManager.id,
       employmentTypeId: empPerm.id,
-      joinDate: new Date("2020-01-15"),
+      joinDate: new Date("2018-01-02"),
     },
   });
 
   await prisma.modelHasRole.create({
     data: {
       roleId: superAdminRole.id,
-      modelType: "App\\Models\\User",
-      modelId: admin.id,
+      modelType: MODEL_USER,
+      modelId: itAdmin.id,
     },
   });
+  await prisma.notificationPreference.create({
+    data: { userId: itAdmin.id, email: true, inApp: true, sound: true },
+  });
 
-  const devopsAdmin = await prisma.user.create({
+  const hrManager = await prisma.user.create({
     data: {
-      name: "Sarah Chen",
-      email: "devops-admin@devops-platform.local",
+      name: "Nurul Aina",
+      email: "hr@map2u.com.my",
       password: hashedPassword,
       isActive: true,
       emailVerifiedAt: new Date(),
       employeeId: "EMP-002",
+      departmentId: deptHR.id,
+      positionId: posManager.id,
+      employmentTypeId: empPerm.id,
+      joinDate: new Date("2019-04-08"),
+    },
+  });
+  await prisma.modelHasRole.create({
+    data: { roleId: roleByName.get("hr-manager")!.id, modelType: MODEL_USER, modelId: hrManager.id },
+  });
+
+  const devopsLead = await prisma.user.create({
+    data: {
+      name: "Sarah Chen",
+      email: "devops-lead@map2u.com.my",
+      password: hashedPassword,
+      isActive: true,
+      emailVerifiedAt: new Date(),
+      employeeId: "EMP-003",
       departmentId: deptIT.id,
       positionId: posDevOps.id,
       employmentTypeId: empPerm.id,
       joinDate: new Date("2021-03-10"),
+      directManagerId: itAdmin.id,
     },
   });
-
   await prisma.modelHasRole.create({
     data: {
-      roleId: devopsAdminRole.id,
-      modelType: "App\\Models\\User",
-      modelId: devopsAdmin.id,
+      roleId: roleByName.get("devops-team-lead")!.id,
+      modelType: MODEL_USER,
+      modelId: devopsLead.id,
     },
   });
 
   const engineer = await prisma.user.create({
     data: {
       name: "Raj Kumar",
-      email: "engineer@devops-platform.local",
-      password: hashedPassword,
-      isActive: true,
-      emailVerifiedAt: new Date(),
-      employeeId: "EMP-003",
-      departmentId: deptIT.id,
-      positionId: posDev.id,
-      employmentTypeId: empContract.id,
-      joinDate: new Date("2022-06-01"),
-    },
-  });
-
-  await prisma.modelHasRole.create({
-    data: {
-      roleId: devopsEngineerRole.id,
-      modelType: "App\\Models\\User",
-      modelId: engineer.id,
-    },
-  });
-
-  const viewer = await prisma.user.create({
-    data: {
-      name: "Lim Wei",
-      email: "viewer@devops-platform.local",
+      email: "engineer@map2u.com.my",
       password: hashedPassword,
       isActive: true,
       emailVerifiedAt: new Date(),
       employeeId: "EMP-004",
-      departmentId: deptHR.id,
-      joinDate: new Date("2019-11-20"),
+      departmentId: deptIT.id,
+      positionId: posDev.id,
+      employmentTypeId: empContract.id,
+      joinDate: new Date("2022-06-01"),
+      directManagerId: devopsLead.id,
+    },
+  });
+  await prisma.modelHasRole.create({
+    data: {
+      roleId: roleByName.get("devops-engineer")!.id,
+      modelType: MODEL_USER,
+      modelId: engineer.id,
     },
   });
 
-  await prisma.modelHasRole.create({
+  const pmo = await prisma.user.create({
     data: {
-      roleId: viewerRole.id,
-      modelType: "App\\Models\\User",
-      modelId: viewer.id,
+      name: "Lim Wei Sheng",
+      email: "pmo@map2u.com.my",
+      password: hashedPassword,
+      isActive: true,
+      emailVerifiedAt: new Date(),
+      employeeId: "EMP-005",
+      departmentId: deptIT.id,
+      positionId: posManager.id,
+      employmentTypeId: empPerm.id,
+      joinDate: new Date("2019-11-20"),
+      directManagerId: itAdmin.id,
     },
   });
+  await prisma.modelHasRole.create({
+    data: {
+      roleId: roleByName.get("project-manager-officer")!.id,
+      modelType: MODEL_USER,
+      modelId: pmo.id,
+    },
+  });
+
+  const finance = await prisma.user.create({
+    data: {
+      name: "Tan Mei Ling",
+      email: "finance@map2u.com.my",
+      password: hashedPassword,
+      isActive: true,
+      emailVerifiedAt: new Date(),
+      employeeId: "EMP-006",
+      departmentId: deptFIN.id,
+      positionId: posManager.id,
+      employmentTypeId: empPerm.id,
+      joinDate: new Date("2020-02-17"),
+      directManagerId: itAdmin.id,
+    },
+  });
+  await prisma.modelHasRole.create({
+    data: { roleId: roleByName.get("finance")!.id, modelType: MODEL_USER, modelId: finance.id },
+  });
+
+  const employee = await prisma.user.create({
+    data: {
+      name: "Ahmad Faiz",
+      email: "employee@map2u.com.my",
+      password: hashedPassword,
+      isActive: true,
+      emailVerifiedAt: new Date(),
+      employeeId: "EMP-007",
+      departmentId: deptHR.id,
+      positionId: posDev.id,
+      employmentTypeId: empContract.id,
+      joinDate: new Date("2023-08-14"),
+      directManagerId: hrManager.id,
+    },
+  });
+  await prisma.modelHasRole.create({
+    data: { roleId: roleByName.get("employee")!.id, modelType: MODEL_USER, modelId: employee.id },
+  });
+
+  await prisma.notificationPreference.createMany({
+    data: [hrManager.id, devopsLead.id, engineer.id, pmo.id, finance.id, employee.id].map(
+      (userId) => ({ userId, email: true, inApp: true, sound: true })
+    ),
+  });
+
+  // ==================== Named test accounts ====================
+  //
+  // One account per tier, so the role-adaptive dashboard and the permission
+  // matrix can be exercised by logging in rather than by editing the database.
+  // They share the super-admin password so there is one credential to remember
+  // while testing — these are demo accounts, not production identities.
+  console.log("Creating named test accounts...");
+
+  const testPassword = await bcrypt.hash("ChangeMe!2026", 12);
+
+  /**
+   * A test account. Roles are passed by preset name; the caller decides the
+   * reporting line afterwards because the manager may be created later in the
+   * same block.
+   */
+  const makeTestUser = async (input: {
+    name: string;
+    email: string;
+    employeeId: string;
+    departmentId: number;
+    positionId: number;
+    employmentTypeId: number;
+    joinDate: string;
+  }) => {
+    const user = await prisma.user.create({
+      data: { ...input, password: testPassword, isActive: true, emailVerifiedAt: new Date() },
+    });
+    await prisma.notificationPreference.create({
+      data: { userId: user.id, email: true, inApp: true, sound: true },
+    });
+    return user;
+  };
+
+  const assignRole = (userId: number, roleName: string) =>
+    prisma.modelHasRole.create({
+      data: { roleId: roleByName.get(roleName)!.id, modelType: MODEL_USER, modelId: userId },
+    });
+
+  // IT manager — heads the IT department, so the IT head is their manager's
+  // manager. Reports to the super admin to keep one root in the org chart.
+  const azfar = await makeTestUser({
+    name: "Azfar",
+    email: "azfar@map2u.com.my",
+    employeeId: "EMP-101",
+    departmentId: deptIT.id,
+    positionId: posDeptHead.id,
+    employmentTypeId: empPerm.id,
+    joinDate: "2019-02-04",
+  });
+  await assignRole(azfar.id, "department-head");
+
+  // PMO manager — heads the PMO department (nested under IT), so reports to
+  // Azfar, which is also what makes IT a two-tier org chart to look at.
+  const zakaria = await makeTestUser({
+    name: "Zakaria",
+    email: "zakaria@map2u.com.my",
+    employeeId: "EMP-102",
+    departmentId: deptPMO.id,
+    positionId: posDeptHead.id,
+    employmentTypeId: empPerm.id,
+    joinDate: "2020-07-13",
+  });
+  await assignRole(zakaria.id, "department-head");
+  await prisma.user.update({ where: { id: zakaria.id }, data: { directManagerId: azfar.id } });
+
+  // DevOps team lead and his engineer, both inside IT. The lead reports to the
+  // IT manager, the engineer to the lead — a chain the timesheet approver
+  // resolver walks.
+  const amin = await makeTestUser({
+    name: "Amin",
+    email: "amin@map2u.com.my",
+    employeeId: "EMP-103",
+    departmentId: deptIT.id,
+    positionId: posTeamLead.id,
+    employmentTypeId: empPerm.id,
+    joinDate: "2021-09-06",
+  });
+  await assignRole(amin.id, "devops-team-lead");
+  await prisma.user.update({ where: { id: amin.id }, data: { directManagerId: azfar.id } });
+
+  const aiman = await makeTestUser({
+    name: "Aiman",
+    email: "aiman@map2u.com.my",
+    employeeId: "EMP-104",
+    departmentId: deptIT.id,
+    positionId: posDevOps.id,
+    employmentTypeId: empPerm.id,
+    joinDate: "2023-01-16",
+  });
+  await assignRole(aiman.id, "devops-engineer");
+  await prisma.user.update({ where: { id: aiman.id }, data: { directManagerId: amin.id } });
+
+  // Project manager inside the PMO, reporting to the PMO manager.
+  const wafiy = await makeTestUser({
+    name: "Wafiy",
+    email: "wafiy@map2u.com.my",
+    employeeId: "EMP-105",
+    departmentId: deptPMO.id,
+    positionId: posProjMgr.id,
+    employmentTypeId: empPerm.id,
+    joinDate: "2022-03-21",
+  });
+  await assignRole(wafiy.id, "project-manager-officer");
+  await prisma.user.update({ where: { id: wafiy.id }, data: { directManagerId: zakaria.id } });
+
+  // Departments are headed by the matching manager.
+  await prisma.department.update({ where: { id: deptIT.id }, data: { managerId: azfar.id } });
+  await prisma.department.update({ where: { id: deptHR.id }, data: { managerId: hrManager.id } });
+  await prisma.department.update({ where: { id: deptFIN.id }, data: { managerId: finance.id } });
+  await prisma.department.update({ where: { id: deptPMO.id }, data: { managerId: zakaria.id } });
+
+  const opsTeam = await prisma.team.create({
+    data: {
+      name: "DevOps Operations",
+      slug: "devops-operations",
+      type: "devops",
+      description: "Infrastructure, delivery and reliability",
+      // The owning department is what makes `department`-scoped permissions
+      // resolvable: scopeFilter widens team records through this link.
+      departmentId: deptIT.id,
+    },
+  });
+  const supportTeam = await prisma.team.create({
+    data: {
+      name: "Internal Support",
+      slug: "internal-support",
+      type: "support",
+      description: "First-line helpdesk",
+      departmentId: deptIT.id,
+    },
+  });
+  // The PMO's own team. Without a team of their own a project manager holds
+  // `timesheet.entry.read.team` but leads nothing, so their dashboard's team
+  // tier resolves to null and the page silently drops the whole section.
+  const pmoTeam = await prisma.team.create({
+    data: {
+      name: "Project Management",
+      slug: "project-management",
+      type: "project",
+      description: "Delivery planning and project governance",
+      departmentId: deptPMO.id,
+    },
+  });
+  await prisma.teamMember.createMany({
+    data: [
+      // Sarah Chen keeps the team but hands over day-to-day leadership: the
+      // route that promotes a lead demotes the incumbent to assistant lead, so
+      // the seed has to reproduce that same shape or the chart shows two leads.
+      { teamId: opsTeam.id, userId: devopsLead.id, teamRole: "assistant_lead" },
+      { teamId: opsTeam.id, userId: amin.id, teamRole: "lead" },
+      { teamId: opsTeam.id, userId: aiman.id, teamRole: "member" },
+      { teamId: opsTeam.id, userId: engineer.id, teamRole: "member" },
+      { teamId: opsTeam.id, userId: itAdmin.id, teamRole: "member" },
+      { teamId: supportTeam.id, userId: employee.id, teamRole: "lead" },
+      { teamId: pmoTeam.id, userId: wafiy.id, teamRole: "lead" },
+      { teamId: pmoTeam.id, userId: zakaria.id, teamRole: "member" },
+    ],
+  });
+
+  // Retained names for the demo data below.
+  const admin = itAdmin;
+  const devopsAdmin = devopsLead;
+  const viewer = employee;
+
 
   // ==================== Create Projects ====================
   console.log("Creating projects...");
@@ -608,6 +664,21 @@ async function main() {
     },
   });
 
+  // Give the named test accounts a project to land on. A project manager with
+  // no project opens an empty list, and a DevOps engineer with no team
+  // membership cannot be assigned a task — both make the pages untestable.
+  await prisma.teamAssignment.createMany({
+    data: [
+      { projectId: project1.id, userId: wafiy.id, projectRoleId: prManager.id },
+      { projectId: project2.id, userId: wafiy.id, projectRoleId: prManager.id },
+      { projectId: project3.id, userId: wafiy.id, projectRoleId: prManager.id },
+      { projectId: project2.id, userId: aiman.id, projectRoleId: prDeveloper.id },
+      { projectId: project3.id, userId: amin.id, projectRoleId: prLead.id },
+      { projectId: project1.id, userId: azfar.id, projectRoleId: prLead.id },
+      { projectId: project2.id, userId: zakaria.id, projectRoleId: prLead.id },
+    ],
+  });
+
   // ==================== Kanban Setup ====================
   console.log("Creating Kanban boards...");
 
@@ -640,12 +711,43 @@ async function main() {
     }
   });
 
+  // Work already sitting with the test accounts, so the kanban, the calendar
+  // and the dashboard's task panel are not empty on first login.
+  await prisma.projectTask.createMany({
+    data: [
+      {
+        projectId: project1.id,
+        columnId: colTodo.id,
+        title: "Containerise the reporting worker",
+        description: "Move the nightly report job into the shared cluster",
+        assignees: [aiman.id],
+        priority: "high",
+      },
+      {
+        projectId: project1.id,
+        columnId: colInProgress.id,
+        title: "Rotate the staging TLS certificates",
+        assignees: [aiman.id, amin.id],
+        priority: "medium",
+      },
+      {
+        projectId: project1.id,
+        columnId: colReview.id,
+        title: "Sign off the Q4 delivery plan",
+        description: "Confirm scope and resourcing with the PMO",
+        assignees: [wafiy.id],
+        priority: "high",
+      },
+    ],
+  });
+
   // ==================== Create Infrastructure Nodes ====================
   console.log("Creating infrastructure nodes...");
 
   await prisma.infrastructureNode.create({
     data: {
       projectId: project1.id,
+      teamId: opsTeam.id,
       environmentId: prodEnv.id,
       name: "Web Server 1",
       hostname: "web01.prod.ecommerce",
@@ -665,6 +767,7 @@ async function main() {
   await prisma.infrastructureNode.create({
     data: {
       projectId: project1.id,
+      teamId: opsTeam.id,
       environmentId: prodEnv.id,
       name: "Database Server",
       hostname: "db01.prod.ecommerce",
@@ -684,6 +787,7 @@ async function main() {
   await prisma.infrastructureNode.create({
     data: {
       projectId: project1.id,
+      teamId: opsTeam.id,
       environmentId: prodEnv.id,
       name: "Cache Server",
       hostname: "cache01.prod.ecommerce",
@@ -707,6 +811,7 @@ async function main() {
   const app1 = await prisma.application.create({
     data: {
       projectId: project1.id,
+      teamId: opsTeam.id,
       environmentId: prodEnv.id,
       name: "E-Commerce Web",
       slug: "ecommerce-web",
@@ -724,6 +829,7 @@ async function main() {
   await prisma.application.create({
     data: {
       projectId: project1.id,
+      teamId: opsTeam.id,
       environmentId: prodEnv.id,
       name: "E-Commerce API",
       slug: "ecommerce-api",
@@ -744,6 +850,7 @@ async function main() {
   await prisma.service.create({
     data: {
       projectId: project1.id,
+      teamId: opsTeam.id,
       environmentId: prodEnv.id,
       name: "PostgreSQL",
       slug: "postgresql",
@@ -759,6 +866,7 @@ async function main() {
   await prisma.service.create({
     data: {
       projectId: project1.id,
+      teamId: opsTeam.id,
       environmentId: prodEnv.id,
       name: "Redis",
       slug: "redis",
@@ -789,6 +897,7 @@ async function main() {
   await prisma.deployment.create({
     data: {
       projectId: project1.id,
+      teamId: opsTeam.id,
       environmentId: prodEnv.id,
       applicationId: app1.id,
       name: "v2.4.1 Release",
@@ -807,6 +916,7 @@ async function main() {
   await prisma.deployment.create({
     data: {
       projectId: project1.id,
+      teamId: opsTeam.id,
       environmentId: prodEnv.id,
       applicationId: app1.id,
       name: "v2.4.0 Release",
@@ -831,6 +941,7 @@ async function main() {
   await prisma.incident.create({
     data: {
       projectId: project1.id,
+      teamId: opsTeam.id,
       environmentId: prodEnv.id,
       title: "High Memory Usage on Cache Server",
       slug: "high-memory-cache",
@@ -854,6 +965,7 @@ async function main() {
   await prisma.domain.create({
     data: {
       projectId: project1.id,
+      teamId: opsTeam.id,
       name: "ecommerce.company.com",
       type: "primary",
       status: "active",
@@ -944,6 +1056,7 @@ async function main() {
       { value: "ADMIN", label: "Administration", sortOrder: 6 },
       { value: "FIN", label: "Finance", sortOrder: 7 },
       { value: "OPS", label: "Operations", sortOrder: 8 },
+      { value: "PMO", label: "Project Management Office", sortOrder: 9 },
     ],
     uom: [
       { value: "Unit", label: "Unit", sortOrder: 1 },
@@ -956,8 +1069,19 @@ async function main() {
       { value: "License", label: "License", sortOrder: 8 },
       { value: "Kg", label: "Kilogram", sortOrder: 9 },
       { value: "Meter", label: "Meter", sortOrder: 10 },
-      { value: "Box", label: "Box", sortOrder: 11 },
-      { value: "Pack", label: "Pack", sortOrder: 12 },
+      { value: "Pack", label: "Pack", sortOrder: 11 },
+    ],
+    budget_category: [
+      { value: "Hardware", label: "Hardware", sortOrder: 1 },
+      { value: "Software", label: "Software", sortOrder: 2 },
+      { value: "Maintenance", label: "Maintenance", sortOrder: 3 },
+      { value: "Office Equipment", label: "Office Equipment", sortOrder: 4 },
+      { value: "Rentals", label: "Rentals", sortOrder: 5 },
+      { value: "Hosting", label: "Hosting", sortOrder: 6 },
+      { value: "Security", label: "Security", sortOrder: 7 },
+      { value: "Training", label: "Training", sortOrder: 8 },
+      { value: "Consulting", label: "Consulting", sortOrder: 9 },
+      { value: "Other", label: "Other", sortOrder: 10 },
     ],
     currency: [
       { value: "MYR", label: "Malaysian Ringgit (MYR)", sortOrder: 1 },
@@ -1044,6 +1168,208 @@ async function main() {
       { value: "meeting", label: "Meeting", sortOrder: 4 },
       { value: "others", label: "Others", sortOrder: 5 },
     ],
+
+    // ── DevOps ────────────────────────────────────────────────────────────
+    // These mirror the zod enums in the corresponding routes. Keeping them
+    // here means the filters and create forms read a list an admin can edit,
+    // instead of a copy of a literal that quietly drifts from the API.
+    status_deployment: [
+      { value: "pending", label: "Pending", sortOrder: 1 },
+      { value: "in_progress", label: "In Progress", sortOrder: 2 },
+      { value: "completed", label: "Completed", sortOrder: 3 },
+      { value: "failed", label: "Failed", sortOrder: 4 },
+      { value: "rolled_back", label: "Rolled Back", sortOrder: 5 },
+    ],
+    incident_severity: [
+      { value: "low", label: "Low", sortOrder: 1 },
+      { value: "medium", label: "Medium", sortOrder: 2 },
+      { value: "high", label: "High", sortOrder: 3 },
+      { value: "critical", label: "Critical", sortOrder: 4 },
+    ],
+    status_incident: [
+      { value: "open", label: "Open", sortOrder: 1 },
+      { value: "investigating", label: "Investigating", sortOrder: 2 },
+      { value: "identified", label: "Identified", sortOrder: 3 },
+      { value: "monitoring", label: "Monitoring", sortOrder: 4 },
+      { value: "resolved", label: "Resolved", sortOrder: 5 },
+      { value: "closed", label: "Closed", sortOrder: 6 },
+    ],
+    infrastructure_node_type: [
+      { value: "server", label: "Server", sortOrder: 1 },
+      { value: "database", label: "Database", sortOrder: 2 },
+      { value: "load-balancer", label: "Load Balancer", sortOrder: 3 },
+      { value: "cache", label: "Cache", sortOrder: 4 },
+      { value: "queue", label: "Queue", sortOrder: 5 },
+      { value: "storage", label: "Storage", sortOrder: 6 },
+      { value: "network", label: "Network", sortOrder: 7 },
+      { value: "container", label: "Container", sortOrder: 8 },
+      { value: "kubernetes", label: "Kubernetes", sortOrder: 9 },
+    ],
+    infrastructure_status: [
+      { value: "active", label: "Active", sortOrder: 1 },
+      { value: "healthy", label: "Healthy", sortOrder: 2 },
+      { value: "warning", label: "Warning", sortOrder: 3 },
+      { value: "critical", label: "Critical", sortOrder: 4 },
+      { value: "offline", label: "Offline", sortOrder: 5 },
+      { value: "maintenance", label: "Maintenance", sortOrder: 6 },
+    ],
+    domain_type: [
+      { value: "primary", label: "Primary", sortOrder: 1 },
+      { value: "redirect", label: "Redirect", sortOrder: 2 },
+      { value: "alias", label: "Alias", sortOrder: 3 },
+      { value: "subdomain", label: "Subdomain", sortOrder: 4 },
+    ],
+    status_domain: [
+      { value: "active", label: "Active", sortOrder: 1 },
+      { value: "pending", label: "Pending", sortOrder: 2 },
+      { value: "expired", label: "Expired", sortOrder: 3 },
+      { value: "suspended", label: "Suspended", sortOrder: 4 },
+    ],
+    ssl_certificate_type: [
+      { value: "letsencrypt", label: "Let's Encrypt", sortOrder: 1 },
+      { value: "self-signed", label: "Self-signed", sortOrder: 2 },
+      { value: "commercial", label: "Commercial", sortOrder: 3 },
+      { value: "internal", label: "Internal", sortOrder: 4 },
+    ],
+    status_ssl_certificate: [
+      { value: "pending", label: "Pending", sortOrder: 1 },
+      { value: "valid", label: "Valid", sortOrder: 2 },
+      // Written by POST /ssl/:id/renew while the ACME job runs.
+      { value: "renewing", label: "Renewing", sortOrder: 3 },
+      { value: "expired", label: "Expired", sortOrder: 4 },
+      { value: "revoked", label: "Revoked", sortOrder: 5 },
+    ],
+    environment_type: [
+      { value: "development", label: "Development", sortOrder: 1 },
+      { value: "testing", label: "Testing", sortOrder: 2 },
+      { value: "staging", label: "Staging", sortOrder: 3 },
+      { value: "production", label: "Production", sortOrder: 4 },
+    ],
+    service_type: [
+      { value: "web", label: "Web", sortOrder: 1 },
+      { value: "api", label: "API", sortOrder: 2 },
+      { value: "database", label: "Database", sortOrder: 3 },
+      { value: "cache", label: "Cache", sortOrder: 4 },
+      { value: "queue", label: "Queue", sortOrder: 5 },
+      { value: "worker", label: "Worker", sortOrder: 6 },
+      { value: "cron", label: "Cron", sortOrder: 7 },
+      { value: "other", label: "Other", sortOrder: 8 },
+    ],
+    status_service: [
+      { value: "running", label: "Running", sortOrder: 1 },
+      { value: "active", label: "Active", sortOrder: 2 },
+      { value: "inactive", label: "Inactive", sortOrder: 3 },
+      { value: "maintenance", label: "Maintenance", sortOrder: 4 },
+      { value: "error", label: "Error", sortOrder: 5 },
+      { value: "unknown", label: "Unknown", sortOrder: 6 },
+    ],
+    document_type: [
+      { value: "documentation", label: "Documentation", sortOrder: 1 },
+      { value: "runbook", label: "Runbook", sortOrder: 2 },
+      { value: "architecture", label: "Architecture", sortOrder: 3 },
+      { value: "api", label: "API Spec", sortOrder: 4 },
+      { value: "meeting_notes", label: "Meeting Notes", sortOrder: 5 },
+      { value: "other", label: "Other", sortOrder: 6 },
+    ],
+    status_document: [
+      { value: "draft", label: "Draft", sortOrder: 1 },
+      { value: "review", label: "Review", sortOrder: 2 },
+      { value: "published", label: "Published", sortOrder: 3 },
+      { value: "archived", label: "Archived", sortOrder: 4 },
+    ],
+    credential_type: [
+      { value: "server", label: "Server", sortOrder: 1 },
+      { value: "database", label: "Database", sortOrder: 2 },
+      { value: "ssh", label: "SSH", sortOrder: 3 },
+      { value: "api", label: "API", sortOrder: 4 },
+      { value: "other", label: "Other", sortOrder: 5 },
+    ],
+    cloud_provider: [
+      { value: "aws", label: "AWS", sortOrder: 1 },
+      { value: "gcp", label: "Google Cloud", sortOrder: 2 },
+      { value: "azure", label: "Azure", sortOrder: 3 },
+      { value: "digitalocean", label: "DigitalOcean", sortOrder: 4 },
+      { value: "linode", label: "Linode", sortOrder: 5 },
+      { value: "vultr", label: "Vultr", sortOrder: 6 },
+      { value: "on-premise", label: "On-Premise", sortOrder: 7 },
+      { value: "other", label: "Other", sortOrder: 8 },
+    ],
+    team_type: [
+      { value: "devops", label: "DevOps", sortOrder: 1 },
+      { value: "support", label: "Support", sortOrder: 2 },
+      { value: "project", label: "Project", sortOrder: 3 },
+      { value: "ops", label: "Operations", sortOrder: 4 },
+    ],
+
+    // ── Helpdesk ──────────────────────────────────────────────────────────
+    status_ticket: [
+      { value: "open", label: "Open", sortOrder: 1 },
+      { value: "in_progress", label: "In Progress", sortOrder: 2 },
+      { value: "awaiting_response", label: "Awaiting Response", sortOrder: 3 },
+      { value: "resolved", label: "Resolved", sortOrder: 4 },
+      { value: "closed", label: "Closed", sortOrder: 5 },
+      { value: "reopened", label: "Reopened", sortOrder: 6 },
+    ],
+    ticket_priority: [
+      { value: "low", label: "Low", sortOrder: 1 },
+      { value: "medium", label: "Medium", sortOrder: 2 },
+      { value: "high", label: "High", sortOrder: 3 },
+      { value: "urgent", label: "Urgent", sortOrder: 4 },
+    ],
+    ticket_source: [
+      { value: "web", label: "Web", sortOrder: 1 },
+      { value: "email", label: "Email", sortOrder: 2 },
+      { value: "phone", label: "Phone", sortOrder: 3 },
+      { value: "chat", label: "Chat", sortOrder: 4 },
+      { value: "walk-in", label: "Walk-in", sortOrder: 5 },
+    ],
+
+    // ── Projects, assets, timesheet ───────────────────────────────────────
+    status_project: [
+      { value: "planning", label: "Planning", sortOrder: 1 },
+      { value: "active", label: "Active", sortOrder: 2 },
+      { value: "inactive", label: "Inactive", sortOrder: 3 },
+      { value: "archived", label: "Archived", sortOrder: 4 },
+    ],
+    project_priority: [
+      { value: "low", label: "Low", sortOrder: 1 },
+      { value: "medium", label: "Medium", sortOrder: 2 },
+      { value: "high", label: "High", sortOrder: 3 },
+      { value: "urgent", label: "Urgent", sortOrder: 4 },
+      { value: "critical", label: "Critical", sortOrder: 5 },
+    ],
+    status_subtask: [
+      { value: "open", label: "Open", sortOrder: 1 },
+      { value: "in_progress", label: "In Progress", sortOrder: 2 },
+      { value: "done", label: "Done", sortOrder: 3 },
+    ],
+    status_asset: [
+      { value: "active", label: "Active", sortOrder: 1 },
+      { value: "inactive", label: "Inactive", sortOrder: 2 },
+      { value: "maintenance", label: "Under Maintenance", sortOrder: 3 },
+      { value: "disposed", label: "Disposed", sortOrder: 4 },
+      { value: "decommissioned", label: "Decommissioned", sortOrder: 5 },
+    ],
+    status_timesheet_entry: [
+      { value: "draft", label: "Draft", sortOrder: 1 },
+      { value: "submitted", label: "Submitted", sortOrder: 2 },
+      { value: "approved", label: "Approved", sortOrder: 3 },
+      { value: "rejected", label: "Rejected", sortOrder: 4 },
+    ],
+    status_direct_purchase: [
+      { value: "draft", label: "Draft", sortOrder: 1 },
+      { value: "submitted", label: "Submitted", sortOrder: 2 },
+      { value: "approved", label: "Approved", sortOrder: 3 },
+      { value: "completed", label: "Completed", sortOrder: 4 },
+      { value: "rejected", label: "Rejected", sortOrder: 5 },
+    ],
+    status_internal_project: [
+      { value: "planning", label: "Planning", sortOrder: 1 },
+      { value: "in_progress", label: "In Progress", sortOrder: 2 },
+      { value: "on_hold", label: "On Hold", sortOrder: 3 },
+      { value: "completed", label: "Completed", sortOrder: 4 },
+      { value: "cancelled", label: "Cancelled", sortOrder: 5 },
+    ],
   };
 
   for (const [group, items] of Object.entries(referenceDataGroups)) {
@@ -1122,6 +1448,33 @@ async function main() {
     });
   }
 
+  // ==================== Invariants ====================
+  // Exactly one super-admin may exist. If this ever fails, the platform has no
+  // unambiguous owner and privilege transfer would be unsafe.
+  const superAdminHolders = await prisma.modelHasRole.count({
+    where: {
+      modelType: MODEL_USER,
+      roleId: superAdminRole.id,
+    },
+  });
+  if (superAdminHolders !== 1) {
+    throw new Error(
+      `Invariant violated: expected exactly 1 super-admin, found ${superAdminHolders}`
+    );
+  }
+
+  const target = await prisma.modelHasRole.findFirst({
+    where: { modelType: MODEL_USER, roleId: superAdminRole.id },
+  });
+  const holder = await prisma.user.findUnique({
+    where: { id: target!.modelId },
+    select: { email: true },
+  });
+  if (holder?.email !== "it@map2u.com.my") {
+    throw new Error(`Invariant violated: super-admin is ${holder?.email}, expected it@map2u.com.my`);
+  }
+
+  console.log(`Super admin: ${holder.email} (sole holder)`);
   console.log("Database seeded successfully!");
 }
 

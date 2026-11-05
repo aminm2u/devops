@@ -3,7 +3,7 @@ import multer from "multer";
 import path from "path";
 import fs from "fs";
 import { authenticate } from "../middleware/auth.js";
-import { requireRole } from "../middleware/rbac.js";
+import { requirePermission } from "../middleware/rbac.js";
 import { RequestWithUser } from "../types/index.js";
 import { NotFoundError, AppError } from "../lib/errors.js";
 
@@ -152,7 +152,7 @@ router.get(
 router.delete(
   "/file/:projectPath/:filename",
   authenticate,
-  requireRole("super-admin", "devops-admin"),
+  requirePermission("admin.settings.manage"),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const { projectPath, filename } = req.params;

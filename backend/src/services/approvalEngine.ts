@@ -1,4 +1,16 @@
 import prisma from "../config/database.js";
+import { openRequest, settleSubject } from "./approvalRequest.service.js";
+
+/**
+ * Procurement's step engine.
+ *
+ * `RequisitionApproval` remains the source of truth for the chain — order,
+ * comments and the per-step audit belong to procurement. But every step is now
+ * *also* mirrored into the unified ledger, so a requisition shows up in
+ * `/approvals` alongside timesheets and deployments instead of only on the
+ * requisition page. `settleSubject` keeps the two in step when a decision is
+ * taken from either side.
+ */
 
 interface PolicyMatch {
   policyId: number;
@@ -149,6 +161,32 @@ export async function createApprovalChain(
     })),
   });
 
+  // Mirror the first step into the unified ledger so it shows up in
+  // `/approvals`. Later steps are opened as the chain advances — a row here for
+  // an approver who is not yet actionable would put work in their queue that
+  // they cannot legally decide.
+  const form = await prisma.requisitionForm.findUnique({
+    where: { id: requisitionId },
+    select: { totalEstimatedCost: true, createdByUserId: true },
+  });
+  const first = match.approverIds[0];
+  // `createdByUserId` is nullable on legacy rows; without a requester there is
+  // nobody to notify, so the ledger row is skipped rather than faked.
+  if (first && form?.createdByUserId) {
+    await openRequest({
+      module: "requisition",
+      subjectType: "RequisitionForm",
+      subjectId: requisitionId,
+      title: `Requisition #${requisitionId} — ${Number(
+        form.totalEstimatedCost ?? totalAmount
+      ).toFixed(2)}`,
+      requesterId: form.createdByUserId,
+      approverId: first,
+      link: "/procurement/requisitions/manage",
+      metadata: { order: 1, policyId: match.policyId },
+    });
+  }
+
   return true;
 }
 
@@ -197,12 +235,22 @@ export async function processApprovalStep(
       },
     });
 
+    // A rejection ends the chain, so every open ledger row for this requisition
+    // closes — including steps that had not been reached yet.
+    await settleSubject({
+      subjectType: "RequisitionForm",
+      subjectId: requisitionId,
+      status: "rejected",
+      comment: comments ?? null,
+    });
+
     return { requisitionStatus: "rejected", isComplete: true };
   }
 
   // Check if all required approvals are done
   const allApprovals = await prisma.requisitionApproval.findMany({
     where: { requisitionId },
+    orderBy: { order: "asc" },
   });
 
   const allApproved = allApprovals.every((a) => a.status === "approved");
@@ -232,7 +280,48 @@ export async function processApprovalStep(
       });
     }
 
+    await settleSubject({
+      subjectType: "RequisitionForm",
+      subjectId: requisitionId,
+      status: "approved",
+    });
+
     return { requisitionStatus: "approved", isComplete: true };
+  }
+
+  // This approver has decided but the chain continues: close *their* row and
+  // open the next one, so the item moves through the inbox instead of staying
+  // with someone who is already done.
+  await prisma.approvalRequest.updateMany({
+    where: {
+      subjectType: "RequisitionForm",
+      subjectId: requisitionId,
+      approverId,
+      status: "pending",
+    },
+    data: { status: "approved", comment: comments ?? null, decidedAt: new Date() },
+  });
+
+  const next = allApprovals.find((a) => a.status === "pending");
+  if (next) {
+    const requisition = await prisma.requisitionForm.findUnique({
+      where: { id: requisitionId },
+      select: { createdByUserId: true, totalEstimatedCost: true },
+    });
+    if (requisition?.createdByUserId) {
+      await openRequest({
+        module: "requisition",
+        subjectType: "RequisitionForm",
+        subjectId: requisitionId,
+        title: `Requisition #${requisitionId} — ${Number(
+          requisition.totalEstimatedCost ?? 0
+        ).toFixed(2)}`,
+        requesterId: requisition.createdByUserId,
+        approverId: next.approverId,
+        link: "/procurement/requisitions/manage",
+        metadata: { order: next.order },
+      });
+    }
   }
 
   return { requisitionStatus: "under_review", isComplete: false };

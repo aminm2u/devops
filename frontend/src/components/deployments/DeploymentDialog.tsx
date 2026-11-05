@@ -12,6 +12,7 @@ import { FormDialog } from '@/components/ui/form-dialog';
 import { FormField } from '@/components/ui/form-field';
 import { FormGrid } from '@/components/ui/form-grid';
 import apiClient from '@/api/client';
+import { useReferenceData, toSelectOptions } from '@/hooks/useReferenceData';
 import toast from 'react-hot-toast';
 
 interface Deployment {
@@ -55,6 +56,9 @@ export function DeploymentDialog({
   deployment,
   onSuccess,
 }: DeploymentDialogProps) {
+  // Deployment states are master data.
+  const { data: statusData } = useReferenceData('status_deployment');
+  const deploymentStatuses = toSelectOptions(statusData);
   const [form, setForm] = useState(emptyForm);
   const [isPending, setIsPending] = useState(false);
 
@@ -149,11 +153,9 @@ export function DeploymentDialog({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="pending">Pending</SelectItem>
-              <SelectItem value="in_progress">In Progress</SelectItem>
-              <SelectItem value="completed">Completed</SelectItem>
-              <SelectItem value="failed">Failed</SelectItem>
-              <SelectItem value="rolled_back">Rolled Back</SelectItem>
+              {deploymentStatuses.map((option) => (
+                <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </FormField>

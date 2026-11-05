@@ -1,5 +1,6 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import { Bell, Check, CheckCheck } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -12,11 +13,11 @@ import {
 } from '@/components/ui/dropdown-menu';
 import {
   getNotifications,
-  getUnreadCount,
   markAsRead,
   markAllAsRead,
 } from '@/api/notifications';
 import type { Notification } from '@/types';
+import { useNotifications } from '@/shared/notifications/NotificationProvider';
 import { cn } from '@/lib/utils';
 
 const timeAgo = (dateStr: string): string => {
@@ -32,74 +33,63 @@ const timeAgo = (dateStr: string): string => {
   return `${diffDay}d ago`;
 };
 
-const typeColor: Record<string, string> = {
-  welcome: 'bg-blue-500/10 text-blue-600 dark:text-blue-400',
-  incident: 'bg-red-500/10 text-red-600 dark:text-red-400',
-  deployment: 'bg-green-500/10 text-green-600 dark:text-green-400',
-  system: 'bg-purple-500/10 text-purple-600 dark:text-purple-400',
-  security: 'bg-yellow-500/10 text-yellow-600 dark:text-yellow-400',
-};
-
 const typeDot: Record<string, string> = {
   welcome: 'bg-blue-500',
   incident: 'bg-red-500',
   deployment: 'bg-green-500',
   system: 'bg-purple-500',
   security: 'bg-yellow-500',
+  approval_requested: 'bg-amber-500',
+  approval_approved: 'bg-green-500',
+  approval_rejected: 'bg-red-500',
+  timesheet: 'bg-blue-500',
 };
 
+/**
+ * The bell.
+ *
+ * The unread count now comes from `NotificationProvider`, which receives it
+ * over the socket. This component used to keep its own count and poll every
+ * 30 s — and read `data.unreadCount` from an endpoint that returned `count`,
+ * so the badge never appeared at all.
+ */
 export function NotificationBell() {
   const navigate = useNavigate();
-  const [unreadCount, setUnreadCount] = useState(0);
+  const queryClient = useQueryClient();
+  const { unreadCount } = useNotifications();
+
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(false);
-  const loadedRef = useRef(false);
 
-  const fetchUnread = useCallback(async () => {
-    try {
-      const count = await getUnreadCount();
-      setUnreadCount(count);
-    } catch {
-      // silently fail
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchUnread();
-    // Poll every 30s
-    const interval = setInterval(fetchUnread, 30000);
-    return () => clearInterval(interval);
-  }, [fetchUnread]);
-
-  const loadNotifications = async () => {
-    if (loadedRef.current) return;
+  // The dropdown loads fresh each time it opens: a notification may have
+  // arrived on another tab, and a stale list behind a live badge is worse than
+  // a moment of loading.
+  const loadNotifications = useCallback(async () => {
     setLoading(true);
     try {
       const res = await getNotifications({ page: 1, limit: 10 });
       setNotifications(res.data);
     } catch {
-      // silently fail
+      // silently fail — the badge still reflects the socket stream
     } finally {
       setLoading(false);
-      loadedRef.current = true;
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    if (open) void loadNotifications();
+  }, [open, loadNotifications]);
 
   const handleOpen = (isOpen: boolean) => {
     setOpen(isOpen);
-    if (isOpen) {
-      loadNotifications();
-    }
   };
 
   const handleMarkRead = async (id: number) => {
     try {
       await markAsRead(id);
-      setNotifications((prev) =>
-        prev.map((n) => (n.id === id ? { ...n, isRead: true } : n))
-      );
-      setUnreadCount((prev) => Math.max(0, prev - 1));
+      setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, isRead: true } : n)));
+      void queryClient.invalidateQueries({ queryKey: ['notifications', 'unread'] });
     } catch {
       // silently fail
     }
@@ -109,7 +99,7 @@ export function NotificationBell() {
     try {
       await markAllAsRead();
       setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })));
-      setUnreadCount(0);
+      void queryClient.invalidateQueries({ queryKey: ['notifications', 'unread'] });
     } catch {
       // silently fail
     }

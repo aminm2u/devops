@@ -4,6 +4,7 @@ import { authConfig } from "../config/auth.js";
 import prisma from "../config/database.js";
 import { UnauthorizedError } from "../lib/errors.js";
 import { RequestWithUser } from "../types/index.js";
+import { MODEL_USER, resolveAccess } from "../rbac/effective.js";
 
 export async function authenticate(
   req: RequestWithUser,
@@ -38,10 +39,12 @@ export async function authenticate(
       userId: number;
     };
 
-    // Load user
-    const user = await prisma.user.findUnique({
-      where: { id: decoded.userId },
-    });
+    // Load the user and their effective access in parallel. `resolveAccess`
+    // is the only place the multi-role union / deny / max-scope rules live.
+    const [user, access] = await Promise.all([
+      prisma.user.findUnique({ where: { id: decoded.userId } }),
+      resolveAccess(decoded.userId),
+    ]);
 
     if (!user) {
       throw new UnauthorizedError("User not found");
@@ -51,23 +54,16 @@ export async function authenticate(
       throw new UnauthorizedError("User account is deactivated");
     }
 
-    // Load roles and permissions separately (polymorphic relation)
+    // Legacy shape: several route handlers still filter by role name and read
+    // `roles[].permissions`. Derived from the same resolver so it can never
+    // disagree with `req.access`.
     const modelRoles = await prisma.modelHasRole.findMany({
-      where: { modelId: user.id, modelType: "App\\Models\\User" },
+      where: { modelId: user.id, modelType: MODEL_USER },
       include: {
-        role: {
-          include: {
-            permissions: {
-              include: {
-                permission: true,
-              },
-            },
-          },
-        },
+        role: { include: { permissions: { include: { permission: true } } } },
       },
     });
 
-    // Transform user data to include roles and permissions
     const roles = modelRoles.map((mhr) => ({
       name: mhr.role.name,
       permissions: mhr.role.permissions.map((rhp) => ({
@@ -85,15 +81,17 @@ export async function authenticate(
       updatedAt: user.updatedAt,
       roles,
     };
+    req.access = access;
 
     next();
   } catch (error) {
     if (error instanceof UnauthorizedError) {
       next(error);
+    } else if (error instanceof jwt.TokenExpiredError) {
+      // Must be tested before JsonWebTokenError — TokenExpiredError extends it.
+      next(new UnauthorizedError("Token expired"));
     } else if (error instanceof jwt.JsonWebTokenError) {
       next(new UnauthorizedError("Invalid token"));
-    } else if (error instanceof jwt.TokenExpiredError) {
-      next(new UnauthorizedError("Token expired"));
     } else {
       next(new UnauthorizedError("Authentication failed"));
     }

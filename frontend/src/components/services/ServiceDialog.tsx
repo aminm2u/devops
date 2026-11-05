@@ -12,6 +12,7 @@ import { FormDialog } from '@/components/ui/form-dialog';
 import { FormField } from '@/components/ui/form-field';
 import { FormGrid } from '@/components/ui/form-grid';
 import apiClient from '@/api/client';
+import { useReferenceData, toSelectOptions } from '@/hooks/useReferenceData';
 import toast from 'react-hot-toast';
 
 interface Service {
@@ -59,6 +60,11 @@ export function ServiceDialog({
   service,
   onSuccess,
 }: ServiceDialogProps) {
+  // Service kinds and health states are master data, not page literals.
+  const { data: typeData } = useReferenceData('service_type');
+  const serviceTypes = toSelectOptions(typeData);
+  const { data: statusData } = useReferenceData('status_service');
+  const serviceStatuses = toSelectOptions(statusData);
   const [form, setForm] = useState(emptyForm);
   const [isPending, setIsPending] = useState(false);
 
@@ -144,14 +150,9 @@ export function ServiceDialog({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="web">Web</SelectItem>
-              <SelectItem value="api">API</SelectItem>
-              <SelectItem value="database">Database</SelectItem>
-              <SelectItem value="cache">Cache</SelectItem>
-              <SelectItem value="queue">Queue</SelectItem>
-              <SelectItem value="worker">Worker</SelectItem>
-              <SelectItem value="cron">Cron</SelectItem>
-              <SelectItem value="other">Other</SelectItem>
+              {serviceTypes.map((option) => (
+                <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </FormField>
@@ -161,11 +162,9 @@ export function ServiceDialog({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="active">Active</SelectItem>
-              <SelectItem value="inactive">Inactive</SelectItem>
-              <SelectItem value="maintenance">Maintenance</SelectItem>
-              <SelectItem value="error">Error</SelectItem>
-              <SelectItem value="unknown">Unknown</SelectItem>
+              {serviceStatuses.map((option) => (
+                <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </FormField>

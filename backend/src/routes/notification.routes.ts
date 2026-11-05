@@ -60,7 +60,11 @@ router.get(
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const count = await getUnreadCount(req.user!.id);
-      res.status(200).json({ success: true, data: { count } });
+      // `unreadCount` matches the key `GET /notifications` puts in its meta, so
+      // the bell reads the same field whichever endpoint answered. The old
+      // `count` key left the client's `unreadCount` undefined, which is why the
+      // badge never rendered.
+      res.status(200).json({ success: true, data: { unreadCount: count } });
     } catch (error) {
       next(error);
     }
@@ -99,58 +103,86 @@ router.put(
   }
 );
 
-// GET /api/notifications/preferences - Get notification preferences
+/**
+ * Notification preferences, now stored in their own table.
+ *
+ * The old implementation read and wrote a JSON blob under
+ * `settings.notification_prefs_<id>`, which no UI ever wrote and no code ever
+ * read consistently — so `wantsEmail()` always returned true and the switches
+ * in Digital Me changed nothing. `types` holds per-type overrides:
+ * `{ incident: { email: false, sound: true } }`.
+ */
+const DEFAULTS = { email: true, inApp: true, sound: true };
+
+// GET /api/notifications/preferences
 router.get(
   "/preferences",
   authenticate,
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
-      const userId = req.user!.id;
-      const pref = await prisma.setting.findUnique({
-        where: { key: `notification_prefs_${userId}` },
+      const pref = await prisma.notificationPreference.findUnique({
+        where: { userId: req.user!.id },
       });
 
-      const defaults = {
-        email: true,
-        push: true,
-        incidentAlerts: true,
-        deploymentUpdates: true,
-        weeklyReport: false,
-      };
-
-      const preferences = pref ? JSON.parse(pref.value as string) : defaults;
-
-      res.status(200).json({ success: true, data: preferences });
+      res.status(200).json({
+        success: true,
+        data: {
+          ...DEFAULTS,
+          ...(pref
+            ? { email: pref.email, inApp: pref.inApp, sound: pref.sound, types: pref.types ?? {} }
+            : { types: {} }),
+        },
+      });
     } catch (error) {
       next(error);
     }
   }
 );
 
-// PUT /api/notifications/preferences - Update notification preferences
+// PUT /api/notifications/preferences
 router.put(
   "/preferences",
   authenticate,
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const userId = req.user!.id;
-      const { email, push, incidentAlerts, deploymentUpdates, weeklyReport } = req.body;
+      const body = req.body ?? {};
 
-      const preferences = {
-        email: email !== undefined ? email : true,
-        push: push !== undefined ? push : true,
-        incidentAlerts: incidentAlerts !== undefined ? incidentAlerts : true,
-        deploymentUpdates: deploymentUpdates !== undefined ? deploymentUpdates : true,
-        weeklyReport: weeklyReport !== undefined ? weeklyReport : false,
+      // Only known keys are written, so a stray field cannot be smuggled into
+      // the JSON column.
+      const pick = (value: unknown, fallback: boolean) =>
+        typeof value === "boolean" ? value : fallback;
+
+      const types =
+        body.types && typeof body.types === "object" && !Array.isArray(body.types)
+          ? body.types
+          : undefined;
+
+      const existing = await prisma.notificationPreference.findUnique({ where: { userId } });
+
+      const data = {
+        email: pick(body.email, existing?.email ?? DEFAULTS.email),
+        inApp: pick(body.inApp, existing?.inApp ?? DEFAULTS.inApp),
+        sound: pick(body.sound, existing?.sound ?? DEFAULTS.sound),
+        types: types ?? ((existing?.types ?? {}) as object),
       };
 
-      await prisma.setting.upsert({
-        where: { key: `notification_prefs_${userId}` },
-        update: { value: JSON.stringify(preferences) },
-        create: { key: `notification_prefs_${userId}`, value: JSON.stringify(preferences) },
+      const saved = await prisma.notificationPreference.upsert({
+        where: { userId },
+        update: data,
+        create: { userId, ...data },
       });
 
-      res.status(200).json({ success: true, data: preferences, message: "Preferences updated" });
+      res.status(200).json({
+        success: true,
+        data: {
+          email: saved.email,
+          inApp: saved.inApp,
+          sound: saved.sound,
+          types: saved.types ?? {},
+        },
+        message: "Preferences updated",
+      });
     } catch (error) {
       next(error);
     }

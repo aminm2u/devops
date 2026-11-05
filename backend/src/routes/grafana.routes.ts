@@ -140,7 +140,7 @@ function proxyStatus(httpStatus: number): number {
 router.get(
   "/config",
   authenticate,
-  requirePermission("view-projects"),
+  requirePermission("project.record.view"),
   async (_req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const config = await getGrafanaConfig();
@@ -166,7 +166,7 @@ router.get(
 router.put(
   "/config",
   authenticate,
-  requirePermission("update-projects"),
+  requirePermission("project.record.manage"),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const parsed = configUpdateSchema.safeParse(req.body);
@@ -247,7 +247,7 @@ router.put(
 router.get(
   "/dashboards",
   authenticate,
-  requirePermission("view-projects"),
+  requirePermission("project.record.view"),
   async (_req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const config = await getGrafanaConfig();
@@ -305,7 +305,7 @@ router.get(
 router.get(
   "/folders",
   authenticate,
-  requirePermission("view-projects"),
+  requirePermission("project.record.view"),
   async (_req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const config = await getGrafanaConfig();
@@ -346,7 +346,7 @@ router.get(
 router.get(
   "/proxy/*",
   authenticate,
-  requirePermission("view-projects"),
+  requirePermission("project.record.view"),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const config = await getGrafanaConfig();

@@ -1,6 +1,8 @@
 import { create } from 'zustand';
 import { authApi } from '@/api/auth';
 import { User } from '@/types';
+import { can, hasAnyRole, hasRole, isSuperAdmin, scopeOf } from '@/lib/roles';
+import { disconnectSocket } from '@/hooks/useSocket';
 import toast from 'react-hot-toast';
 
 interface AuthState {
@@ -14,7 +16,12 @@ interface AuthState {
   logout: () => Promise<void>;
   fetchUser: () => Promise<void>;
   hasRole: (name: string) => boolean;
+  hasAnyRole: (names: string[]) => boolean;
   hasPermission: (name: string) => boolean;
+  /** Scope-aware capability check against the resolved access payload. */
+  can: (permission: string, scope?: 'self' | 'team' | 'department' | 'all') => boolean;
+  scopeOf: (permission: string) => 'self' | 'team' | 'department' | 'all' | null;
+  isSuperAdmin: () => boolean;
   setUser: (user: User | null) => void;
   setToken: (token: string | null) => void;
 }
@@ -70,6 +77,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       // Logout even if API call fails
     } finally {
       localStorage.removeItem('token');
+      // The socket is authenticated with the old token's identity; leaving it
+      // open would keep a room membership for a session that no longer exists.
+      disconnectSocket();
       set({ user: null, token: null, isAuthenticated: false });
       toast.success('Logged out successfully');
     }
@@ -92,21 +102,12 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
   },
 
-  hasRole: (name: string) => {
-    const { user } = get();
-    if (!user || !user.roles) return false;
-    return user.roles.some((role) =>
-      typeof role === 'string' ? role === name : role.name === name
-    );
-  },
-
-  hasPermission: (name: string) => {
-    const { user } = get();
-    if (!user || !user.permissions) return false;
-    return user.permissions.some((permission) =>
-      typeof permission === 'string' ? permission === name : permission.name === name
-    );
-  },
+  hasRole: (name: string) => hasRole(get().user, name),
+  hasAnyRole: (names: string[]) => hasAnyRole(get().user, names),
+  hasPermission: (name: string) => can(get().user, name),
+  can: (permission, scope = 'self') => can(get().user, permission, scope),
+  scopeOf: (permission) => scopeOf(get().user, permission),
+  isSuperAdmin: () => isSuperAdmin(get().user),
 
   setUser: (user: User | null) => set({ user }),
   setToken: (token: string | null) => set({ token }),

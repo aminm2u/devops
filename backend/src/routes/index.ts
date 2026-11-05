@@ -8,6 +8,7 @@ import incidentRoutes from "./incident.routes.js";
 import deploymentRoutes from "./deployment.routes.js";
 import activityRoutes from "./activity.routes.js";
 import adminRoutes from "./admin.routes.js";
+import orgRoutes from "./org.routes.js";
 import grafanaRoutes from "./grafana.routes.js";
 import settingsRoutes from "./settings.routes.js";
 import credentialRoutes from "./credential.routes.js";
@@ -33,6 +34,9 @@ import assetRoutes from "./asset.routes.js";
 import paymentRoutes from "./payment.routes.js";
 import internalProjectRoutes from "./internalProject.routes.js";
 import microsoftRoutes from "./microsoft.routes.js";
+import accessRoutes from "./access.routes.js";
+import teamRoutes from "./team.routes.js";
+import approvalsRoutes from "./approvals.routes.js";
 
 const router = Router();
 
@@ -44,6 +48,11 @@ router.use("/profile", profileRoutes);
 router.use("/incidents", incidentRoutes);
 router.use("/deployments", deploymentRoutes);
 router.use("/activity-log", activityRoutes);
+// Mounted before adminRoutes so /admin/access/* is never shadowed.
+router.use("/admin/access", accessRoutes);
+router.use("/org", orgRoutes);
+router.use("/teams", teamRoutes);
+router.use("/approvals", approvalsRoutes);
 router.use("/admin", adminRoutes);
 router.use("/grafana", grafanaRoutes);
 router.use("/settings", settingsRoutes);

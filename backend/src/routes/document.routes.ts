@@ -1,7 +1,7 @@
 import { Router, Response, NextFunction } from "express";
 import { z } from "zod";
 import { authenticate } from "../middleware/auth.js";
-import { requireRole, requirePermission } from "../middleware/rbac.js";
+import { requirePermission } from "../middleware/rbac.js";
 import { validate } from "../middleware/validate.js";
 import { RequestWithUser } from "../types/index.js";
 import { NotFoundError } from "../lib/errors.js";
@@ -35,7 +35,7 @@ const updateDocumentSchema = createDocumentSchema.partial().omit({ projectId: tr
 router.get(
   "/project/:projectId",
   authenticate,
-  requirePermission("view-documents"),
+  requirePermission("project.document.view"),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const { projectId } = req.params;
@@ -92,7 +92,7 @@ router.get(
 router.post(
   "/",
   authenticate,
-  requireRole("super-admin", "devops-admin"),
+  requirePermission("project.document.manage"),
   validate(createDocumentSchema),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
@@ -139,7 +139,7 @@ router.post(
 router.put(
   "/:id",
   authenticate,
-  requireRole("super-admin", "devops-admin"),
+  requirePermission("project.document.manage"),
   validate(updateDocumentSchema),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
@@ -184,7 +184,7 @@ router.put(
 router.delete(
   "/:id",
   authenticate,
-  requireRole("super-admin", "devops-admin"),
+  requirePermission("project.document.manage"),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const { id } = req.params;

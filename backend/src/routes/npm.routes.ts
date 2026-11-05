@@ -128,7 +128,7 @@ function findPemInObject(obj: any, depth = 0): string | null {
 router.post(
   "/config",
   authenticate,
-  requirePermission("update-settings"),
+  requirePermission("admin.settings.manage"),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const { url, apiToken, userId } = req.body;
@@ -174,7 +174,7 @@ router.post(
 router.get(
   "/config",
   authenticate,
-  requirePermission("update-settings"),
+  requirePermission("admin.settings.manage"),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const config = await getNpmConfig();
@@ -192,7 +192,7 @@ router.get(
 router.post(
   "/sync",
   authenticate,
-  requirePermission("create-ssl-certificates"),
+  requirePermission("devops.ssl.manage"),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const config = await getNpmConfig();
@@ -575,7 +575,7 @@ router.post(
 router.get(
   "/debug/certificates",
   authenticate,
-  requirePermission("update-settings"),
+  requirePermission("admin.settings.manage"),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const config = await getNpmConfig();
@@ -619,7 +619,7 @@ router.get(
 router.get(
   "/proxy-hosts",
   authenticate,
-  requirePermission("view-ssl-certificates"),
+  requirePermission("devops.ssl.view"),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const config = await getNpmConfig();
@@ -649,7 +649,7 @@ router.get(
 router.post(
   "/test",
   authenticate,
-  requirePermission("update-settings"),
+  requirePermission("admin.settings.manage"),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const config = await getNpmConfig();

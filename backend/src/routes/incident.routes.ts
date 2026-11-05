@@ -2,6 +2,8 @@ import { Router, Response, NextFunction } from "express";
 import { z } from "zod";
 import { authenticate } from "../middleware/auth.js";
 import { requirePermission } from "../middleware/rbac.js";
+import { scopeFilter, withScope } from "../rbac/authorize.js";
+import { resolveTeamId, assertRecordInScope } from "../lib/teamScope.js";
 import { validate } from "../middleware/validate.js";
 import { RequestWithUser } from "../types/index.js";
 import { NotFoundError } from "../lib/errors.js";
@@ -14,6 +16,7 @@ const router = Router();
 
 const createIncidentSchema = z.object({
   projectId: z.number().int().positive(),
+  teamId: z.number().int().positive().optional().nullable(),
   title: z.string().min(2).max(255),
   description: z.string().nullable().optional(),
   severity: z.enum(["low", "medium", "high", "critical"]),
@@ -35,39 +38,17 @@ const updateIncidentSchema = z.object({
 router.get(
   "/",
   authenticate,
-  requirePermission("view-incidents"),
+  requirePermission("devops.incident.view"),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
-      const userId = req.user!.id;
-      const userRoles = req.user!.roles.map((r) => r.name);
-      const isViewer = userRoles.includes("viewer");
-
-      const { search, severity, status, projectId, page = "1", limit = "20" } = req.query;
+      const { search, severity, status, projectId, teamId, page = "1", limit = "20" } = req.query;
       const pageNum = Math.max(1, parseInt(page as string, 10) || 1);
       const limitNum = Math.min(100, Math.max(1, parseInt(limit as string, 10) || 30));
       const skip = (pageNum - 1) * limitNum;
 
       const where: any = { deletedAt: null };
 
-      if (isViewer) {
-        const assignments = await prisma.teamAssignment.findMany({
-          where: { userId },
-          select: { projectId: true },
-        });
-        const allowedProjectIds = assignments.map((a) => a.projectId);
-
-        if (projectId) {
-          const requestedId = parseInt(projectId as string, 10);
-          if (!allowedProjectIds.includes(requestedId)) {
-            return res.status(200).json({ success: true, data: [], meta: { currentPage: 1, lastPage: 0, perPage: limitNum, total: 0 } });
-          }
-          where.projectId = requestedId;
-        } else {
-          where.projectId = { in: allowedProjectIds };
-        }
-      } else {
-        if (projectId) where.projectId = parseInt(projectId as string, 10);
-      }
+      if (projectId) where.projectId = parseInt(projectId as string, 10);
 
       if (search) {
         where.OR = [
@@ -78,19 +59,26 @@ router.get(
       if (severity) where.severity = severity;
       if (status) where.status = status;
 
+      // An explicit team filter narrows further; it can never widen the scope
+      // the server already decided on, because both land in the same `where`.
+      if (teamId && teamId !== "all") where.teamId = parseInt(teamId as string, 10);
+
+      const scoped = withScope(where, scopeFilter(req.access!, "devops.incident.view"));
+
       const [incidents, total] = await Promise.all([
         prisma.incident.findMany({
-          where,
+          where: scoped,
           include: {
             project: { select: { id: true, name: true, slug: true } },
             reportedUser: { select: { id: true, name: true, email: true } },
             assignedUser: { select: { id: true, name: true, email: true } },
+            team: { select: { id: true, name: true } },
           },
           orderBy: { createdAt: "desc" },
           skip,
           take: limitNum,
         }),
-        prisma.incident.count({ where }),
+        prisma.incident.count({ where: scoped }),
       ]);
 
       res.status(200).json({
@@ -114,7 +102,7 @@ router.get(
 router.post(
   "/",
   authenticate,
-  requirePermission("create-incidents"),
+  requirePermission("devops.incident.create"),
   validate(createIncidentSchema),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
@@ -136,6 +124,7 @@ router.post(
       const incident = await prisma.incident.create({
         data: {
           projectId: req.body.projectId,
+          teamId: await resolveTeamId(req.access!, req.body.teamId),
           title: req.body.title,
           slug,
           description: req.body.description || null,
@@ -175,16 +164,18 @@ router.post(
 router.put(
   "/:id",
   authenticate,
-  requirePermission("update-incidents"),
+  requirePermission("devops.incident.manage"),
   validate(updateIncidentSchema),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const { id } = req.params;
       console.log("[Incident Update] Request for ID:", id, "Body:", req.body);
       const existing = await prisma.incident.findFirst({
-        where: { id: parseInt(id, 10), deletedAt: null },
+        where: { id: parseInt(id as string, 10), deletedAt: null },
       });
       if (!existing) throw new NotFoundError("Incident not found");
+
+      assertRecordInScope(req.access!, existing.teamId);
 
       // Handle slug update if title changes
       let slugUpdate: any = {};

@@ -1,7 +1,7 @@
 import { Router, Response, NextFunction } from "express";
 import { z } from "zod";
 import { authenticate } from "../middleware/auth.js";
-import { requireRole } from "../middleware/rbac.js";
+import { requirePermission } from "../middleware/rbac.js";
 import { validate } from "../middleware/validate.js";
 import { RequestWithUser } from "../types/index.js";
 import { logActivity } from "../middleware/activity.js";
@@ -66,7 +66,7 @@ router.get(
 router.put(
   "/",
   authenticate,
-  requireRole("super-admin", "devops-admin"),
+  requirePermission("admin.settings.manage"),
   validate(upsertManySchema),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
@@ -106,7 +106,7 @@ router.put(
 router.put(
   "/:key",
   authenticate,
-  requireRole("super-admin", "devops-admin"),
+  requirePermission("admin.settings.manage"),
   validate(upsertSettingSchema),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
@@ -143,7 +143,7 @@ router.put(
 router.delete(
   "/:key",
   authenticate,
-  requireRole("super-admin", "devops-admin"),
+  requirePermission("admin.settings.manage"),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const key = req.params.key as string;
@@ -226,7 +226,7 @@ router.get(
 router.post(
   "/reference-data/:group",
   authenticate,
-  requireRole("super-admin", "devops-admin"),
+  requirePermission("admin.settings.manage"),
   validate(upsertReferenceDataSchema),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
@@ -252,7 +252,7 @@ router.post(
 router.put(
   "/reference-data/:group/:id",
   authenticate,
-  requireRole("super-admin", "devops-admin"),
+  requirePermission("admin.settings.manage"),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const id = parseInt(req.params.id as string, 10);
@@ -277,7 +277,7 @@ router.put(
 router.delete(
   "/reference-data/:group/:id",
   authenticate,
-  requireRole("super-admin", "devops-admin"),
+  requirePermission("admin.settings.manage"),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const id = parseInt(req.params.id as string, 10);
@@ -297,7 +297,7 @@ router.delete(
 router.put(
   "/reference-data/:group/reorder",
   authenticate,
-  requireRole("super-admin", "devops-admin"),
+  requirePermission("admin.settings.manage"),
   validate(reorderReferenceDataSchema),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
@@ -361,7 +361,7 @@ router.get(
 router.put(
   "/numbering/:refType",
   authenticate,
-  requireRole("super-admin"),
+  requirePermission("admin.settings.manage"),
   validate(updateNumberingSchema),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
@@ -446,7 +446,7 @@ router.get(
 router.post(
   "/approval-policies",
   authenticate,
-  requireRole("super-admin", "devops-admin"),
+  requirePermission("admin.settings.manage"),
   validate(approvalPolicySchema),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
@@ -486,7 +486,7 @@ router.post(
 router.put(
   "/approval-policies/:id",
   authenticate,
-  requireRole("super-admin", "devops-admin"),
+  requirePermission("admin.settings.manage"),
   validate(approvalPolicySchema),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
@@ -541,7 +541,7 @@ router.put(
 router.delete(
   "/approval-policies/:id",
   authenticate,
-  requireRole("super-admin", "devops-admin"),
+  requirePermission("admin.settings.manage"),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const id = parseInt(req.params.id as string, 10);

@@ -16,6 +16,7 @@ import { FormDialog } from '@/components/ui/form-dialog';
 import { FormField } from '@/components/ui/form-field';
 import { FormGrid } from '@/components/ui/form-grid';
 import apiClient from '@/api/client';
+import { useReferenceData, toSelectOptions } from '@/hooks/useReferenceData';
 import toast from 'react-hot-toast';
 
 interface UploadedFile {
@@ -81,6 +82,11 @@ export function DocumentDialog({
   document: doc,
   onSuccess,
 }: DocumentDialogProps) {
+  // Document kinds and workflow states are master data.
+  const { data: typeData } = useReferenceData('document_type');
+  const documentTypes = toSelectOptions(typeData);
+  const { data: statusData } = useReferenceData('status_document');
+  const documentStatuses = toSelectOptions(statusData);
   const [form, setForm] = useState(emptyForm);
   const [isPending, setIsPending] = useState(false);
   const [uploadingFiles, setUploadingFiles] = useState<UploadedFile[]>([]);
@@ -358,12 +364,9 @@ export function DocumentDialog({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="documentation">Documentation</SelectItem>
-              <SelectItem value="runbook">Runbook</SelectItem>
-              <SelectItem value="architecture">Architecture</SelectItem>
-              <SelectItem value="api">API Spec</SelectItem>
-              <SelectItem value="meeting_notes">Meeting Notes</SelectItem>
-              <SelectItem value="other">Other</SelectItem>
+              {documentTypes.map((option) => (
+                <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </FormField>
@@ -373,10 +376,9 @@ export function DocumentDialog({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="draft">Draft</SelectItem>
-              <SelectItem value="review">Review</SelectItem>
-              <SelectItem value="published">Published</SelectItem>
-              <SelectItem value="archived">Archived</SelectItem>
+              {documentStatuses.map((option) => (
+                <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </FormField>

@@ -1,3 +1,32 @@
+export type PermissionScope = 'self' | 'team' | 'department' | 'all';
+
+export interface AccessPermission {
+  name: string;
+  scope: PermissionScope;
+}
+
+export interface AccessRole {
+  id: number;
+  name: string;
+  level: number;
+  color: string | null;
+  permissions: string[];
+}
+
+/**
+ * Resolved effective access from `GET /auth/me`. This is the authoritative
+ * source for every client-side gate — role names are kept only for display.
+ */
+export interface Access {
+  isSuperAdmin: boolean;
+  level: number;
+  roles: AccessRole[];
+  teamIds: number[];
+  departmentIds: number[];
+  directManagerId: number | null;
+  permissions: AccessPermission[];
+}
+
 export interface User {
   id: number;
   name: string;
@@ -8,6 +37,7 @@ export interface User {
   updatedAt?: string;
   roles: Role[] | string[];
   permissions: Permission[] | string[];
+  access?: Access;
 }
 
 export interface Role {
@@ -34,10 +64,24 @@ export interface Project {
   priority: ProjectPriority;
   repositoryUrl: string | null;
   documentationUrl: string | null;
-  ownerId: number;
+  ownerId: number | null;
   owner?: User;
   createdAt: string;
   updatedAt: string;
+
+  // Delivery tracking
+  projectTypeId?: number | null;
+  projectType?: { id: number; name: string } | null;
+  startDate?: string | null;
+  expectedEndDate?: string | null;
+  actualEndDate?: string | null;
+  healthStatus?: string;
+  delayReason?: string | null;
+  recommendation?: string | null;
+  isActive?: boolean;
+  /** Lets any employee join the project team without PMO action. */
+  allowSelfEnroll?: boolean;
+
   environments?: Environment[];
   infrastructureNodes?: InfrastructureNode[];
   services?: Service[];
@@ -48,6 +92,9 @@ export interface Project {
   activities?: Activity[];
   teamAssignments?: TeamAssignment[];
   credentials?: Credential[];
+  tasks?: unknown[];
+  budgetItems?: ProjectBudgetItem[];
+  purchaseOrders?: ProjectPurchaseOrder[];
   _count?: {
     environments?: number;
     services?: number;
@@ -56,6 +103,24 @@ export interface Project {
     deployments?: number;
     incidents?: number;
   };
+}
+
+/** Budget line rolled up onto the project detail page. */
+export interface ProjectBudgetItem {
+  id: number;
+  name?: string | null;
+  allocatedBudget: number | string;
+  spentBudget?: number | string | null;
+  [key: string]: unknown;
+}
+
+/** Minimal PO shape needed for the project finance roll-up. */
+export interface ProjectPurchaseOrder {
+  id: number;
+  poNumber?: string | null;
+  totalAmount?: number | string | null;
+  status?: string;
+  [key: string]: unknown;
 }
 
 export type ProjectStatus = 'planning' | 'active' | 'inactive' | 'archived';
@@ -105,6 +170,10 @@ export interface InfrastructureNode {
   storageGb: number | null;
   provider: string | null;
   providerRegion: string | null;
+  /** SSH/console credentials, returned only to users holding project.credential.view. */
+  username: string | null;
+  password: string | null;
+  teamId?: number | null;
   isActive: boolean;
   metadata: Record<string, unknown> | null;
   createdBy?: number | null;
@@ -455,6 +524,8 @@ export interface ProjectFilters {
   search?: string;
   status?: ProjectStatus;
   priority?: ProjectPriority;
+  /** Only projects this user owns or is on the team for. */
+  mine?: boolean;
   page?: number;
   perPage?: number;
 }
@@ -492,11 +563,14 @@ export interface Notification {
 export type NotificationType = 'welcome' | 'incident' | 'deployment' | 'system' | 'security';
 
 export interface NotificationPreferences {
+  /** Email copies of notifications. */
   email: boolean;
-  push: boolean;
-  incidentAlerts: boolean;
-  deploymentUpdates: boolean;
-  weeklyReport: boolean;
+  /** In-app notification records (the bell). */
+  inApp: boolean;
+  /** Audible chime on arrival. */
+  sound: boolean;
+  /** Per-type overrides, keyed by Notification.type. */
+  types?: Record<string, { email?: boolean; inApp?: boolean; sound?: boolean }>;
 }
 
 export interface BudgetItem {
@@ -826,5 +900,41 @@ export interface MyTaskOption {
   projectId: number;
   projectName: string;
   subtasks: { id: number; title: string; status: string; assigneeId: number | null }[];
+}
+
+/** A task the user may log against, with the subtasks they may claim. */
+export interface EnrollableTask {
+  id: number;
+  title: string;
+  projectId: number;
+  projectName: string;
+  subtasks: {
+    id: number;
+    title: string;
+    status: string;
+    /** False when the subtask is assigned to somebody else. */
+    claimable: boolean;
+  }[];
+}
+
+export interface EnrollableProject {
+  id: number;
+  name: string;
+  slug: string;
+  role: string;
+}
+
+/** Response of `GET /timesheet/enrollable` — everything the entry form may offer. */
+export interface EnrollableOptions {
+  projects: EnrollableProject[];
+  tasks: EnrollableTask[];
+  categories: { value: string; label: string }[];
+  events: {
+    id: number;
+    subject: string;
+    startAt: string;
+    endAt: string;
+    attended: boolean;
+  }[];
 }
 

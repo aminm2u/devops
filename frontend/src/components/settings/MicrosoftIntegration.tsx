@@ -19,6 +19,7 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Separator } from '@/components/ui/separator';
 import { microsoftApi } from '@/api/microsoft';
+import { useReferenceData, toSelectOptions } from '@/hooks/useReferenceData';
 import type { MicrosoftAppConfig, MicrosoftCalendarEvent, MicrosoftAccountStatus } from '@/api/microsoft';
 import { format } from 'date-fns';
 import toast from 'react-hot-toast';
@@ -269,6 +270,11 @@ function SyncSettings({
   onChange: (patch: Parameters<typeof microsoftApi.updateMe>[0]) => void;
   saving: boolean;
 }) {
+  // The category list is master data (Admin settings → Reference data), not a
+  // literal, so adding a category there also makes it selectable here.
+  const { data: categoryData } = useReferenceData('timesheet_category');
+  const categories = toSelectOptions(categoryData);
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -329,11 +335,16 @@ function SyncSettings({
               disabled={saving}
               className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
             >
-              <option value="meeting">Meeting</option>
-              <option value="project">Project</option>
-              <option value="management">Management</option>
-              <option value="programme">Programme</option>
-              <option value="others">Others</option>
+              {categories.length === 0 && (
+                <option value={account.timesheetCategory ?? 'meeting'}>
+                  {account.timesheetCategory ?? 'meeting'}
+                </option>
+              )}
+              {categories.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
             </select>
             <p className="text-xs text-muted-foreground">Category used for meeting-derived entries</p>
           </div>

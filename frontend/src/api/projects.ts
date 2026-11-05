@@ -7,6 +7,7 @@ export const projectsApi = {
     if (filters?.search) params.append('search', filters.search);
     if (filters?.status) params.append('status', filters.status);
     if (filters?.priority) params.append('priority', filters.priority);
+    if (filters?.mine) params.append('mine', 'true');
     if (filters?.page) params.append('page', filters.page.toString());
     if (filters?.perPage) params.append('per_page', filters.perPage.toString());
 
@@ -31,5 +32,14 @@ export const projectsApi = {
 
   deleteProject: async (id: number): Promise<void> => {
     await apiClient.delete(`/projects/${id}`);
+  },
+
+  /**
+   * Join a project's team yourself. Only allowed when the project has
+   * `allowSelfEnroll` on; the server picks the lowest-privilege role.
+   */
+  enroll: async (id: number): Promise<ApiResponse<unknown>> => {
+    const response = await apiClient.post<ApiResponse<unknown>>(`/projects/${id}/enroll`);
+    return response.data;
   },
 };

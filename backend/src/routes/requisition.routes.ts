@@ -1,7 +1,7 @@
 import { Router, Response, NextFunction } from "express";
 import { z } from "zod";
 import { authenticate } from "../middleware/auth.js";
-import { requireRole } from "../middleware/rbac.js";
+import { requirePermission } from "../middleware/rbac.js";
 import { validate } from "../middleware/validate.js";
 import { RequestWithUser } from "../types/index.js";
 import { NotFoundError } from "../lib/errors.js";
@@ -450,7 +450,7 @@ const approveRejectSchema = z.object({
 router.put(
   "/:id/approve",
   authenticate,
-  requireRole(["super-admin", "devops-admin"]),
+  requirePermission("procurement.requisition.approve"),
   async (req: Request, res: Response) => {
     try {
       const id = parseInt(req.params.id);

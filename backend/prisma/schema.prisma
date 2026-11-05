@@ -14,9 +14,17 @@ model Department {
   code      String   @unique
   name      String
   managerId Int?     @map("manager_id")
+  /// Self-relation — departments may nest.
+  parentId  Int?     @map("parent_id")
   employees User[]
+  teams     Team[]
   createdAt DateTime @default(now()) @map("created_at")
 
+  manager  User?        @relation("DepartmentManager", fields: [managerId], references: [id], onDelete: SetNull)
+  parent   Department?  @relation("DepartmentTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children Department[] @relation("DepartmentTree")
+
+  @@index([parentId])
   @@map("departments")
 }
 
@@ -82,6 +90,7 @@ model User {
   employmentType EmploymentType? @relation(fields: [employmentTypeId], references: [id])
   directManager  User?           @relation("ManagerToEmployee", fields: [directManagerId], references: [id])
   subordinates   User[]          @relation("ManagerToEmployee")
+  managedDepartments Department[] @relation("DepartmentManager")
 
   ownedProjects              Project[]
   teamAssignments            TeamAssignment[]
@@ -109,6 +118,11 @@ model User {
   timesheetToApprove         TimeEntry[]                   @relation("TimesheetApprover")
   subtasksAssigned           TaskSubtask[]                 @relation("SubtaskAssignee")
   timesheetRuleUsers         TimesheetApprovalRuleUser[]
+  // Team membership & approvals
+  teamMemberships            TeamMember[]
+  approvalRequestsRaised     ApprovalRequest[]             @relation("ApprovalRequestedBy")
+  approvalRequestsToDecide   ApprovalRequest[]             @relation("ApprovalAssignedTo")
+  notificationPreference     NotificationPreference?
   // Procurement relations
   createdRequisitions        RequisitionForm[]     @relation("RequisitionCreatedBy")
   approvalAssignments        ApprovalAssignment[]
@@ -239,6 +253,13 @@ model Role {
   name        String   @unique
   guardName   String   @map("guard_name")
   description String?
+  /// Protected system role — cannot be renamed or deleted from the UI.
+  isSystem     Boolean @default(false) @map("is_system")
+  /// false for super-admin: only the transfer endpoint may hand it out.
+  isAssignable Boolean @default(true) @map("is_assignable")
+  /// 0-100. A user may not assign or edit a role at or above their own level.
+  level       Int      @default(0)
+  color       String?
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
@@ -254,6 +275,10 @@ model Permission {
   guardName   String   @map("guard_name")
   description String?
   group       String?
+  /// Rendered red in the matrix; saving requires a confirm dialog.
+  isDangerous    Boolean @default(false) @map("is_dangerous")
+  /// Whether narrowing this permission by scope is meaningful.
+  supportsScope  Boolean @default(true) @map("supports_scope")
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
@@ -263,10 +288,16 @@ model Permission {
   @@map("permissions")
 }
 
+/// Direct per-user grant/deny layer. Effective access is:
+///   (⋃ role grants) ∪ (direct allows) − (direct denies)
 model ModelHasPermission {
   permissionId Int    @map("permission_id")
   modelType    String @map("model_type")
   modelId      Int    @map("model_id")
+  /// "allow" | "deny" — deny always wins over any allow.
+  effect       String @default("allow")
+  /// self | team | department | all — ignored when supportsScope is false.
+  scope        String @default("all")
 
   permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
 
@@ -288,14 +319,126 @@ model ModelHasRole {
 }
 
 model RoleHasPermission {
-  permissionId Int @map("permission_id")
-  roleId       Int @map("role_id")
+  permissionId Int    @map("permission_id")
+  roleId       Int    @map("role_id")
+  /// self | team | department | all — the widest scope across all sources wins.
+  scope        String @default("all")
 
   permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
   role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
 
   @@id([permissionId, roleId])
   @@map("role_has_permissions")
+}
+
+// ==================== Teams (scope layer) ====================
+//
+// Role = *what* a user may do (capability, global).
+// Team = *which records* they may do it to (scope, per record).
+// Records opt into a team via their nullable `teamId` column.
+
+model Team {
+  id          Int      @id @default(autoincrement())
+  name        String
+  slug        String   @unique
+  /// devops | support | project | ops
+  type        String   @default("devops")
+  description String?  @db.Text
+  parentTeamId Int?    @map("parent_team_id")
+  projectId   Int?     @map("project_id")
+  /// Which department owns this team. Drives `department`-scoped permissions.
+  departmentId Int?    @map("department_id")
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  parentTeam Team?        @relation("TeamTree", fields: [parentTeamId], references: [id], onDelete: SetNull)
+  childTeams Team[]       @relation("TeamTree")
+  project    Project?     @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  department Department?  @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  members    TeamMember[]
+
+  // Records scoped to this team
+  infrastructureNodes InfrastructureNode[]
+  services            Service[]
+  applications        Application[]
+  domains             Domain[]
+  sslCertificates     SslCertificate[]
+  deployments         Deployment[]
+  incidents           Incident[]
+  changeManagements   ChangeManagement[]
+  helpdeskTickets     HelpdeskTicket[]
+
+  @@index([type])
+  @@index([projectId])
+  @@index([departmentId])
+  @@map("teams")
+}
+
+model TeamMember {
+  teamId    Int      @map("team_id")
+  userId    Int      @map("user_id")
+  /// lead | assistant_lead | member
+  teamRole  String   @default("member") @map("team_role")
+  isActive  Boolean  @default(true) @map("is_active")
+  joinedAt  DateTime @default(now()) @map("joined_at")
+
+  team Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([teamId, userId])
+  @@index([userId])
+  @@map("team_members")
+}
+
+// ==================== Unified approval ledger ====================
+//
+// One inbox across every module. Business rules stay in the module engines
+// (`approvalEngine.ts`, `timesheetApproval.ts`); this table only records who
+// must decide what, so "Approval Section" can be a single query.
+
+model ApprovalRequest {
+  id          Int      @id @default(autoincrement())
+  /// timesheet | requisition | purchase-order | payment | deployment | change | enrollment
+  module      String
+  subjectType String   @map("subject_type")
+  subjectId   Int      @map("subject_id")
+  title       String
+  requesterId Int      @map("requester_id")
+  approverId  Int      @map("approver_id")
+  step        Int      @default(1)
+  /// pending | approved | rejected | cancelled
+  status      String   @default("pending")
+  comment     String?  @db.Text
+  decidedAt   DateTime? @map("decided_at")
+  metadata    Json?
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  requester User @relation("ApprovalRequestedBy", fields: [requesterId], references: [id], onDelete: Cascade)
+  approver  User @relation("ApprovalAssignedTo", fields: [approverId], references: [id], onDelete: Cascade)
+
+  @@unique([module, subjectType, subjectId, approverId])
+  @@index([approverId, status])
+  @@index([requesterId])
+  @@index([status])
+  @@map("approval_requests")
+}
+
+// ==================== Notification preferences ====================
+
+model NotificationPreference {
+  userId Int      @id @map("user_id")
+  email  Boolean  @default(true)
+  inApp  Boolean  @default(true)
+  sound  Boolean  @default(true)
+  /// Per-type overrides, keyed by Notification.type.
+  types  Json?
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("notification_preferences")
 }
 
 // ==================== Activity Log ====================
@@ -344,6 +487,8 @@ model Project {
   recommendation  String?   @db.Text
 
   isActive  Boolean   @default(true) @map("is_active")
+  /// Allows any employee to join the project team without HR/PMO action.
+  allowSelfEnroll Boolean @default(false) @map("allow_self_enroll")
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt @map("updated_at")
   deletedAt DateTime? @map("deleted_at")
@@ -377,6 +522,7 @@ model Project {
   directPurchases       DirectPurchase[]
   assets                Asset[]
   internalProjects      InternalProject[]
+  teams                 Team[]
 
   @@index([status])
   @@index([isActive])
@@ -677,6 +823,7 @@ model InfrastructureNode {
   id                 Int       @id @default(autoincrement())
   projectId          Int       @map("project_id")
   environmentId      Int?      @map("environment_id")
+  teamId             Int?      @map("team_id")
   name               String
   hostname           String?
   ipAddress          String?   @map("ip_address")
@@ -701,12 +848,14 @@ model InfrastructureNode {
   // Relations
   project       Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
   environment   Environment? @relation(fields: [environmentId], references: [id], onDelete: SetNull)
+  team          Team?        @relation(fields: [teamId], references: [id], onDelete: SetNull)
   createdByUser User?        @relation("InfrastructureNodeCreatedBy", fields: [createdBy], references: [id])
   services      Service[]
 
   @@index([type])
   @@index([status])
   @@index([isActive])
+  @@index([teamId])
   @@map("infrastructure_nodes")
 }
 
@@ -715,6 +864,7 @@ model Service {
   projectId            Int       @map("project_id")
   environmentId        Int?      @map("environment_id")
   infrastructureNodeId Int?      @map("infrastructure_node_id")
+  teamId               Int?      @map("team_id")
   name                 String
   slug                 String
   type                 String
@@ -733,12 +883,14 @@ model Service {
   project            Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
   environment        Environment?        @relation(fields: [environmentId], references: [id], onDelete: SetNull)
   infrastructureNode InfrastructureNode? @relation(fields: [infrastructureNodeId], references: [id], onDelete: SetNull)
+  team               Team?               @relation(fields: [teamId], references: [id], onDelete: SetNull)
   domains            Domain[]
 
   @@unique([projectId, slug])
   @@index([type])
   @@index([status])
   @@index([isActive])
+  @@index([teamId])
   @@map("services")
 }
 
@@ -746,6 +898,7 @@ model Application {
   id             Int       @id @default(autoincrement())
   projectId      Int       @map("project_id")
   environmentId  Int?      @map("environment_id")
+  teamId         Int?      @map("team_id")
   name           String
   slug           String
   type           String
@@ -764,6 +917,7 @@ model Application {
   // Relations
   project          Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
   environment      Environment?      @relation(fields: [environmentId], references: [id], onDelete: SetNull)
+  team             Team?             @relation(fields: [teamId], references: [id], onDelete: SetNull)
   domains          Domain[]
   deployments      Deployment[]
   securityFindings SecurityFinding[]
@@ -772,6 +926,7 @@ model Application {
   @@index([type])
   @@index([status])
   @@index([isActive])
+  @@index([teamId])
   @@map("applications")
 }
 
@@ -780,6 +935,7 @@ model Domain {
   projectId      Int?      @map("project_id")
   serviceId      Int?      @map("service_id")
   applicationId  Int?      @map("application_id")
+  teamId         Int?      @map("team_id")
   name           String
   type           String    @default("primary")
   status         String    @default("active")
@@ -797,6 +953,7 @@ model Domain {
   project         Project?         @relation(fields: [projectId], references: [id], onDelete: SetNull)
   service         Service?         @relation(fields: [serviceId], references: [id], onDelete: SetNull)
   application     Application?     @relation(fields: [applicationId], references: [id], onDelete: SetNull)
+  team            Team?            @relation(fields: [teamId], references: [id], onDelete: SetNull)
   sslCertificates SslCertificate[]
 
   @@unique([projectId, name])
@@ -804,6 +961,7 @@ model Domain {
   @@index([status])
   @@index([expirationDate])
   @@index([isActive])
+  @@index([teamId])
   @@map("domains")
 }
 
@@ -811,6 +969,7 @@ model SslCertificate {
   id              Int       @id @default(autoincrement())
   domainId        Int?      @map("domain_id")
   projectId       Int       @map("project_id")
+  teamId          Int?      @map("team_id")
   name            String
   type            String    @default("letsencrypt")
   status          String    @default("pending")
@@ -832,10 +991,12 @@ model SslCertificate {
   // Relations
   domain  Domain? @relation(fields: [domainId], references: [id], onDelete: Cascade)
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  team    Team?   @relation(fields: [teamId], references: [id], onDelete: SetNull)
 
   @@index([status])
   @@index([notAfter])
   @@index([isActive])
+  @@index([teamId])
   @@map("ssl_certificates")
 }
 
@@ -844,6 +1005,7 @@ model Deployment {
   projectId       Int       @map("project_id")
   environmentId   Int?      @map("environment_id")
   applicationId   Int?      @map("application_id")
+  teamId          Int?      @map("team_id")
   name            String
   status          String    @default("pending")
   version         String?
@@ -865,12 +1027,14 @@ model Deployment {
   project        Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
   environment    Environment? @relation(fields: [environmentId], references: [id], onDelete: SetNull)
   application    Application? @relation(fields: [applicationId], references: [id], onDelete: SetNull)
+  team           Team?        @relation(fields: [teamId], references: [id], onDelete: SetNull)
   deployedByUser User?        @relation("DeploymentDeployedBy", fields: [deployedBy], references: [id], onDelete: SetNull)
   rollbackFrom   Deployment?  @relation("DeploymentRollback", fields: [rollbackFromId], references: [id], onDelete: SetNull)
   rollbacks      Deployment[] @relation("DeploymentRollback")
 
   @@index([status])
   @@index([deployedAt])
+  @@index([teamId])
   @@map("deployments")
 }
 
@@ -878,6 +1042,7 @@ model Incident {
   id            Int       @id @default(autoincrement())
   projectId     Int       @map("project_id")
   environmentId Int?      @map("environment_id")
+  teamId        Int?      @map("team_id")
   title         String
   slug          String
   description   String?   @db.Text
@@ -899,6 +1064,7 @@ model Incident {
   // Relations
   project      Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
   environment  Environment? @relation(fields: [environmentId], references: [id], onDelete: SetNull)
+  team         Team?        @relation(fields: [teamId], references: [id], onDelete: SetNull)
   assignedUser User?        @relation("IncidentAssignedTo", fields: [assignedTo], references: [id], onDelete: SetNull)
   reportedUser User?        @relation("IncidentReportedBy", fields: [reportedBy], references: [id], onDelete: SetNull)
 
@@ -907,6 +1073,7 @@ model Incident {
   @@index([severity])
   @@index([priority])
   @@index([isActive])
+  @@index([teamId])
   @@map("incidents")
 }
 
@@ -914,6 +1081,7 @@ model ChangeManagement {
   id            Int       @id @default(autoincrement())
   projectId     Int       @map("project_id")
   environmentId Int?      @map("environment_id")
+  teamId        Int?      @map("team_id")
   title         String
   slug          String
   description   String?   @db.Text
@@ -938,6 +1106,7 @@ model ChangeManagement {
   // Relations
   project         Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
   environment     Environment? @relation(fields: [environmentId], references: [id], onDelete: SetNull)
+  team            Team?        @relation(fields: [teamId], references: [id], onDelete: SetNull)
   requestedUser   User?        @relation("ChangeRequestedBy", fields: [requestedBy], references: [id], onDelete: SetNull)
   approvedUser    User?        @relation("ChangeApprovedBy", fields: [approvedBy], references: [id], onDelete: SetNull)
   implementedUser User?        @relation("ChangeImplementedBy", fields: [implementedBy], references: [id], onDelete: SetNull)
@@ -948,6 +1117,7 @@ model ChangeManagement {
   @@index([riskLevel])
   @@index([priority])
   @@index([isActive])
+  @@index([teamId])
   @@map("change_managements")
 }
 
@@ -1103,7 +1273,7 @@ model BudgetItem {
   id               Int       @id @default(autoincrement())
   projectId        Int?      @map("project_id")
   budgetType       String    @default("project") @map("budget_type")
-  division         String    @default("Information Technology")
+  division         String    @default("IT")
   category         String
   description      String
   details          String?
@@ -1277,6 +1447,7 @@ model HelpdeskCategory {
 model HelpdeskTicket {
   id              Int       @id @default(autoincrement())
   projectId       Int?      @map("project_id")
+  teamId          Int?      @map("team_id")
   title           String
   slug            String
   description     String?   @db.Text
@@ -1302,6 +1473,7 @@ model HelpdeskTicket {
   deletedAt       DateTime? @map("deleted_at")
 
   project     Project?             @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  team        Team?                @relation(fields: [teamId], references: [id], onDelete: SetNull)
   category    HelpdeskCategory?    @relation(fields: [categoryId], references: [id], onDelete: SetNull)
   assignee    User?                @relation("HelpdeskAssignedTo", fields: [assignedTo], references: [id], onDelete: SetNull)
   reporter    User?                @relation("HelpdeskReportedBy", fields: [reportedBy], references: [id], onDelete: SetNull)
@@ -1314,6 +1486,7 @@ model HelpdeskTicket {
   @@index([categoryId])
   @@index([assignedTo])
   @@index([reportedBy])
+  @@index([teamId])
   @@index([isActive])
   @@map("helpdesk_tickets")
 }

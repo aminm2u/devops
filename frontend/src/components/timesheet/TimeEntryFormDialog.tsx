@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { FormDialog } from '@/components/ui/form-dialog';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Button } from '@/components/ui/button';
@@ -10,9 +10,8 @@ import { DatePicker } from '@/components/ui/date-picker';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Trash2, Timer, ListTodo, CheckCircle2 } from 'lucide-react';
 import { todayLocal } from '@/lib/utils';
-import { useReferenceData, toSelectOptions } from '@/hooks/useReferenceData';
 import {
-  useMyTasks,
+  useEnrollable,
   useCreateTimeEntry,
   useUpdateTimeEntry,
   useDeleteTimeEntry,
@@ -33,6 +32,11 @@ interface TimeEntryFormDialogProps {
  * Create/edit a timesheet entry. Task-linked entries auto-derive category
  * ("project") from the task metadata; ad-hoc entries pick from the admin
  * managed `timesheet_category` reference group.
+ *
+ * Both pickers come from `/timesheet/enrollable`, so the list is the work this
+ * person is enrolled on — not every task they were ever named on. The server
+ * re-validates on write; this only stops the form from offering work that
+ * would be refused.
  */
 export function TimeEntryFormDialog({
   open,
@@ -54,8 +58,7 @@ export function TimeEntryFormDialog({
   const [categoryValue, setCategoryValue] = useState('');
   const [deleteOpen, setDeleteOpen] = useState(false);
 
-  const { data: categories } = useReferenceData('timesheet_category');
-  const { data: myTasks } = useMyTasks();
+  const { data: enrollable } = useEnrollable();
   const createTimeEntry = useCreateTimeEntry();
   const updateTimeEntry = useUpdateTimeEntry();
   const deleteTimeEntry = useDeleteTimeEntry();
@@ -83,7 +86,27 @@ export function TimeEntryFormDialog({
     }
   }, [open, entry, defaultDate]);
 
-  const selectedTask = myTasks?.find((t) => String(t.id) === taskId);
+  const tasks = useMemo(() => {
+    const options = enrollable?.tasks ?? [];
+    // Editing an older entry whose task has since left the enrolled list: keep
+    // the row selectable so opening the form cannot silently drop the link.
+    if (entry?.task && !options.some((t) => t.id === entry.task!.id)) {
+      return [
+        {
+          id: entry.task.id,
+          title: entry.task.title,
+          projectId: entry.projectId ?? 0,
+          projectName: entry.project?.name ?? 'Project',
+          subtasks: [],
+        },
+        ...options,
+      ];
+    }
+    return options;
+  }, [enrollable, entry]);
+
+  const categories = enrollable?.categories ?? [];
+  const selectedTask = tasks.find((t) => String(t.id) === taskId);
   const isTaskLinked = source === 'task' && !!taskId;
 
   const saveEntry = async (): Promise<TimeEntry | null> => {
@@ -224,16 +247,21 @@ export function TimeEntryFormDialog({
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label>Task</Label>
-                <Select value={taskId} onValueChange={(v) => { setTaskId(v); setSubtaskId(''); }} disabled={locked}>
-                  <SelectTrigger><SelectValue placeholder="Select assigned task..." /></SelectTrigger>
+                <Select value={taskId} onValueChange={(v) => { setTaskId(v); setSubtaskId(''); }} disabled={locked || tasks.length === 0}>
+                  <SelectTrigger><SelectValue placeholder="Select enrolled task..." /></SelectTrigger>
                   <SelectContent>
-                    {(myTasks || []).map((t) => (
+                    {tasks.map((t) => (
                       <SelectItem key={t.id} value={String(t.id)}>
                         {t.title} <span className="text-muted-foreground">({t.projectName})</span>
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
+                {tasks.length === 0 && (
+                  <p className="text-xs text-muted-foreground">
+                    No enrolled tasks — log this as an ad-hoc activity.
+                  </p>
+                )}
               </div>
               <div className="space-y-2">
                 <Label>Subtask (optional)</Label>
@@ -241,9 +269,12 @@ export function TimeEntryFormDialog({
                   <SelectTrigger><SelectValue placeholder="None" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">None</SelectItem>
-                    {(selectedTask?.subtasks || []).map((s) => (
-                      <SelectItem key={s.id} value={String(s.id)}>{s.title}</SelectItem>
-                    ))}
+                    {(selectedTask?.subtasks || [])
+                      // A subtask claimed by somebody else is not yours to log.
+                      .filter((s) => s.claimable)
+                      .map((s) => (
+                        <SelectItem key={s.id} value={String(s.id)}>{s.title}</SelectItem>
+                      ))}
                   </SelectContent>
                 </Select>
               </div>
@@ -264,7 +295,7 @@ export function TimeEntryFormDialog({
               <Select value={categoryValue} onValueChange={setCategoryValue} disabled={locked}>
                 <SelectTrigger><SelectValue placeholder="Select category..." /></SelectTrigger>
                 <SelectContent>
-                  {toSelectOptions(categories).map((c) => (
+                  {categories.map((c) => (
                     <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>
                   ))}
                 </SelectContent>

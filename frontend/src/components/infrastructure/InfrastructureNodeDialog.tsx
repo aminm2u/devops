@@ -11,6 +11,7 @@ import { FormDialog } from '@/components/ui/form-dialog';
 import { FormField } from '@/components/ui/form-field';
 import { FormGrid } from '@/components/ui/form-grid';
 import apiClient from '@/api/client';
+import { useReferenceData, toSelectOptions } from '@/hooks/useReferenceData';
 import toast from 'react-hot-toast';
 
 interface InfrastructureNode {
@@ -67,6 +68,13 @@ export function InfrastructureNodeDialog({
   node,
   onSuccess,
 }: InfrastructureNodeDialogProps) {
+  // Node kinds and health states are master data.
+  const { data: typeData } = useReferenceData('infrastructure_node_type');
+  const nodeTypes = toSelectOptions(typeData);
+  const { data: statusData } = useReferenceData('infrastructure_status');
+  const nodeStatuses = toSelectOptions(statusData);
+  const { data: providerData } = useReferenceData('cloud_provider');
+  const cloudProviders = toSelectOptions(providerData);
   const [form, setForm] = useState(emptyForm);
   const [isPending, setIsPending] = useState(false);
 
@@ -188,11 +196,9 @@ export function InfrastructureNodeDialog({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="server">Server</SelectItem>
-                <SelectItem value="database">Database</SelectItem>
-                <SelectItem value="cache">Cache</SelectItem>
-                <SelectItem value="load-balancer">Load Balancer</SelectItem>
-                <SelectItem value="storage">Storage</SelectItem>
+                {nodeTypes.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </FormField>
@@ -204,12 +210,9 @@ export function InfrastructureNodeDialog({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="active">Active</SelectItem>
-                <SelectItem value="healthy">Healthy</SelectItem>
-                <SelectItem value="warning">Warning</SelectItem>
-                <SelectItem value="critical">Critical</SelectItem>
-                <SelectItem value="maintenance">Maintenance</SelectItem>
-                <SelectItem value="offline">Offline</SelectItem>
+                {nodeStatuses.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </FormField>
@@ -264,14 +267,9 @@ export function InfrastructureNodeDialog({
                 <SelectValue placeholder="Select provider" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="aws">AWS</SelectItem>
-                <SelectItem value="gcp">Google Cloud</SelectItem>
-                <SelectItem value="azure">Azure</SelectItem>
-                <SelectItem value="digitalocean">DigitalOcean</SelectItem>
-                <SelectItem value="linode">Linode</SelectItem>
-                <SelectItem value="vultr">Vultr</SelectItem>
-                <SelectItem value="on-premise">On-Premise</SelectItem>
-                <SelectItem value="other">Other</SelectItem>
+                {cloudProviders.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </FormField>

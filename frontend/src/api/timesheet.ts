@@ -3,6 +3,7 @@ import type {
   TimeEntry,
   CalendarEventsResponse,
   MyTaskOption,
+  EnrollableOptions,
   TimesheetApprovalRule,
 } from '@/types';
 
@@ -76,6 +77,13 @@ export const timesheetApi = {
 
   myTasks: () =>
     apiClient.get('/timesheet/my-tasks').then((r) => r.data.data as MyTaskOption[]),
+
+  /**
+   * What this user may legitimately log time against: their enrolled projects,
+   * the tasks on those projects, the categories, and their own calendar events.
+   */
+  enrollable: () =>
+    apiClient.get('/timesheet/enrollable').then((r) => r.data.data as EnrollableOptions),
 
   listRules: () =>
     apiClient.get('/timesheet/approval-rules').then((r) => r.data.data as TimesheetApprovalRule[]),

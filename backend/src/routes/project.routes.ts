@@ -1,12 +1,13 @@
 import { Router, Response, NextFunction } from "express";
 import { z } from "zod";
 import { authenticate } from "../middleware/auth.js";
-import { requireRole, requirePermission } from "../middleware/rbac.js";
+import { requirePermission } from "../middleware/rbac.js";
 import { validate } from "../middleware/validate.js";
 import { RequestWithUser } from "../types/index.js";
-import { NotFoundError, ForbiddenError, AppError } from "../lib/errors.js";
+import { NotFoundError, ForbiddenError, ValidationError, AppError } from "../lib/errors.js";
 import { generateSlug } from "../lib/slug.js";
 import { logActivity } from "../middleware/activity.js";
+import { createNotification } from "../services/notification.service.js";
 import prisma from "../config/database.js";
 
 const router = Router();
@@ -45,16 +46,22 @@ const updateProjectSchema = z.object({
 router.get(
   "/",
   authenticate,
-  requirePermission("view-projects"),
+  requirePermission("project.record.view"),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const userId = req.user!.id;
       const userRoles = req.user!.roles.map((r) => r.name);
+      // `viewer` was removed from the role catalog, so this branch had become
+      // dead and every signed-in user saw every project. The `mine` filter is
+      // now the explicit, per-request version of what it was trying to do.
       const isViewer = userRoles.includes("viewer");
 
-      const { search, status, priority, page = "1", limit = "12" } = req.query;
+      const { search, status, priority, page = "1", limit, per_page, mine } = req.query;
       const pageNum = Math.max(1, parseInt(page as string, 10) || 1);
-      const limitNum = Math.min(100, Math.max(1, parseInt(limit as string, 10) || 30));
+      // The client has always sent `per_page` while this handler read `limit`,
+      // so page size silently ignored the caller. Accept both.
+      const rawLimit = (limit ?? per_page ?? "12") as string;
+      const limitNum = Math.min(100, Math.max(1, parseInt(rawLimit, 10) || 12));
       const skip = (pageNum - 1) * limitNum;
 
       // Build where clause
@@ -62,19 +69,41 @@ router.get(
         deletedAt: null,
       };
 
-      if (isViewer) {
+      if (isViewer || mine === "true") {
+        // `isActive: false` rows are people who were removed; they must not keep
+        // project visibility after leaving the team.
         const assignments = await prisma.teamAssignment.findMany({
-          where: { userId },
+          where: { userId, isActive: true },
           select: { projectId: true },
         });
-        where.id = { in: assignments.map((a) => a.projectId) };
+        where.AND = [
+          {
+            OR: [
+              { ownerId: userId },
+              { id: { in: assignments.map((a) => a.projectId) } },
+            ],
+          },
+        ];
       }
 
+      const and: any[] = [];
+      if (where.AND) and.push(...where.AND);
+
       if (search) {
-        where.OR = [
-          { name: { contains: search as string, mode: "insensitive" } },
-          { description: { contains: search as string, mode: "insensitive" } },
-        ];
+        and.push({
+          OR: [
+            { name: { contains: search as string, mode: "insensitive" } },
+            { description: { contains: search as string, mode: "insensitive" } },
+          ],
+        });
+      }
+
+      // Fold every optional filter into one AND so a search term and a `mine`
+      // restriction can both apply (two top-level keys would, but only because
+      // Prisma merges them — one array is easier to reason about).
+      if (and.length > 0) {
+        delete where.AND;
+        where.AND = and;
       }
 
       if (status) {
@@ -131,7 +160,7 @@ router.get(
 router.post(
   "/",
   authenticate,
-  requireRole("super-admin", "devops-admin"),
+  requirePermission("project.record.create"),
   validate(createProjectSchema),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
@@ -188,7 +217,7 @@ router.post(
 router.get(
   "/:id",
   authenticate,
-  requirePermission("view-projects"),
+  requirePermission("project.record.view"),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const { id } = req.params;
@@ -250,7 +279,7 @@ router.get(
           tasks: {
             orderBy: { position: 'asc' },
             include: {
-              subtasks: { select: { id: true, status: true } }
+              subtasks: { select: { id: true, status: true, dueDate: true } }
             }
           },
           infrastructureNodes: {
@@ -285,6 +314,23 @@ router.get(
             },
             orderBy: { createdAt: "desc" },
             take: 5,
+          },
+          changeManagements: {
+            where: { deletedAt: null, isActive: true },
+            orderBy: { createdAt: "desc" },
+            take: 20,
+            select: {
+              id: true,
+              title: true,
+              type: true,
+              status: true,
+              riskLevel: true,
+              priority: true,
+              requestedAt: true,
+              approvedAt: true,
+              implementedAt: true,
+              createdAt: true,
+            },
           },
           credentials: true,
         },
@@ -331,7 +377,7 @@ router.get(
 router.put(
   "/:id",
   authenticate,
-  requirePermission("update-projects"),
+  requirePermission("project.record.manage"),
   validate(updateProjectSchema),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
@@ -421,7 +467,7 @@ router.put(
 router.delete(
   "/:id",
   authenticate,
-  requireRole("super-admin", "devops-admin"),
+  requirePermission("project.record.delete"),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const { id } = req.params;
@@ -468,7 +514,7 @@ const createEnvironmentSchema = z.object({
 router.get(
   "/:id/environments",
   authenticate,
-  requirePermission("view-projects"),
+  requirePermission("project.record.view"),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const { id } = req.params;
@@ -498,7 +544,7 @@ router.get(
 router.post(
   "/:id/environments",
   authenticate,
-  requireRole("super-admin", "devops-admin"),
+  requirePermission("project.environment.manage"),
   validate(createEnvironmentSchema),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
@@ -540,7 +586,7 @@ router.post(
 router.delete(
   "/:id/environments/:envId",
   authenticate,
-  requireRole("super-admin", "devops-admin"),
+  requirePermission("project.environment.manage"),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const { envId } = req.params;
@@ -570,46 +616,223 @@ router.delete(
   }
 );
 
+// POST /api/projects/:id/enroll — join the project team yourself
+/**
+ * Self-enrollment.
+ *
+ * Gated on `projects.allow_self_enroll`, not on a permission: the point is that
+ * a project open to volunteers does not need an administrator in the loop. A
+ * project with the flag off still requires `POST /:id/members` from someone
+ * with `project.team.manage`.
+ *
+ * The role is never taken from the client — otherwise self-enrollment would be
+ * a way to grant yourself Project Manager. `project_roles` has no ordering
+ * column (and the seed happens to create Project Manager first), so "lowest id"
+ * is *not* "lowest privilege": it would hand out the manager role. The role is
+ * chosen by name instead, and anything unrecognised ranks above the safe
+ * defaults so an unknown custom role is never granted automatically.
+ */
+const SELF_ENROLL_ROLE_RANK = ["developer", "member", "contributor", "viewer"];
+
+function selfEnrollRank(name: string): number {
+  const index = SELF_ENROLL_ROLE_RANK.indexOf(name.trim().toLowerCase());
+  // Unrecognised roles sort last so a custom "Project Manager" clone can never
+  // be picked by accident.
+  return index === -1 ? SELF_ENROLL_ROLE_RANK.length + 1 : index;
+}
+
+router.post(
+  "/:id/enroll",
+  authenticate,
+  requirePermission("project.team.enroll.self"),
+  async (req: RequestWithUser, res: Response, next: NextFunction) => {
+    try {
+      const rawId = req.params.id;
+      const projectId = parseInt(Array.isArray(rawId) ? rawId[0] : rawId, 10);
+      const project = await prisma.project.findFirst({
+        where: { id: projectId, deletedAt: null },
+        select: { id: true, name: true, allowSelfEnroll: true, ownerId: true },
+      });
+      if (!project) throw new NotFoundError("Project not found");
+      if (!project.allowSelfEnroll) {
+        throw new ForbiddenError("This project is not open to self-enrollment");
+      }
+
+      const already = await prisma.teamAssignment.findUnique({
+        where: { projectId_userId: { projectId, userId: req.user!.id } },
+      });
+      if (already?.isActive) {
+        throw new AppError(409, "You are already on this project");
+      }
+
+      const memberRole = (await prisma.projectRole.findMany())
+        .sort((a, b) => selfEnrollRank(a.name) - selfEnrollRank(b.name))[0];
+      if (!memberRole) {
+        throw new AppError(500, "No project roles are configured");
+      }
+
+      // A previous removal leaves the row behind (`isActive: false`); reusing it
+      // keeps the unique key intact and preserves the original assignment date.
+      const assignment = already
+        ? await prisma.teamAssignment.update({
+            where: { id: already.id },
+            data: { isActive: true, assignedAt: new Date(), projectRoleId: memberRole.id },
+            include: {
+              project: { select: { id: true, name: true } },
+              projectRole: true,
+            },
+          })
+        : await prisma.teamAssignment.create({
+            data: {
+              projectId,
+              userId: req.user!.id,
+              projectRoleId: memberRole.id,
+              assignedAt: new Date(),
+            },
+            include: {
+              project: { select: { id: true, name: true } },
+              projectRole: true,
+            },
+          });
+
+      if (project.ownerId && project.ownerId !== req.user!.id) {
+        await createNotification(
+          project.ownerId,
+          "project",
+          "Someone joined your project",
+          `${req.user!.name} enrolled on ${project.name}`,
+          `/projects/${projectId}?tab=team`
+        );
+      }
+
+      res.status(201).json({ success: true, data: assignment, message: "Enrolled" });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
 // POST /api/projects/:id/members
 router.post(
   "/:id/members",
   authenticate,
+  requirePermission("project.team.manage"),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
-      const { id } = req.params;
-      const { userId, projectRoleId } = req.body;
+      const rawId = req.params.id;
+      const projectId = parseInt(Array.isArray(rawId) ? rawId[0] : rawId, 10);
+      // Both ids arrive as numbers from the UI but as strings over JSON in some
+      // callers; Number() here keeps a malformed body from becoming NaN.
+      const userId = Number(req.body.userId);
+      const projectRoleId = Number(req.body.projectRoleId);
 
-      const project = await prisma.project.findUnique({
-        where: { id: parseInt(id, 10), deletedAt: null },
-      });
-      if (!project) throw new NotFoundError("Project not found");
-
-      const existing = await prisma.teamAssignment.findUnique({
-        where: {
-          projectId_userId: {
-            projectId: project.id,
-            userId: parseInt(userId, 10)
-          }
-        }
-      });
-
-      if (existing) {
-        return res.status(400).json({ error: "User is already a member of this project" });
+      if (!Number.isInteger(userId) || userId <= 0) {
+        throw new ValidationError({ userId: ["A valid user is required"] });
+      }
+      if (!Number.isInteger(projectRoleId) || projectRoleId <= 0) {
+        throw new ValidationError({ projectRoleId: ["A project role is required"] });
       }
 
-      const assignment = await prisma.teamAssignment.create({
-        data: {
-          projectId: project.id,
-          userId: parseInt(userId, 10),
-          projectRoleId: parseInt(projectRoleId, 10)
-        },
-        include: {
-          user: { select: { id: true, name: true, email: true } },
-          projectRole: true
-        }
+      const [project, role, targetUser] = await Promise.all([
+        prisma.project.findFirst({
+          where: { id: projectId, deletedAt: null },
+          select: { id: true, name: true, ownerId: true },
+        }),
+        prisma.projectRole.findUnique({ where: { id: projectRoleId } }),
+        prisma.user.findUnique({ where: { id: userId }, select: { id: true, name: true } }),
+      ]);
+      if (!project) throw new NotFoundError("Project not found");
+      if (!role) throw new ValidationError({ projectRoleId: ["Unknown project role"] });
+      if (!targetUser) throw new NotFoundError("User not found");
+
+      const existing = await prisma.teamAssignment.findUnique({
+        where: { projectId_userId: { projectId: project.id, userId } },
       });
 
+      if (existing?.isActive) {
+        // 409 rather than 400: the request is well-formed, it just collides
+        // with the current state.
+        throw new AppError(409, "User is already a member of this project");
+      }
+
+      // Re-adding somebody who was removed reuses their old row so the unique
+      // key stays intact and prior history is not silently duplicated.
+      const assignment = existing
+        ? await prisma.teamAssignment.update({
+            where: { id: existing.id },
+            data: { isActive: true, assignedAt: new Date(), projectRoleId: role.id },
+            include: {
+              user: { select: { id: true, name: true, email: true } },
+              projectRole: true,
+            },
+          })
+        : await prisma.teamAssignment.create({
+            data: { projectId: project.id, userId, projectRoleId: role.id, assignedAt: new Date() },
+            include: {
+              user: { select: { id: true, name: true, email: true } },
+              projectRole: true,
+            },
+          });
+
+      if (userId !== req.user!.id) {
+        await createNotification(
+          userId,
+          "project",
+          "Added to a project",
+          `${req.user!.name} added you to ${project.name} as ${role.name}`,
+          `/projects/${project.id}?tab=team`
+        );
+      }
+
       res.status(201).json({ success: true, data: assignment });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+// DELETE /api/projects/:id/members/:userId — remove somebody from the team
+/**
+ * Removal flips `isActive` instead of deleting the row: the assignment history
+ * is what a project's contribution numbers are reconciled against, and the
+ * unique key also stops a second live row for the same person.
+ */
+router.delete(
+  "/:id/members/:userId",
+  authenticate,
+  requirePermission("project.team.manage"),
+  async (req: RequestWithUser, res: Response, next: NextFunction) => {
+    try {
+      const rawId = req.params.id;
+      const rawUserId = req.params.userId;
+      const projectId = parseInt(Array.isArray(rawId) ? rawId[0] : rawId, 10);
+      const userId = parseInt(Array.isArray(rawUserId) ? rawUserId[0] : rawUserId, 10);
+
+      const assignment = await prisma.teamAssignment.findUnique({
+        where: { projectId_userId: { projectId, userId } },
+      });
+      // `findUnique` ignores `isActive`, so an already-removed row lands here
+      // too and is reported as "not on the team" rather than removed twice.
+      if (!assignment || !assignment.isActive) {
+        throw new NotFoundError("That person is not on this project's team");
+      }
+
+      // The project owner losing their seat would leave nobody accountable for
+      // it, so ownership has to be transferred first.
+      const project = await prisma.project.findUnique({
+        where: { id: projectId },
+        select: { id: true, name: true, ownerId: true },
+      });
+      if (project?.ownerId === userId) {
+        throw new AppError(409, "Transfer project ownership before removing the owner");
+      }
+
+      await prisma.teamAssignment.update({
+        where: { id: assignment.id },
+        data: { isActive: false },
+      });
+
+      res.status(204).send();
     } catch (error) {
       next(error);
     }

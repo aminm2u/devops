@@ -1,7 +1,7 @@
 import { Router, Response, NextFunction } from "express";
 import { z } from "zod";
 import { authenticate } from "../middleware/auth.js";
-import { requirePermission, requireRole } from "../middleware/rbac.js";
+import { requirePermission } from "../middleware/rbac.js";
 import { validate } from "../middleware/validate.js";
 import { RequestWithUser } from "../types/index.js";
 import { NotFoundError } from "../lib/errors.js";
@@ -228,7 +228,7 @@ router.get(
 router.post(
   "/",
   authenticate,
-  requireRole("super-admin", "devops-admin"),
+  requirePermission("budget.manage"),
   validate(createBudgetItemSchema),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
@@ -236,7 +236,9 @@ router.post(
         data: {
           projectId: req.body.projectId || null,
           budgetType: req.body.budgetType || "project",
-          division: req.body.division || "Information Technology",
+          // `division` stores the reference-data *value* (e.g. "IT"), never its
+          // label — the UI resolves the label from the master data.
+          division: req.body.division || "IT",
           category: req.body.category,
           description: req.body.description,
           details: req.body.details || null,
@@ -279,7 +281,7 @@ router.post(
 router.put(
   "/:id",
   authenticate,
-  requireRole("super-admin", "devops-admin"),
+  requirePermission("budget.manage"),
   validate(updateBudgetItemSchema),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
@@ -343,7 +345,7 @@ router.put(
 router.delete(
   "/:id",
   authenticate,
-  requireRole("super-admin", "devops-admin"),
+  requirePermission("budget.manage"),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const { id } = req.params;
@@ -379,7 +381,7 @@ router.delete(
 router.post(
   "/:id/expenditures",
   authenticate,
-  requireRole("super-admin", "devops-admin"),
+  requirePermission("budget.manage"),
   validate(createExpenditureSchema),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
@@ -460,7 +462,7 @@ router.get(
 router.delete(
   "/:id/expenditures/:expId",
   authenticate,
-  requireRole("super-admin", "devops-admin"),
+  requirePermission("budget.manage"),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const { id, expId } = req.params;

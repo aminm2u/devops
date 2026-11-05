@@ -12,7 +12,11 @@ export function useAuth() {
     fetchUser,
     setUser,
     hasRole,
+    hasAnyRole,
     hasPermission,
+    can,
+    scopeOf,
+    isSuperAdmin,
   } = useAuthStore();
 
   return {
@@ -26,6 +30,10 @@ export function useAuth() {
     fetchUser,
     setUser,
     hasRole,
+    hasAnyRole,
     hasPermission,
+    can,
+    scopeOf,
+    isSuperAdmin: isSuperAdmin(),
   };
 }

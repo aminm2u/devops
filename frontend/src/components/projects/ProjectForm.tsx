@@ -13,6 +13,7 @@ import { FormField } from '@/components/ui/form-field';
 import { FormGrid } from '@/components/ui/form-grid';
 import { UserAvatar } from '@/components/ui/UserAvatar';
 import { useAuth } from '@/hooks/useAuth';
+import { useReferenceData, toSelectOptions } from '@/hooks/useReferenceData';
 import apiClient from '@/api/client';
 import type { Project } from '@/types';
 
@@ -33,6 +34,12 @@ interface UserOption {
 
 export function ProjectForm({ open, onOpenChange, project, onSubmit, onCancel, isLoading }: ProjectFormProps) {
   const { user } = useAuth();
+  // Status and priority come from master data rather than a literal list, so
+  // the form cannot offer a value the list or the filter does not know about.
+  const { data: statusData } = useReferenceData('status_project');
+  const projectStatuses = toSelectOptions(statusData);
+  const { data: priorityData } = useReferenceData('project_priority');
+  const projectPriorities = toSelectOptions(priorityData);
   const [name, setName] = useState(project?.name || '');
   const [description, setDescription] = useState(project?.description || '');
   const [status, setStatus] = useState(project?.status || 'planning');
@@ -134,10 +141,9 @@ export function ProjectForm({ open, onOpenChange, project, onSubmit, onCancel, i
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="planning">Planning</SelectItem>
-              <SelectItem value="active">Active</SelectItem>
-              <SelectItem value="inactive">Inactive</SelectItem>
-              <SelectItem value="archived">Archived</SelectItem>
+              {projectStatuses.map((option) => (
+                <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </FormField>
@@ -148,10 +154,9 @@ export function ProjectForm({ open, onOpenChange, project, onSubmit, onCancel, i
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="low">Low</SelectItem>
-              <SelectItem value="medium">Medium</SelectItem>
-              <SelectItem value="high">High</SelectItem>
-              <SelectItem value="critical">Critical</SelectItem>
+              {projectPriorities.map((option) => (
+                <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </FormField>

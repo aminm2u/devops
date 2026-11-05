@@ -1,10 +1,15 @@
 import { Router, Response, NextFunction } from "express";
 import { z } from "zod";
 import { authenticate } from "../middleware/auth.js";
-import { requireRole } from "../middleware/rbac.js";
+import { authorize } from "../rbac/authorize.js";
+import { can } from "../rbac/effective.js";
+import { scopeFilter, withScope } from "../rbac/authorize.js";
+import { requirePermission } from "../middleware/rbac.js";
 import { RequestWithUser } from "../types/index.js";
 import { logActivity } from "../middleware/activity.js";
+import { resolveTeamId } from "../lib/teamScope.js";
 import { generateSlug } from "../lib/slug.js";
+import { availablePeriods, monthlyReport } from "../services/helpdeskReport.service.js";
 import prisma from "../config/database.js";
 import { getIO } from "../lib/socket.js";
 
@@ -14,6 +19,8 @@ const router = Router();
 
 const createTicketSchema = z.object({
   projectId: z.number().int().positive().optional().nullable(),
+  /** Which team owns the ticket. Defaults to the reporter's only team. */
+  teamId: z.number().int().positive().optional().nullable(),
   title: z.string().min(1, "Title is required"),
   description: z.string().optional().nullable(),
   priority: z.enum(["low", "medium", "high", "urgent"]).optional(),
@@ -55,6 +62,39 @@ const createCategorySchema = z.object({
   sortOrder: z.number().int().optional(),
 });
 
+// ==================== Visibility scope ====================
+
+/**
+ * Which tickets a caller may see, decided by capability rather than by role
+ * name.
+ *
+ *   helpdesk.ticket.read.all   every ticket
+ *   helpdesk.ticket.manage     the tickets they are working on, within their
+ *                              team scope, plus their own reports
+ *   otherwise                  only what they reported
+ *
+ * The previous implementation branched on `super-admin` / `devops-engineer` /
+ * `viewer`; `viewer` is not a catalog role, so that branch was dead and the
+ * engineer branch matched nobody either. Scope now follows the same resolver
+ * the rest of the API uses.
+ */
+function ticketScope(req: RequestWithUser): Record<string, unknown> {
+  const access = req.access;
+  const userId = req.user!.id;
+  if (!access) return { reportedBy: userId };
+
+  if (can(access, "helpdesk.ticket.read.all", "all")) return {};
+
+  // A manager sees their team's queue (narrowed by `scopeFilter`) plus anything
+  // they raised themselves. Both conditions go through `withScope` so a caller
+  // that already filtered on `OR` is not silently overwritten.
+  if (can(access, "helpdesk.ticket.manage", "self")) {
+    return withScope({ reportedBy: userId }, scopeFilter(access, "helpdesk.ticket.manage"));
+  }
+
+  return { reportedBy: userId };
+}
+
 // ==================== Stats ====================
 
 router.get(
@@ -63,27 +103,7 @@ router.get(
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const userId = req.user?.id;
-      const userRoles = req.user?.roles?.map((r: any) => r.name) || [];
-      const isAdmin = userRoles.some((r: string) => ["super-admin", "devops-admin"].includes(r));
-      const isEngineer = userRoles.some((r: string) => r === "devops-engineer");
-
-      // Build role-based filter
-      let roleFilter: any = {};
-      if (!isAdmin && !isEngineer) {
-        // Viewer: only own tickets
-        roleFilter = { reportedBy: userId };
-      } else if (isEngineer) {
-        // Engineer: assigned tickets + viewer-reported tickets (not admin tickets)
-        roleFilter = {
-          OR: [
-            { assignedTo: userId },
-            { reporter: { roles: { some: { role: { name: "viewer" } } } } },
-          ],
-        };
-      }
-      // Admin: no additional filter
-
-      const baseWhere = { isActive: true, deletedAt: null, ...roleFilter };
+      const baseWhere = { isActive: true, deletedAt: null, ...ticketScope(req) };
 
       // Get counts by status
       const [total, open, inProgress, awaitingResponse, resolvedToday, closedToday] =
@@ -120,18 +140,18 @@ router.get(
         prisma.helpdeskTicket.count({ where: { ...baseWhere, priority: "low" } }),
       ]);
 
-      // My tickets (for engineers)
-      let myOpenTickets = 0;
-      if (isEngineer && userId) {
-        myOpenTickets = await prisma.helpdeskTicket.count({
-          where: {
-            isActive: true,
-            deletedAt: null,
-            assignedTo: userId,
-            status: { in: ["open", "in_progress", "awaiting_response"] },
-          },
-        });
-      }
+      // My own open queue — meaningful for anyone who works tickets, not just
+      // one role name.
+      const myOpenTickets = userId
+        ? await prisma.helpdeskTicket.count({
+            where: {
+              isActive: true,
+              deletedAt: null,
+              assignedTo: userId,
+              status: { in: ["open", "in_progress", "awaiting_response"] },
+            },
+          })
+        : 0;
 
       // Average satisfaction
       const satisfactionResult = await prisma.helpdeskTicket.aggregate({
@@ -163,150 +183,46 @@ router.get(
 
 // ==================== Reports ====================
 
+/**
+ * Month picker options — only periods that actually contain visible tickets,
+ * so the report never opens on an empty month with no explanation.
+ */
+router.get(
+  "/reports/periods",
+  authenticate,
+  authorize({ permission: "helpdesk.report.view" }),
+  async (req: RequestWithUser, res: Response, next: NextFunction) => {
+    try {
+      const periods = await availablePeriods(ticketScope(req));
+      res.json({ data: periods });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
 router.get(
   "/reports/monthly",
   authenticate,
+  authorize({ permission: "helpdesk.report.view" }),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
-      const userId = req.user?.id;
-      const userRoles = req.user?.roles?.map((r: any) => r.name) || [];
-      const isAdmin = userRoles.some((r: string) => ["super-admin", "devops-admin"].includes(r));
-      const isEngineer = userRoles.some((r: string) => r === "devops-engineer");
-
-      const { month, year } = req.query;
       const now = new Date();
-      const targetMonth = month ? parseInt(month as string) - 1 : now.getMonth();
-      const targetYear = year ? parseInt(year as string) : now.getFullYear();
+      const month = Math.min(
+        12,
+        Math.max(1, parseInt(String(req.query.month ?? ""), 10) || now.getMonth() + 1)
+      );
+      const year = parseInt(String(req.query.year ?? ""), 10) || now.getFullYear();
 
-      const startDate = new Date(targetYear, targetMonth, 1);
-      const endDate = new Date(targetYear, targetMonth + 1, 0, 23, 59, 59);
-
-      const baseWhere: any = {
-        isActive: true,
-        deletedAt: null,
-        createdAt: { gte: startDate, lte: endDate },
-      };
-
-      // Role-based filtering
-      if (!isAdmin && !isEngineer) {
-        // Viewer: only own tickets
-        baseWhere.reportedBy = userId;
-      } else if (isEngineer) {
-        // Engineer: assigned tickets + viewer-reported tickets
-        baseWhere.OR = [
-          { assignedTo: userId },
-          { reporter: { roles: { some: { role: { name: "viewer" } } } } },
-        ];
-      }
-      // Admin: no additional filter
-
-      // Get all tickets for the month
-      const tickets = await prisma.helpdeskTicket.findMany({
-        where: baseWhere,
-        include: {
-          category: { select: { id: true, name: true } },
-          assignee: { select: { id: true, name: true } },
-          reporter: { select: { id: true, name: true } },
-        },
-        orderBy: { createdAt: "desc" },
+      const report = await monthlyReport({
+        month,
+        year,
+        scope: ticketScope(req),
       });
 
-      // Calculate stats
-      const totalCreated = tickets.length;
-      const resolved = tickets.filter((t) => t.status === "resolved" || t.status === "closed");
-      const totalResolved = resolved.length;
-      const avgResolutionTime =
-        resolved.length > 0
-          ? Math.round(
-              resolved.reduce((sum, t) => {
-                const created = new Date(t.createdAt).getTime();
-                const resolvedAt = t.resolvedAt ? new Date(t.resolvedAt).getTime() : created;
-                return sum + (resolvedAt - created);
-              }, 0) / resolved.length / (1000 * 60)
-            )
-          : 0;
-
-      // SLA compliance
-      const slaBreached = tickets.filter((t) => {
-        if (!t.slaResolutionAt || t.status === "open" || t.status === "in_progress") return false;
-        const resolvedAt = t.resolvedAt ? new Date(t.resolvedAt) : new Date();
-        return resolvedAt > new Date(t.slaResolutionAt);
-      }).length;
-
-      const slaComplianceRate = totalResolved > 0 ? Math.round(((totalResolved - slaBreached) / totalResolved) * 100) : 100;
-
-      // By category
-      const byCategory = tickets.reduce((acc, t) => {
-        const cat = t.category?.name || "Uncategorized";
-        acc[cat] = (acc[cat] || 0) + 1;
-        return acc;
-      }, {} as Record<string, number>);
-
-      // By priority
-      const byPriority = tickets.reduce((acc, t) => {
-        acc[t.priority] = (acc[t.priority] || 0) + 1;
-        return acc;
-      }, {} as Record<string, number>);
-
-      // By assignee
-      const byAssignee = tickets.reduce((acc, t) => {
-        const name = t.assignee?.name || "Unassigned";
-        acc[name] = (acc[name] || 0) + 1;
-        return acc;
-      }, {} as Record<string, number>);
-
-      // By day
-      const byDay = tickets.reduce((acc, t) => {
-        const day = new Date(t.createdAt).getDate();
-        acc[day] = (acc[day] || 0) + 1;
-        return acc;
-      }, {} as Record<number, number>);
-
-      // Satisfaction
-      const ratedTickets = tickets.filter((t) => t.satisfaction !== null);
-      const avgSatisfaction =
-        ratedTickets.length > 0
-          ? ratedTickets.reduce((sum, t) => sum + (t.satisfaction || 0), 0) / ratedTickets.length
-          : 0;
-
-      res.json({
-        data: {
-          period: {
-            month: targetMonth + 1,
-            year: targetYear,
-            startDate: startDate.toISOString(),
-            endDate: endDate.toISOString(),
-          },
-          summary: {
-            totalCreated,
-            totalResolved,
-            totalOpen: totalCreated - totalResolved,
-            avgResolutionTime,
-            slaBreached,
-            slaComplianceRate,
-            avgSatisfaction: Math.round(avgSatisfaction * 10) / 10,
-            totalRated: ratedTickets.length,
-          },
-          byCategory,
-          byPriority,
-          byAssignee,
-          byDay,
-          tickets: tickets.map((t) => ({
-            id: t.id,
-            title: t.title,
-            status: t.status,
-            priority: t.priority,
-            category: t.category?.name,
-            assignee: t.assignee?.name,
-            createdAt: t.createdAt,
-            resolvedAt: t.resolvedAt,
-            satisfaction: t.satisfaction,
-          })),
-        },
-      });
+      res.json({ data: report });
     } catch (error) {
-      console.error("Error generating monthly report:", error);
-      res.status(500).json({ error: "Internal server error" });
+      next(error);
     }
   }
 );
@@ -360,7 +276,7 @@ router.get(
 router.post(
   "/categories",
   authenticate,
-  requireRole(["super-admin", "devops-admin"]),
+  requirePermission("helpdesk.ticket.manage"),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const data = createCategorySchema.parse(req.body);
@@ -380,11 +296,6 @@ router.get(
   authenticate,
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
-      const userId = req.user?.id;
-      const userRoles = req.user?.roles?.map((r: any) => r.name) || [];
-      const isAdmin = userRoles.some((r: string) => ["super-admin", "devops-admin"].includes(r));
-      const isEngineer = userRoles.some((r: string) => r === "devops-engineer");
-
       const {
         status,
         priority,
@@ -399,45 +310,28 @@ router.get(
       const limitNum = Math.min(100, Math.max(1, parseInt(limit as string, 10) || 20));
       const skip = (pageNum - 1) * limitNum;
 
-      const where: any = {
-        isActive: true,
-        deletedAt: null,
-      };
-
-      // Role-based filtering
-      if (!isAdmin && !isEngineer) {
-        // Viewer: only own tickets
-        where.reportedBy = userId;
-      } else if (isEngineer) {
-        // Engineer: assigned tickets + viewer-reported tickets
-        where.OR = [
-          { assignedTo: userId },
-          { reporter: { roles: { some: { role: { name: "viewer" } } } } },
-        ];
-      }
-      // Admin: no additional filter
-
-      if (status) where.status = status;
-      if (priority) where.priority = priority;
-      if (categoryId) where.categoryId = parseInt(categoryId as string, 10);
-      if (assignedTo) where.assignedTo = parseInt(assignedTo as string, 10);
+      const filters: any = {};
+      if (status) filters.status = status;
+      if (priority) filters.priority = priority;
+      if (categoryId) filters.categoryId = parseInt(categoryId as string, 10);
+      if (assignedTo) filters.assignedTo = parseInt(assignedTo as string, 10);
 
       if (search) {
-        const searchCondition = [
+        filters.OR = [
           { title: { contains: search as string, mode: "insensitive" } },
           { slug: { contains: search as string, mode: "insensitive" } },
           { description: { contains: search as string, mode: "insensitive" } },
           { contactName: { contains: search as string, mode: "insensitive" } },
           { contactEmail: { contains: search as string, mode: "insensitive" } },
         ];
-        // Merge OR conditions if role filter already uses OR
-        if (where.OR) {
-          where.AND = [{ OR: searchCondition }, { OR: where.OR }];
-          delete where.OR;
-        } else {
-          where.OR = searchCondition;
-        }
       }
+
+      // `withScope` folds the visibility clause and the filter clause into one
+      // AND so neither overwrites the other's OR.
+      const where = withScope(
+        { isActive: true, deletedAt: null, ...filters },
+        ticketScope(req)
+      );
 
       const [tickets, total] = await Promise.all([
         prisma.helpdeskTicket.findMany({
@@ -481,9 +375,11 @@ router.get(
   authenticate,
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
-      const id = parseInt(req.params.id);
+      const id = parseInt(req.params.id as string, 10);
       const ticket = await prisma.helpdeskTicket.findFirst({
-        where: { id, isActive: true, deletedAt: null },
+        // Id alone is not an access check — apply the same visibility rule the
+        // list uses so a guessed id cannot read someone else's ticket.
+        where: { id, isActive: true, deletedAt: null, ...ticketScope(req) },
         include: {
           category: { select: { id: true, name: true, color: true, icon: true } },
           assignee: { select: { id: true, name: true, email: true } },
@@ -517,6 +413,7 @@ router.get(
 router.post(
   "/tickets",
   authenticate,
+  requirePermission("helpdesk.ticket.create"),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const data = createTicketSchema.parse(req.body);
@@ -627,6 +524,7 @@ router.post(
       const ticket = await prisma.helpdeskTicket.create({
         data: {
           projectId: data.projectId || null,
+          teamId: await resolveTeamId(req.access!, data.teamId),
           title: data.title,
           slug,
           description: data.description,
@@ -677,7 +575,7 @@ router.post(
             title: "New Helpdesk Ticket",
             message: `New ticket "${ticket.title}" has been created by ${user?.name || "a user"}${ticket.assignee ? ` and assigned to ${ticket.assignee.name}` : ""}`,
             type: "info",
-            metadata: { ticketId: ticket.id, ticketTitle: ticket.title },
+            link: `/helpdesk/${ticket.id}`,
           },
         });
       }
@@ -690,7 +588,7 @@ router.post(
             title: "Ticket Assigned to You",
             message: `Ticket "${ticket.title}" has been auto-assigned to you based on project "${ticket.project?.name || "N/A"}".`,
             type: "info",
-            metadata: { ticketId: ticket.id, ticketTitle: ticket.title, projectId: data.projectId },
+            link: `/helpdesk/${ticket.id}`,
           },
         });
       }
@@ -714,6 +612,7 @@ router.post(
 router.put(
   "/tickets/:id",
   authenticate,
+  requirePermission("helpdesk.ticket.manage"),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const id = parseInt(req.params.id);
@@ -767,7 +666,7 @@ router.put(
 router.delete(
   "/tickets/:id",
   authenticate,
-  requireRole(["super-admin", "devops-admin"]),
+  requirePermission("helpdesk.ticket.manage"),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const id = parseInt(req.params.id);
@@ -811,9 +710,6 @@ router.put(
       const id = parseInt(req.params.id);
       const data = updateStatusSchema.parse(req.body);
       const userId = req.user?.id;
-      const userRoles = req.user?.roles?.map((r: any) => r.name) || [];
-      const isAdmin = userRoles.some((r: string) => ["super-admin", "devops-admin"].includes(r));
-      const isEngineer = userRoles.some((r: string) => r === "devops-engineer");
 
       const existing = await prisma.helpdeskTicket.findFirst({
         where: { id, isActive: true, deletedAt: null },
@@ -823,24 +719,22 @@ router.put(
         return res.status(404).json({ error: "Ticket not found" });
       }
 
-      // Role-based status change restrictions
-      if (!isAdmin && !isEngineer) {
-        // Viewer: can only reopen their own tickets
-        if (existing.reportedBy !== userId) {
+      // Who may move a ticket, decided on capability rather than role name:
+      //   • helpdesk.ticket.manage — the support queue, no restriction.
+      //   • everyone else — only their own ticket, and only to reopen it, so a
+      //     requester can push back but cannot close their own work as done.
+      const access = req.access!;
+      const managesQueue = can(access, "helpdesk.ticket.manage", "self");
+      const isReporter = existing.reportedBy === userId;
+
+      if (!managesQueue) {
+        if (!isReporter) {
           return res.status(403).json({ error: "You can only change status of your own tickets" });
         }
         if (data.status !== "reopened") {
           return res.status(403).json({ error: "You can only reopen tickets" });
         }
-      } else if (isEngineer) {
-        // Engineer: can change status on assigned tickets or viewer-reported tickets
-        const isAssigned = existing.assignedTo === userId;
-        const isViewerTicket = existing.reportedBy === userId; // engineers can also report
-        if (!isAssigned && !isViewerTicket) {
-          return res.status(403).json({ error: "You can only manage tickets assigned to you" });
-        }
       }
-      // Admin: no restrictions
 
       const updateData: any = { status: data.status };
 
@@ -887,11 +781,7 @@ router.put(
             title: "Your Ticket Has Been Resolved",
             message: `Your ticket "${existing.title}" has been resolved. ${resolutionTime ? `Resolution time: ${resolutionTime} minutes.` : ""} Please rate the resolution.`,
             type: "success",
-            metadata: {
-              ticketId: id,
-              resolutionTime,
-              satisfactionUrl: `/helpdesk/${id}`,
-            },
+            link: `/helpdesk/${id}`,
           },
         });
       }
@@ -904,7 +794,7 @@ router.put(
             title: "Ticket Reopened",
             message: `Ticket "${existing.title}" has been reopened and needs attention.`,
             type: "warning",
-            metadata: { ticketId: id },
+            link: `/helpdesk/${id}`,
           },
         });
       }
@@ -927,7 +817,7 @@ router.put(
 router.put(
   "/tickets/:id/assign",
   authenticate,
-  requireRole(["super-admin", "devops-admin"]),
+  requirePermission("helpdesk.ticket.manage"),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const id = parseInt(req.params.id);
@@ -977,7 +867,7 @@ router.put(
               title: "Ticket Assigned to You",
               message: `Ticket "HD-${String(id).padStart(4, '0')}" has been assigned to you. Priority: ${existing.priority}`,
               type: "info",
-              metadata: { ticketId: id, ticketTitle: existing.title, priority: existing.priority },
+              link: `/helpdesk/${id}`,
             },
           });
         }
@@ -991,7 +881,7 @@ router.put(
             title: "Your Ticket Has Been Assigned",
             message: `Your ticket "${existing.title}" has been assigned to ${ticket.assignee?.name || "a technician"}`,
             type: "success",
-            metadata: { ticketId: id },
+            link: `/helpdesk/${id}`,
           },
         });
       }
@@ -1183,7 +1073,7 @@ router.delete(
 router.get(
   "/users",
   authenticate,
-  requireRole(["super-admin", "devops-admin"]),
+  requirePermission("helpdesk.ticket.manage"),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const users = await prisma.user.findMany({

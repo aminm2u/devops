@@ -2,6 +2,8 @@ import { Router, Response, NextFunction } from "express";
 import { z } from "zod";
 import { authenticate } from "../middleware/auth.js";
 import { requirePermission } from "../middleware/rbac.js";
+import { scopeFilter, withScope } from "../rbac/authorize.js";
+import { resolveTeamId, assertRecordInScope } from "../lib/teamScope.js";
 import { validate } from "../middleware/validate.js";
 import { RequestWithUser } from "../types/index.js";
 import { NotFoundError } from "../lib/errors.js";
@@ -12,6 +14,7 @@ const router = Router();
 
 const createDomainSchema = z.object({
   projectId: z.number().int().positive().nullable().optional(),
+  teamId: z.number().int().positive().nullable().optional(),
   name: z.string().min(1).max(255),
   type: z.enum(["primary", "redirect", "alias", "subdomain"]).optional(),
   registrar: z.string().optional().nullable(),
@@ -25,10 +28,10 @@ const updateDomainSchema = createDomainSchema.partial();
 router.get(
   "/",
   authenticate,
-  requirePermission("view-domains"),
+  requirePermission("devops.domain.view"),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
-      const { projectId, status, search, page = "1", limit = "20" } = req.query;
+      const { projectId, status, search, teamId, page = "1", limit = "20" } = req.query;
       const pageNum = Math.max(1, parseInt(page as string, 10) || 1);
       const limitNum = Math.min(100, Math.max(1, parseInt(limit as string, 10) || 30));
       const skip = (pageNum - 1) * limitNum;
@@ -41,17 +44,24 @@ router.get(
         where.name = { contains: search as string, mode: "insensitive" };
       }
 
+      // An explicit team filter narrows further; it can never widen the scope
+      // the server already decided on, because both land in the same `where`.
+      if (teamId && teamId !== "all") where.teamId = parseInt(teamId as string, 10);
+
+      const scoped = withScope(where, scopeFilter(req.access!, "devops.domain.view"));
+
       const [domains, total] = await Promise.all([
         prisma.domain.findMany({
-          where,
+          where: scoped,
           include: {
             project: { select: { id: true, name: true, slug: true } },
+            team: { select: { id: true, name: true } },
           },
           orderBy: { createdAt: "desc" },
           skip,
           take: limitNum,
         }),
-        prisma.domain.count({ where }),
+        prisma.domain.count({ where: scoped }),
       ]);
 
       res.status(200).json({
@@ -75,18 +85,19 @@ router.get(
 router.get(
   "/:id",
   authenticate,
-  requirePermission("view-domains"),
+  requirePermission("devops.domain.view"),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const { id } = req.params;
       const domain = await prisma.domain.findFirst({
-        where: { id: parseInt(id, 10), deletedAt: null },
+        where: { id: parseInt(id as string, 10), deletedAt: null },
         include: {
           project: { select: { id: true, name: true, slug: true } },
         },
       });
 
       if (!domain) throw new NotFoundError("Domain not found");
+      assertRecordInScope(req.access!, domain.teamId);
 
       res.status(200).json({
         success: true,
@@ -103,13 +114,14 @@ router.get(
 router.post(
   "/",
   authenticate,
-  requirePermission("create-domains"),
+  requirePermission("devops.domain.manage"),
   validate(createDomainSchema),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const domain = await prisma.domain.create({
         data: {
           projectId: req.body.projectId,
+          teamId: await resolveTeamId(req.access!, req.body.teamId),
           name: req.body.name,
           type: req.body.type || "primary",
           registrar: req.body.registrar || null,
@@ -141,15 +153,16 @@ router.post(
 router.put(
   "/:id",
   authenticate,
-  requirePermission("update-domains"),
+  requirePermission("devops.domain.manage"),
   validate(updateDomainSchema),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const { id } = req.params;
       const existing = await prisma.domain.findFirst({
-        where: { id: parseInt(id, 10), deletedAt: null },
+        where: { id: parseInt(id as string, 10), deletedAt: null },
       });
       if (!existing) throw new NotFoundError("Domain not found");
+      assertRecordInScope(req.access!, existing.teamId);
 
       const domain = await prisma.domain.update({
         where: { id: existing.id },
@@ -192,14 +205,15 @@ router.put(
 router.delete(
   "/:id",
   authenticate,
-  requirePermission("delete-domains"),
+  requirePermission("devops.domain.manage"),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const { id } = req.params;
       const existing = await prisma.domain.findFirst({
-        where: { id: parseInt(id, 10), deletedAt: null },
+        where: { id: parseInt(id as string, 10), deletedAt: null },
       });
       if (!existing) throw new NotFoundError("Domain not found");
+      assertRecordInScope(req.access!, existing.teamId);
 
       await prisma.domain.update({
         where: { id: existing.id },
