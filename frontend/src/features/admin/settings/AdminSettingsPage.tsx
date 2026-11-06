@@ -3,7 +3,6 @@ import { useSearchParams } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import {
   SlidersHorizontal,
-  ListTodo,
   ClipboardCheck,
   ShieldCheck,
   Hash,
@@ -11,10 +10,7 @@ import {
 } from 'lucide-react';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import {
-  TimesheetCategoriesTab,
-  TimesheetRulesTab,
-} from '@/features/admin/TimesheetSettingsPage';
+import { TimesheetRulesTab } from '@/features/admin/TimesheetSettingsPage';
 import {
   ApprovalPoliciesTab,
   NumberingTab,
@@ -35,7 +31,6 @@ import {
  */
 
 const TAB_KEYS = [
-  'timesheet-categories',
   'timesheet-rules',
   'approval-policies',
   'numbering',
@@ -44,23 +39,50 @@ const TAB_KEYS = [
 
 type TabKey = (typeof TAB_KEYS)[number];
 
-/** Which permission each tab needs. A tab is only rendered if you hold it. */
-const TAB_PERMISSION: Record<TabKey, string> = {
-  'timesheet-categories': 'timesheet.settings.manage',
+/**
+ * Which permission each tab needs. A tab is only rendered if you hold it, and
+ * an array means "any of these".
+ *
+ * Reference Data is the odd one: it holds the key/value lists plus the
+ * Positions, Units and Helpdesk category lists, which are owned by four
+ * different modules. Whichever grant you hold decides which groups the picker
+ * offers — `ReferenceDataTab` filters them — so the tab itself only needs any
+ * one of them. `procurement.settings.manage` is deliberately absent: it admits
+ * the page but cannot write a reference-data row, so a procurement-only admin
+ * would land on an empty picker. Those two tabs above are what they get.
+ *
+ * Timesheet categories used to be a tab of their own editing the same
+ * `timesheet_category` rows this picker now edits — two screens, one list, and
+ * a deactivate done in either place was invisible to the other. They are one
+ * entry in the group picker now, which is why `timesheet.settings.manage`
+ * admits this tab: it is the grant that writes that group.
+ */
+const TAB_PERMISSION: Record<TabKey, string | string[]> = {
   'timesheet-rules': 'timesheet.settings.manage',
   'approval-policies': 'procurement.settings.manage',
   numbering: 'procurement.settings.manage',
-  'reference-data': 'procurement.settings.manage',
+  'reference-data': [
+    'admin.settings.manage',
+    'hr.org.manage',
+    'helpdesk.ticket.manage',
+    'timesheet.settings.manage',
+  ],
 };
 
-const DEFAULT_TAB: TabKey = 'timesheet-categories';
+const DEFAULT_TAB: TabKey = 'approval-policies';
+
+/** A tab's grant is satisfied by any one of its permissions. */
+const canSee = (can: (permission: string) => boolean, key: TabKey): boolean => {
+  const required = TAB_PERMISSION[key];
+  return Array.isArray(required) ? required.some((p) => can(p)) : can(required);
+};
 
 export function AdminSettingsPage() {
   const { can } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const requested = searchParams.get('tab') as TabKey | null;
 
-  const visibleTabs = TAB_KEYS.filter((key) => can(TAB_PERMISSION[key]));
+  const visibleTabs = TAB_KEYS.filter((key) => canSee(can, key));
 
   const resolve = (key: TabKey | null): TabKey => {
     if (key && TAB_KEYS.includes(key) && visibleTabs.includes(key)) return key;
@@ -100,8 +122,14 @@ export function AdminSettingsPage() {
     );
   }
 
-  const showTimesheet = visibleTabs.some((k) => k.startsWith('timesheet-'));
-  const showProcurement = visibleTabs.some((k) => !k.startsWith('timesheet-'));
+  // Two groups: timesheet and everything else. Positions, units, helpdesk
+  // categories and timesheet categories are not tabs of their own — they are
+  // entries in the Reference Data group picker, next to the key/value lists
+  // they belong with.
+  const visible = (key: TabKey) => visibleTabs.includes(key);
+  const showTimesheet = visible('timesheet-rules');
+  const showOther =
+    visible('approval-policies') || visible('numbering') || visible('reference-data');
 
   return (
     <div className="animate-fade-in space-y-4">
@@ -114,42 +142,38 @@ export function AdminSettingsPage() {
       <Tabs value={tab} onValueChange={changeTab}>
         <TabsList className="flex h-auto w-full flex-wrap justify-start gap-1 p-1">
           {showTimesheet && (
-            <>
-              <TabsTrigger value="timesheet-categories" className="gap-2">
-                <ListTodo className="h-3.5 w-3.5" /> Timesheet Categories
-              </TabsTrigger>
-              <TabsTrigger value="timesheet-rules" className="gap-2">
-                <ClipboardCheck className="h-3.5 w-3.5" /> Approval Rules
-              </TabsTrigger>
-            </>
+            <TabsTrigger value="timesheet-rules" className="gap-2">
+              <ClipboardCheck className="h-3.5 w-3.5" /> Approval Rules
+            </TabsTrigger>
           )}
-          {showProcurement && (
+          {showOther && (
             <>
-              <TabsTrigger value="approval-policies" className="gap-2">
-                <ShieldCheck className="h-3.5 w-3.5" /> Procurement Policies
-              </TabsTrigger>
-              <TabsTrigger value="numbering" className="gap-2">
-                <Hash className="h-3.5 w-3.5" /> Numbering
-              </TabsTrigger>
-              <TabsTrigger value="reference-data" className="gap-2">
-                <Database className="h-3.5 w-3.5" /> Reference Data
-              </TabsTrigger>
+              {visible('approval-policies') && (
+                <TabsTrigger value="approval-policies" className="gap-2">
+                  <ShieldCheck className="h-3.5 w-3.5" /> Procurement Policies
+                </TabsTrigger>
+              )}
+              {visible('numbering') && (
+                <TabsTrigger value="numbering" className="gap-2">
+                  <Hash className="h-3.5 w-3.5" /> Numbering
+                </TabsTrigger>
+              )}
+              {visible('reference-data') && (
+                <TabsTrigger value="reference-data" className="gap-2">
+                  <Database className="h-3.5 w-3.5" /> Reference Data
+                </TabsTrigger>
+              )}
             </>
           )}
         </TabsList>
 
         {showTimesheet && (
-          <>
-            <TabsContent value="timesheet-categories" className="mt-4">
-              <TimesheetCategoriesTab />
-            </TabsContent>
-            <TabsContent value="timesheet-rules" className="mt-4">
-              <TimesheetRulesTab />
-            </TabsContent>
-          </>
+          <TabsContent value="timesheet-rules" className="mt-4">
+            <TimesheetRulesTab />
+          </TabsContent>
         )}
 
-        {showProcurement && (
+        {showOther && (
           <>
             <TabsContent value="approval-policies" className="mt-4">
               <ApprovalPoliciesTab />

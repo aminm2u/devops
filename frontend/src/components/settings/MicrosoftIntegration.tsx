@@ -101,7 +101,7 @@ export function MicrosoftIntegration({ canManageApp }: { canManageApp?: boolean 
         )}
 
         {/* Connection status */}
-        <div className="flex items-center justify-between rounded-lg border p-4">
+        <div className="flex items-center justify-between rounded-lg border dark:border-gray-800 p-4">
           <div className="flex items-center gap-3">
             {connected ? (
               <CheckCircle2 className="h-5 w-5 text-green-500" />

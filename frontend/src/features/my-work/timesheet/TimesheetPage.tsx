@@ -195,7 +195,7 @@ export function TimesheetPage() {
             </Button>
           </div>
 
-          <div className="text-sm font-medium">
+          <div className="text-sm font-medium dark:text-gray-400 text-gray-800">
             {new Date(weekFrom + 'T00:00:00').toLocaleDateString(undefined, {
               day: 'numeric',
               month: 'short',

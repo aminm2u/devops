@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Users, Plus, Shield, Mail, Calendar, AlertTriangle, Pencil, Trash2, X } from 'lucide-react';
+import { Users, Plus, Shield, Calendar, AlertTriangle, Pencil, Trash2, X } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -32,9 +32,17 @@ interface User {
   emailVerifiedAt: string | null;
   createdAt: string;
   roles: Array<{ id: number; name: string; level?: number; color?: string | null }>;
-  department?: { id: number; name: string } | null;
+  department?: { id: number; name: string; code?: string } | null;
+  unit?: { id: number; name: string; code?: string | null } | null;
   directManager?: { id: number; name: string } | null;
 }
+
+/**
+ * Rows per page. Kept in one place because the request and the pagination
+ * footer must agree — the footer computes "showing 1 to 10" from it, and a
+ * mismatch would misreport which slice of the directory is on screen.
+ */
+const PAGE_SIZE = 10;
 
 export function UsersPage() {
   const queryClient = useQueryClient();
@@ -56,7 +64,7 @@ export function UsersPage() {
   const { data, isLoading, error } = useQuery({
     queryKey: ['users', search, page],
     queryFn: async () => {
-      const params: any = { page, limit: 20 };
+      const params: any = { page, limit: PAGE_SIZE };
       if (search) params.search = search;
       const res = await apiClient.get('/admin/users', { params });
       return res.data;
@@ -134,29 +142,40 @@ export function UsersPage() {
   const users: User[] = data?.data || [];
   const meta = data?.meta;
 
+  /**
+   * Deleting the last person on the last page leaves `page` past the end, and
+   * the refetched page comes back empty — which reads as "the directory is
+   * empty" rather than "go back one page". Step back instead. `lastPage` is 0
+   * when nothing matches, so clamp to 1.
+   */
+  const lastPage = meta ? Math.max(1, meta.lastPage ?? 1) : null;
+  useEffect(() => {
+    if (lastPage !== null && page > lastPage) setPage(lastPage);
+  }, [lastPage, page]);
+
   const columns: DataTableColumn<User>[] = [
     {
       key: 'user',
       header: 'User',
+      // Name and email share a column: the email is how you tell two people
+      // with the same name apart, so it belongs under the name rather than in
+      // its own column eating width the placement column needs.
       render: (user) => (
         <div className="flex items-center gap-3">
-          <UserAvatar user={user} size="lg" />
-          <span className="font-medium">{user.name}</span>
+          <UserAvatar user={user} size="lg" className="shrink-0" />
+          <div className="min-w-0">
+            <p className="truncate text-sm font-medium">{user.name}</p>
+            <p className="truncate text-xs text-muted-foreground">
+              <span className="truncate">{user.email}</span>
+            </p>
+          </div>
         </div>
       ),
       sortValue: (user) => user.name,
       sortable: true,
+      className: 'min-w-[220px]',
+      headerClassName: 'min-w-[220px]',
       skeletonClassName: 'h-10 w-10 rounded-full',
-    },
-    {
-      key: 'email',
-      header: 'Email',
-      accessor: (user) => (
-        <div className="flex items-center gap-1 text-muted-foreground">
-          <Mail className="h-3 w-3" />
-          {user.email}
-        </div>
-      ),
     },
     {
       key: 'roles',
@@ -183,13 +202,34 @@ export function UsersPage() {
     },
     {
       key: 'department',
-      header: 'Department',
-      accessor: (user) =>
-        user.department ? (
-          <span className="text-sm">{user.department.name}</span>
-        ) : (
-          <span className="text-xs text-muted-foreground">Unassigned</span>
-        ),
+      header: 'Department / Unit',
+      // Department on top, unit underneath. A unit only means something next to
+      // its department ("Infrastructure" could belong to IT or to Ops), so they
+      // are read as one placement rather than as two unrelated columns.
+      render: (user) => {
+        if (!user.department) {
+          return <span className="text-xs text-muted-foreground">Unassigned</span>;
+        }
+        return (
+          <div className="min-w-0">
+            <p className="truncate text-sm">
+              <span className="truncate">{user.department.name}</span>
+            </p>
+            {/* Indented to sit under the department name, so the pair reads as
+                one placement rather than two peer lines. */}
+            <p className="truncate pl-0 text-xs text-muted-foreground">
+              {user.unit ? user.unit.name : 'No unit'}
+            </p>
+          </div>
+        );
+      },
+      sortValue: (user) =>
+        user.department
+          ? `${user.department.name}${user.unit ? ` / ${user.unit.name}` : ''}`
+          : null,
+      sortable: true,
+      className: 'min-w-[200px]',
+      headerClassName: 'min-w-[200px]',
     },
     {
       key: 'directManager',
@@ -273,29 +313,36 @@ export function UsersPage() {
         </Button>
       </PageHeader>
 
-      {/* Summary */}
+      {/* Summary — every figure here is real. The previous version had a
+          permanent dash for "Active Sessions" (there is no session table) and a
+          hardcoded 4 for "Roles Assigned", which read as data and was not. */}
       <div className="grid gap-4 sm:grid-cols-3">
         <Card>
           <CardContent className="pt-6">
             <div className="flex items-center justify-between">
               <span className="text-sm text-muted-foreground">Total Users</span>
-              <span className="text-2xl font-bold">{meta?.total || users.length}</span>
+              <span className="text-2xl font-bold tabular-nums">{meta?.total ?? users.length}</span>
             </div>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="pt-6">
             <div className="flex items-center justify-between">
-              <span className="text-sm text-muted-foreground">Active Sessions</span>
-              <span className="text-2xl font-bold text-green-600">—</span>
+              <span className="text-sm text-muted-foreground">Role Assignments</span>
+              <span className="text-2xl font-bold tabular-nums text-blue-600">
+                {/* holderCount is per role, so the sum is every held role. */}
+                {availableRoles.reduce((sum, role) => sum + role.holderCount, 0)}
+              </span>
             </div>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="pt-6">
             <div className="flex items-center justify-between">
-              <span className="text-sm text-muted-foreground">Roles Assigned</span>
-              <span className="text-2xl font-bold text-blue-600">4</span>
+              <span className="text-sm text-muted-foreground">Roles Defined</span>
+              <span className="text-2xl font-bold tabular-nums text-green-600">
+                {availableRoles.length}
+              </span>
             </div>
           </CardContent>
         </Card>
@@ -320,10 +367,10 @@ export function UsersPage() {
         }}
         pagination={{
           page,
-          totalPages: meta?.lastPage ?? 1,
+          totalPages: lastPage ?? 1,
           onPageChange: setPage,
           totalItems: meta?.total,
-          itemsPerPage: 20,
+          itemsPerPage: PAGE_SIZE,
         }}
         emptyIcon={Users}
         emptyTitle="No users found"

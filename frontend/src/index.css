@@ -193,18 +193,40 @@
   color: hsl(var(--foreground));
   font-family: inherit;
 }
+/* Grid rules are drawn by three different selectors in the library's
+   stylesheet — `.rbc-header + .rbc-header`, `.rbc-day-bg + .rbc-day-bg` and
+   `.rbc-month-row + .rbc-month-row` — and only some of them are re-skinnable
+   with `border-color` alone. They all read one token so the grid stays a single
+   colour, whatever the theme. */
+.my-calendar {
+  --calendar-line: hsl(var(--border));
+}
+/* The dark card sits only a few percent above the rule, so the full-strength
+   border reads as a bright cage around empty days. Light theme keeps the normal
+   token — there the contrast is what makes the grid legible. */
+.dark .my-calendar {
+  --calendar-line: hsl(var(--border) / 0.7);
+}
 .my-calendar .rbc-header {
   padding: 8px 4px;
   font-size: 12px;
   font-weight: 600;
   color: hsl(var(--muted-foreground));
-  border-bottom: 1px solid hsl(var(--border));
+  border-bottom: 1px solid var(--calendar-line);
+}
+/* The library's own `.rbc-header + .rbc-header` sets `border-left: 1px solid
+   #ddd`, and because a shorthand re-declares the colour, a `border-color` on
+   `.rbc-header` loses to it. Without this rule the weekday separators were
+   rgb(221,221,221) against an rgb(17,24,39) background — by far the brightest
+   lines in the calendar. */
+.my-calendar .rbc-header + .rbc-header {
+  border-left-color: var(--calendar-line);
 }
 .my-calendar .rbc-month-row,
 .my-calendar .rbc-day-bg,
 .my-calendar .rbc-off-range-bg {
   background: transparent;
-  border-color: hsl(var(--border));
+  border-color: var(--calendar-line);
 }
 .my-calendar .rbc-day-bg {
   background: hsl(var(--card));
@@ -241,7 +263,7 @@
 .my-calendar .rbc-time-content,
 .my-calendar .rbc-time-slot,
 .my-calendar .rbc-timeslot-group {
-  border-color: hsl(var(--border));
+  border-color: var(--calendar-line);
 }
 .my-calendar .rbc-time-gutter,
 .my-calendar .rbc-time-header-gutter {

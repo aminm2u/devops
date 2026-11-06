@@ -16,8 +16,6 @@ import {
   RefreshCw,
   Link,
   Unlink,
-  Download,
-  FileText,
   Mail,
   Calendar,
   Trash2,
@@ -322,12 +320,6 @@ export function SettingsPage() {
               Nginx Proxy
             </TabsTrigger>
           )}
-          {can('hr.team.manage') && (
-            <TabsTrigger value="team" className="gap-2">
-              <Shield className="h-4 w-4" />
-              Team
-            </TabsTrigger>
-          )}
         </TabsList>
 
         {/* ── Profile tab ─────────────────────────────────────────────── */}
@@ -561,7 +553,7 @@ export function SettingsPage() {
 
               {/* Sound is synthesised in the browser, so this is the only way
                   to know it works without waiting for a real event. */}
-              <div className="flex items-center justify-between rounded-md border border-dashed p-3">
+              <div className="flex items-center justify-between rounded-md border dark:border-gray-600 border-dashed p-3">
                 <div className="space-y-0.5">
                   <p className="text-sm font-medium">Test the chime</p>
                   <p className="text-xs text-muted-foreground">
@@ -579,9 +571,9 @@ export function SettingsPage() {
                 </Button>
               </div>
 
-              <Separator />
+              {/* <Separator /> */}
 
-              <div className="flex items-center justify-between">
+              {/* <div className="flex items-center justify-between">
                 <div className="space-y-0.5">
                   <p className="text-sm font-medium flex items-center gap-2">
                     <FileText className="h-4 w-4" />
@@ -619,7 +611,7 @@ export function SettingsPage() {
                   <Download className="mr-2 h-4 w-4" />
                   Download PDF
                 </Button>
-              </div>
+              </div> */}
             </CardContent>
           </Card>
         </TabsContent>
@@ -681,27 +673,6 @@ export function SettingsPage() {
         {can('admin.integration.manage') && (
           <TabsContent value="npm" className="space-y-6">
             <NpmSettings />
-          </TabsContent>
-        )}
-
-        {/* ── Team Settings (Admin only) ────────────────────────────────── */}
-        {can('hr.team.manage') && (
-          <TabsContent value="team" className="space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle>Team Management</CardTitle>
-                <CardDescription>Manage team members and their roles</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="flex flex-col items-center justify-center py-8 text-center">
-                  <Shield className="h-8 w-8 text-muted-foreground mb-2" />
-                  <p className="text-sm font-medium">Team management coming soon</p>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Invite members, assign roles, and manage permissions
-                  </p>
-                </div>
-              </CardContent>
-            </Card>
           </TabsContent>
         )}
       </Tabs>

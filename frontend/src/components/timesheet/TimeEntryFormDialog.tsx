@@ -52,7 +52,6 @@ export function TimeEntryFormDialog({
   const [workDate, setWorkDate] = useState('');
   const [hours, setHours] = useState('');
   const [description, setDescription] = useState('');
-  const [source, setSource] = useState<'task' | 'adhoc'>('adhoc');
   const [taskId, setTaskId] = useState<string>('');
   const [subtaskId, setSubtaskId] = useState<string>('');
   const [categoryValue, setCategoryValue] = useState('');
@@ -71,7 +70,6 @@ export function TimeEntryFormDialog({
       setWorkDate(entry.workDate);
       setHours(String(entry.hours));
       setDescription(entry.description);
-      setSource(entry.taskId || entry.subtaskId ? 'task' : 'adhoc');
       setTaskId(entry.taskId ? String(entry.taskId) : '');
       setSubtaskId(entry.subtaskId ? String(entry.subtaskId) : '');
       setCategoryValue(entry.categoryValue);
@@ -79,7 +77,6 @@ export function TimeEntryFormDialog({
       setWorkDate(defaultDate || todayLocal());
       setHours('');
       setDescription('');
-      setSource('adhoc');
       setTaskId('');
       setSubtaskId('');
       setCategoryValue('');
@@ -107,7 +104,7 @@ export function TimeEntryFormDialog({
 
   const categories = enrollable?.categories ?? [];
   const selectedTask = tasks.find((t) => String(t.id) === taskId);
-  const isTaskLinked = source === 'task' && !!taskId;
+  const isTaskLinked = !!taskId;
 
   const saveEntry = async (): Promise<TimeEntry | null> => {
     const parsedHours = Math.round(parseFloat(hours || '0') * 4) / 4;
@@ -210,76 +207,50 @@ export function TimeEntryFormDialog({
             />
           </div>
 
-          <div className="space-y-2">
-            <Label className="flex items-center gap-1"><ListTodo className="h-3 w-3" /> Source</Label>
-            <div className="flex gap-2">
-              <Button
-                type="button"
-                size="sm"
-                variant={source === 'task' ? 'default' : 'outline'}
-                onClick={() => { if (!locked) setSource('task'); }}
-                disabled={locked}
-              >
-                Task / Subtask
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant={source === 'adhoc' ? 'default' : 'outline'}
-                onClick={() => {
-                  if (locked) return;
-                  setSource('adhoc');
-                  setTaskId('');
-                  setSubtaskId('');
-                }}
-                disabled={locked}
-              >
-                Ad-hoc activity
-              </Button>
+          {/* Picking a task is the only thing the old "Source" toggle did, so it
+              is now an optional field rather than a mode. Task-linked entries
+              still derive category "project" and feed project contribution;
+              leaving it empty falls back to the category picker below. */}
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label className="flex items-center gap-1"><ListTodo className="h-3 w-3" /> Project task (optional)</Label>
+              <Select value={taskId || 'none'} onValueChange={(v) => { setTaskId(v === 'none' ? '' : v); setSubtaskId(''); }} disabled={locked || tasks.length === 0}>
+                <SelectTrigger><SelectValue placeholder="No task" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">No task — log an activity</SelectItem>
+                  {tasks.map((t) => (
+                    <SelectItem key={t.id} value={String(t.id)}>
+                      {t.title} <span className="text-muted-foreground">({t.projectName})</span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {tasks.length === 0 && (
+                <p className="text-xs text-muted-foreground">
+                  No enrolled tasks — this will be logged under the category you pick.
+                </p>
+              )}
             </div>
-            <p className="text-xs text-muted-foreground">
-              Task-linked entries are always "project". For ad-hoc work, the category
-              you pick decides which approval rule applies.
-            </p>
-          </div>
-
-          {source === 'task' && (
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>Task</Label>
-                <Select value={taskId} onValueChange={(v) => { setTaskId(v); setSubtaskId(''); }} disabled={locked || tasks.length === 0}>
-                  <SelectTrigger><SelectValue placeholder="Select enrolled task..." /></SelectTrigger>
-                  <SelectContent>
-                    {tasks.map((t) => (
-                      <SelectItem key={t.id} value={String(t.id)}>
-                        {t.title} <span className="text-muted-foreground">({t.projectName})</span>
-                      </SelectItem>
+            <div className="space-y-2">
+              <Label>Subtask (optional)</Label>
+              <Select value={subtaskId || 'none'} onValueChange={(v) => setSubtaskId(v === 'none' ? '' : v)} disabled={locked || !selectedTask}>
+                <SelectTrigger><SelectValue placeholder="None" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">None</SelectItem>
+                  {(selectedTask?.subtasks || [])
+                    // A subtask claimed by somebody else is not yours to log.
+                    .filter((s) => s.claimable)
+                    .map((s) => (
+                      <SelectItem key={s.id} value={String(s.id)}>{s.title}</SelectItem>
                     ))}
-                  </SelectContent>
-                </Select>
-                {tasks.length === 0 && (
-                  <p className="text-xs text-muted-foreground">
-                    No enrolled tasks — log this as an ad-hoc activity.
-                  </p>
-                )}
-              </div>
-              <div className="space-y-2">
-                <Label>Subtask (optional)</Label>
-                <Select value={subtaskId || 'none'} onValueChange={(v) => setSubtaskId(v === 'none' ? '' : v)} disabled={locked || !selectedTask}>
-                  <SelectTrigger><SelectValue placeholder="None" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">None</SelectItem>
-                    {(selectedTask?.subtasks || [])
-                      // A subtask claimed by somebody else is not yours to log.
-                      .filter((s) => s.claimable)
-                      .map((s) => (
-                        <SelectItem key={s.id} value={String(s.id)}>{s.title}</SelectItem>
-                      ))}
-                  </SelectContent>
-                </Select>
-              </div>
+                </SelectContent>
+              </Select>
             </div>
-          )}
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Linking a task records the hours against its project. For standalone
+            work, the category you pick decides which approval rule applies.
+          </p>
 
           <div className="space-y-2">
             <Label>Category</Label>

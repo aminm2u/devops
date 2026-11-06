@@ -179,13 +179,8 @@ export function NotificationBell() {
                 )}
               </DropdownMenuItem>
             ))}
-            <DropdownMenuSeparator />
-            <DropdownMenuItem
-              className="justify-center text-sm text-primary cursor-pointer"
-              onClick={() => { setOpen(false); navigate('/notifications'); }}
-            >
-              View all notifications
-            </DropdownMenuItem>
+            {/* "View all" is parked with the /notifications route (see
+                routes.config.tsx) — the dropdown itself is the whole inbox for now. */}
           </>
         )}
       </DropdownMenuContent>

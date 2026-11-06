@@ -12,6 +12,7 @@ import {
   Mail,
   ShieldCheck,
   Trash2,
+  User,
   UserCheck,
   Users,
   X,
@@ -27,6 +28,8 @@ import { Separator } from '@/components/ui/separator';
 import { Switch } from '@/components/ui/switch';
 import { UserAvatar } from '@/components/ui/UserAvatar';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
+import { DatePicker } from '@/components/ui/date-picker';
+import { RichListBox, type RichListBoxGroup, type RichListBoxItem } from '@/components/ui/rich-listbox';
 import {
   Select,
   SelectContent,
@@ -35,9 +38,11 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { useAuth } from '@/hooks/useAuth';
+import { useReferenceData } from '@/hooks/useReferenceData';
 import apiClient from '@/api/client';
 import { accessApi, type RoleSummary } from '@/api/access';
 import { formatDate } from '@/lib/utils';
+import { UserTeamsCard } from './UserTeamsCard';
 
 /**
  * The digital employee record.
@@ -51,8 +56,22 @@ import { formatDate } from '@/lib/utils';
 
 interface ReferenceData {
   departments: { id: number; name: string; code: string }[];
-  positions: { id: number; name: string; gradeLevel?: string | null }[];
+  // `grade_level` is an Int column (`positions.grade_level`); it was typed as a
+  // string here, which happened to work only because nothing compared it.
+  positions: { id: number; name: string; gradeLevel?: number | null }[];
   employmentTypes: { id: number; name: string }[];
+  /**
+   * Units, each owned by exactly one department. Fetched with the rest of the
+   * reference lists so the picker below the department field can filter them
+   * without a second round trip.
+   */
+  units: {
+    id: number;
+    name: string;
+    code: string | null;
+    departmentId: number;
+    _count?: { employees: number };
+  }[];
 }
 
 interface UserDetail {
@@ -66,11 +85,13 @@ interface UserDetail {
   createdAt: string;
   updatedAt: string;
   departmentId: number | null;
+  unitId: number | null;
   positionId: number | null;
   employmentTypeId: number | null;
   directManagerId: number | null;
   department: { id: number; name: string; code: string } | null;
-  position: { id: number; name: string; gradeLevel: string | null } | null;
+  unit: { id: number; name: string; code: string | null } | null;
+  position: { id: number; name: string; gradeLevel: number | null } | null;
   employmentType: { id: number; name: string } | null;
   directManager: { id: number; name: string; email: string } | null;
   subordinates: { id: number; name: string; email: string }[];
@@ -83,8 +104,8 @@ interface UserDetail {
 interface FormState {
   name: string;
   email: string;
-  employeeId: string;
   departmentId: string;
+  unitId: string;
   positionId: string;
   employmentTypeId: string;
   directManagerId: string;
@@ -93,21 +114,26 @@ interface FormState {
   newPassword: string;
 }
 
-/** `<input type="date">` wants YYYY-MM-DD; the API sends ISO timestamps. */
+/**
+ * The API stores a bare calendar date as UTC midnight, so it must be read back
+ * in UTC. Using the local getters here would show the previous day to anyone
+ * west of Greenwich — the picker and the saved value would then disagree on
+ * every load, and `diff()` would think the field had been edited.
+ */
 function toDateInput(value: string | null): string {
   if (!value) return '';
   const date = new Date(value);
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${date.getFullYear()}-${month}-${day}`;
+  const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(date.getUTCDate()).padStart(2, '0');
+  return `${date.getUTCFullYear()}-${month}-${day}`;
 }
 
 function formFrom(user: UserDetail): FormState {
   return {
     name: user.name,
     email: user.email,
-    employeeId: user.employeeId ?? '',
     departmentId: user.departmentId != null ? String(user.departmentId) : '',
+    unitId: user.unitId != null ? String(user.unitId) : '',
     positionId: user.positionId != null ? String(user.positionId) : '',
     employmentTypeId: user.employmentTypeId != null ? String(user.employmentTypeId) : '',
     directManagerId: user.directManagerId != null ? String(user.directManagerId) : '',
@@ -124,10 +150,10 @@ function diff(user: UserDetail, form: FormState): Record<string, unknown> {
 
   if (form.name.trim() !== user.name) payload.name = form.name.trim();
   if (form.email.trim() !== user.email) payload.email = form.email.trim();
-  if ((form.employeeId.trim() || null) !== (user.employeeId ?? null)) {
-    payload.employeeId = form.employeeId.trim() || null;
-  }
   if (num(form.departmentId) !== user.departmentId) payload.departmentId = num(form.departmentId);
+  // Sent whenever it differs — including back to null, which is how someone is
+  // taken out of a unit without leaving the department.
+  if (num(form.unitId) !== user.unitId) payload.unitId = num(form.unitId);
   if (num(form.positionId) !== user.positionId) payload.positionId = num(form.positionId);
   if (num(form.employmentTypeId) !== user.employmentTypeId) {
     payload.employmentTypeId = num(form.employmentTypeId);
@@ -155,6 +181,10 @@ export function UserDetailPage() {
   const { can } = useAuth();
   const canManage = can('hr.user.manage');
   const canDelete = can('hr.user.delete');
+  // The numbering tab is gated on `procurement.settings.manage`, so an HR
+  // manager who cannot open it should not be offered a link to a page whose
+  // tab list will not contain the panel they were promised.
+  const canManageNumbering = can('procurement.settings.manage');
 
   const [form, setForm] = useState<FormState | null>(null);
   const [roleToAdd, setRoleToAdd] = useState('');
@@ -186,6 +216,143 @@ export function UserDetailPage() {
     staleTime: 5 * 60 * 1000,
   });
 
+  // Departments are the master list — a department row on the org chart and a
+  // `division` reference value are joined by `code`. Reading the reference list
+  // here means a newly added department shows up in this picker immediately,
+  // instead of waiting for a matching department row.
+  const { data: departmentData = [] } = useReferenceData('division');
+
+  /**
+   * The department picker, driven entirely by the `division` reference list.
+   *
+   * Nothing outside that list is offered — including departments that exist on
+   * the org chart but whose division entry was retired. Listing them (the old
+   * "Other departments" group) meant a division deactivated under Reference
+   * Data kept appearing here as a valid choice, which made the reference list
+   * look like it had no effect.
+   *
+   * `users.department_id` still points at a department row, so a division can
+   * only be assigned once it has been promoted on the org chart. The unpromoted
+   * ones are shown anyway, disabled and labelled with the reason, because "it
+   * is not in the dropdown" is a worse answer than "it is not a department yet
+   * — add it on the org chart".
+   */
+  const departmentGroups = useMemo<RichListBoxGroup[]>(() => {
+    const departments = references?.departments ?? [];
+    const departmentByCode = new Map(departments.map((dept) => [dept.code, dept]));
+
+    const departmentItems: RichListBoxItem[] = departmentData.map((entry) => {
+      const department = departmentByCode.get(entry.value);
+      return {
+        // A disabled row must not share a value with a real one, or selecting
+        // the department would render as the unmapped master-data row.
+        value: department ? String(department.id) : `unmapped:${entry.value}`,
+        label: entry.label,
+        description: department
+          ? department.name === entry.label
+            ? department.code
+            : `${department.code} — ${department.name}`
+          : 'Not a department yet — add it on the org chart',
+        icon: Building2,
+        disabled: !department,
+      };
+    });
+
+    return [
+      { items: [{ value: '', label: 'Unassigned', icon: Users }] },
+      { label: 'Departments', items: departmentItems },
+    ];
+  }, [references, departmentData]);
+
+  /**
+   * A department on the record that the reference list no longer carries.
+   *
+   * The picker only offers divisions from the reference list, so without this
+   * the trigger would fall back to its "Unassigned" placeholder and the page
+   * would report someone as having no department when they do have one. It is
+   * not made selectable — the point of the list is that it is authoritative —
+   * but the current value is still named, and the hint says where it came from
+   * so the fix is obvious.
+   */
+  const strandedDepartment =
+    user?.department && !departmentData.some((entry) => entry.value === user.department!.code)
+      ? user.department
+      : null;
+
+  const units = useMemo(() => references?.units ?? [], [references]);
+
+  /**
+   * The unit picker, filtered to whatever department is selected.
+   *
+   * Units are owned by a department, so offering the full list would let
+   * someone pick a Finance unit while sitting in IT. With nothing selected the
+   * list is empty and the field explains why, rather than showing every unit in
+   * the company with no indication of where they belong.
+   */
+  const unitGroups = useMemo<RichListBoxGroup[]>(() => {
+    if (!form?.departmentId) return [];
+    const inDepartment = units.filter(
+      (unit) => String(unit.departmentId) === form.departmentId
+    );
+    return [
+      {
+        items: [
+          { value: '', label: 'No unit', icon: Users },
+          ...inDepartment.map((unit) => ({
+            value: String(unit.id),
+            label: unit.name,
+            description: unit.code ?? undefined,
+            icon: Building2,
+          })),
+        ],
+      },
+    ];
+  }, [units, form?.departmentId]);
+
+  /**
+   * The position picker, fed by Reference Data → Positions.
+   *
+   * A position is a row in the `positions` table, and the panel under Reference
+   * Data writes exactly that table, so an edit there lands here after the
+   * `['references']` invalidation. Grouped by grade because that is the only
+   * thing that orders seniority across titles (a G6 is above a G3 regardless of
+   * the alphabet), while ungraded titles are a normal state — they go in their
+   * own group at the bottom rather than being treated as grade 0.
+   *
+   * The description carries the grade, so the picker still says which rung a
+   * title sits on when the grouping heading has scrolled out of view.
+   */
+  const positionGroups = useMemo<RichListBoxGroup[]>(() => {
+    const all = references?.positions ?? [];
+    if (all.length === 0) {
+      return [{ items: [{ value: '', label: 'None', icon: Users }] }];
+    }
+
+    const graded = all
+      .filter((position) => position.gradeLevel != null)
+      .sort((a, b) => Number(b.gradeLevel) - Number(a.gradeLevel) || a.name.localeCompare(b.name));
+    const ungraded = all
+      .filter((position) => position.gradeLevel == null)
+      .sort((a, b) => a.name.localeCompare(b.name));
+
+    const toItem = (position: { id: number; name: string; gradeLevel?: number | null }) => ({
+      value: String(position.id),
+      label: position.name,
+      description: position.gradeLevel != null ? `Grade ${position.gradeLevel}` : 'No grade set',
+      icon: Briefcase,
+    });
+
+    return [
+      { items: [{ value: '', label: 'None', icon: Users }] },
+      // A heading with no rows under it reads as a rendering fault, so each
+      // group only appears when it has something in it.
+      ...(graded.length > 0 ? [{ label: 'Graded', items: graded.map(toItem) }] : []),
+      ...(ungraded.length > 0
+        ? [{ label: 'Ungraded', items: ungraded.map(toItem) }]
+        : []),
+    ];
+  }, [references]);
+
   // Reset the draft whenever the record loads or a save lands, so "unsaved"
   // always means "differs from what the server currently holds".
   useEffect(() => {
@@ -206,6 +373,17 @@ export function UserDetailPage() {
     },
     onError: (err: any) =>
       toast.error(err?.response?.data?.error || err?.response?.data?.message || 'Save failed'),
+  });
+
+  const issueNumberMutation = useMutation({
+    mutationFn: () => apiClient.post(`/admin/users/${userId}/employee-number`),
+    onSuccess: (res) => {
+      queryClient.invalidateQueries({ queryKey: ['user', userId] });
+      queryClient.invalidateQueries({ queryKey: ['users'] });
+      toast.success(`Employee number ${res.data.data.employeeId} issued`);
+    },
+    onError: (err: any) =>
+      toast.error(err?.response?.data?.error || 'Could not issue an employee number'),
   });
 
   const addRoleMutation = useMutation({
@@ -271,6 +449,24 @@ export function UserDetailPage() {
 
   const setField = <K extends keyof FormState>(key: K, value: FormState[K]) =>
     setForm((prev) => (prev ? { ...prev, [key]: value } : prev));
+
+  /**
+   * Changing the department drops a unit from the old one.
+   *
+   * A unit only exists inside one department, so keeping the selection would
+   * leave the record showing (say) a Finance department with an IT unit — the
+   * server refuses that pair rather than storing it, but the form should not
+   * make the user discover that on save.
+   */
+  const selectDepartment = (value: string) => {
+    setForm((prev) => {
+      if (!prev) return prev;
+      const keepsUnit = units.some(
+        (unit) => String(unit.id) === prev.unitId && String(unit.departmentId) === value
+      );
+      return { ...prev, departmentId: value, unitId: keepsUnit ? prev.unitId : '' };
+    });
+  };
 
   return (
     <div className="animate-fade-in space-y-5">
@@ -349,65 +545,131 @@ export function UserDetailPage() {
               </div>
               <div className="space-y-1.5">
                 <Label className='dark:text-gray-400 text-gray-500' htmlFor="employeeId">Employee ID</Label>
-                <Input
-                  id="employeeId"
-                  value={form.employeeId}
-                  onChange={(e) => setField('employeeId', e.target.value)}
-                  placeholder="e.g. MWP-0142"
-                  disabled={!canManage}
-                />
+                {/* Issued by the server from a running counter — see
+                    `issueEmployeeNumber` in admin.routes.ts. Letting this be
+                    typed would defeat the number: two people entering "EMP-0142"
+                    for different hires is exactly the collision the counter
+                    exists to prevent. The format itself is configurable. */}
+                <div className="flex gap-2">
+                  <Input
+                    id="employeeId"
+                    value={user.employeeId || 'Not issued'}
+                    readOnly
+                    className="font-mono text-muted-foreground"
+                    tabIndex={-1}
+                  />
+                  {/* Self-registered and legacy accounts have no number and
+                      never passed through the create route that issues one. */}
+                  {!user.employeeId && canManage && (
+                    <Button
+                      variant="outline"
+                      onClick={() => issueNumberMutation.mutate()}
+                      disabled={issueNumberMutation.isPending}
+                    >
+                      {issueNumberMutation.isPending ? 'Issuing…' : 'Issue'}
+                    </Button>
+                  )}
+                </div>
+                <p className="text-[11px] text-muted-foreground">
+                  {canManageNumbering ? (
+                    <>
+                      Generated automatically.{' '}
+                      <Link to="/admin/settings?tab=numbering" className="text-primary hover:underline">
+                        Numbering settings
+                      </Link>
+                    </>
+                  ) : (
+                    'Generated automatically from the company numbering format.'
+                  )}
+                </p>
               </div>
               <div className="space-y-1.5">
                 <Label className='dark:text-gray-400 text-gray-500' htmlFor="joinDate">Join date</Label>
-                <Input
-                  id="joinDate"
-                  type="date"
+                <DatePicker
                   value={form.joinDate}
-                  onChange={(e) => setField('joinDate', e.target.value)}
+                  onChange={(value) => setField('joinDate', value)}
                   disabled={!canManage}
+                  placeholder="Not set"
                 />
               </div>
 
               <div className="space-y-1.5">
                 <Label className='dark:text-gray-400 text-gray-500'>Department</Label>
-                <Select
-                  value={form.departmentId || 'none'}
-                  onValueChange={(v) => setField('departmentId', v === 'none' ? '' : v)}
+                <RichListBox
+                  value={form.departmentId}
+                  onChange={selectDepartment}
                   disabled={!canManage}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Unassigned" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">Unassigned</SelectItem>
-                    {(references?.departments ?? []).map((dept) => (
-                      <SelectItem key={dept.id} value={String(dept.id)}>
-                        {dept.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                  placeholder={
+                    strandedDepartment
+                      ? `${strandedDepartment.name} (${strandedDepartment.code})`
+                      : 'Unassigned'
+                  }
+                  searchPlaceholder="Search departments…"
+                  emptyMessage="No department matches that search."
+                  // The default 320px panel truncates the "DMA — Digital
+                  // Marketing & Analytics" descriptions, which is the half of
+                  // the row that tells the two similarly-named ones apart.
+                  contentClassName="w-[380px]"
+                  groups={departmentGroups}
+                />
+                {strandedDepartment && (
+                  <p className="text-[11px] text-amber-600 dark:text-amber-500">
+                    {strandedDepartment.code} is not in the department reference list, so it is not
+                    offered here. Pick a department to replace it.
+                  </p>
+                )}
+              </div>
+
+              <div className="space-y-1.5">
+                <Label className='dark:text-gray-400 text-gray-500'>Unit</Label>
+                {/* Only the units of the chosen department are offered: a unit
+                    is a subdivision of one department, so a cross-department
+                    pick would be a contradiction the server refuses anyway. */}
+                <RichListBox
+                  value={form.unitId}
+                  onChange={(value) => setField('unitId', value)}
+                  disabled={!canManage || !form.departmentId}
+                  placeholder={
+                    form.departmentId ? 'No unit' : 'Choose a department first'
+                  }
+                  searchPlaceholder="Search units…"
+                  emptyMessage="No unit matches that search."
+                  groups={unitGroups}
+                />
+                {form.departmentId && unitGroups[0].items.length <= 1 && (
+                  <p className="text-[11px] text-muted-foreground">
+                    This department has no units yet — add them under{' '}
+                    <Link to="/admin/settings?tab=reference-data" className="text-primary hover:underline">
+                      Reference Data
+                    </Link>
+                    .
+                  </p>
+                )}
               </div>
 
               <div className="space-y-1.5">
                 <Label className='dark:text-gray-400 text-gray-500'>Position</Label>
-                <Select
-                  value={form.positionId || 'none'}
-                  onValueChange={(v) => setField('positionId', v === 'none' ? '' : v)}
+                {/* Same control as Department and Unit: a searchable list, not a
+                    native select. Seeded and edited under Reference Data →
+                    Positions, which writes the same table this reads. */}
+                <RichListBox
+                  value={form.positionId}
+                  onChange={(value) => setField('positionId', value)}
                   disabled={!canManage}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="None" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">None</SelectItem>
-                    {(references?.positions ?? []).map((position) => (
-                      <SelectItem key={position.id} value={String(position.id)}>
-                        {position.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                  placeholder="No position"
+                  searchPlaceholder="Search positions…"
+                  emptyMessage="No position matches that search."
+                  groups={positionGroups}
+                />
+                {(references?.positions ?? []).length === 0 && (
+                  <p className="text-[11px] text-muted-foreground">
+                    No positions have been defined yet — add them under{' '}
+                    <Link to="/admin/settings?tab=reference-data" className="text-primary hover:underline">
+                      Reference Data
+                    </Link>
+                    .
+                  </p>
+                )}
               </div>
 
               <div className="space-y-1.5">
@@ -433,25 +695,33 @@ export function UserDetailPage() {
 
               <div className="space-y-1.5">
                 <Label className='dark:text-gray-400 text-gray-500'>Reports to</Label>
-                <Select
-                  value={form.directManagerId || 'none'}
-                  onValueChange={(v) => setField('directManagerId', v === 'none' ? '' : v)}
+                {/* A directory with more than a screenful of people is not
+                    usable as a plain select — this one searches by name and
+                    email, and shows the email under each name so two people
+                    with the same name can be told apart. */}
+                <RichListBox
+                  value={form.directManagerId}
+                  onChange={(value) => setField('directManagerId', value)}
                   disabled={!canManage}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Nobody (top of chart)" />
-                  </SelectTrigger>
-                  <SelectContent className="max-h-72">
-                    <SelectItem value="none">Nobody (top of chart)</SelectItem>
-                    {(people ?? [])
-                      .filter((person) => person.id !== user.id)
-                      .map((person) => (
-                        <SelectItem key={person.id} value={String(person.id)}>
-                          {person.name}
-                        </SelectItem>
-                      ))}
-                  </SelectContent>
-                </Select>
+                  placeholder="Nobody (top of chart)"
+                  searchPlaceholder="Search people…"
+                  emptyMessage="No employee matches that search."
+                  groups={[
+                    {
+                      items: [
+                        { value: '', label: 'Nobody (top of chart)', icon: Users },
+                        ...(people ?? [])
+                          .filter((person) => person.id !== user.id)
+                          .map((person) => ({
+                            value: String(person.id),
+                            label: person.name,
+                            description: person.email,
+                            icon: User,
+                          })),
+                      ],
+                    },
+                  ]}
+                />
                 <p className="text-[11px] text-muted-foreground">
                   Also editable by dragging on the{' '}
                   <Link to="/hr/org-chart" className="text-primary hover:underline">
@@ -693,34 +963,12 @@ export function UserDetailPage() {
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="flex items-center gap-2 text-sm">
-                <Users className="h-4 w-4" />
-                Teams
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-1.5">
-              {user.teams.length === 0 ? (
-                <p className="text-xs text-muted-foreground">
-                  Not in a team yet. Team membership drives which records this person can see when a
-                  permission is team-scoped.
-                </p>
-              ) : (
-                user.teams.map((team) => (
-                  <div
-                    key={team.id}
-                    className="flex items-center justify-between rounded-md border border-border/60 px-2 py-1.5 dark:text-gray-400 text-gray-500"
-                  >
-                    <span className="truncate text-xs font-medium">{team.name}</span>
-                    <Badge variant="secondary" className="shrink-0 text-[9px] dark:text-gray-400 text-gray-500">
-                      {team.teamRole.replace('_', ' ')}
-                    </Badge>
-                  </div>
-                ))
-              )}
-            </CardContent>
-          </Card>
+          <UserTeamsCard
+            userId={user.id}
+            memberships={user.teams}
+            canManage={can('hr.team.manage')}
+            canView={can('hr.team.view')}
+          />
 
           <Card>
             <CardHeader className="pb-3">
@@ -743,6 +991,13 @@ export function UserDetailPage() {
                 <span className="flex items-center gap-1">
                   <Building2 className="h-3 w-3" />
                   {user.department?.code ?? '—'}
+                </span>
+              </p>
+              <p className="flex justify-between">
+                <span>Unit</span>
+                <span className="flex items-center gap-1">
+                  <Users className="h-3 w-3" />
+                  {user.unit?.name ?? '—'}
                 </span>
               </p>
             </CardContent>

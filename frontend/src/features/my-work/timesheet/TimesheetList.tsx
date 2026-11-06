@@ -123,11 +123,11 @@ export function TimesheetList({
         const dayTotal = dayEntries.reduce((sum, entry) => sum + Number(entry.hours), 0);
 
         return (
-          <section key={date} className="overflow-hidden rounded-lg border bg-card">
+          <section key={date} className="overflow-hidden rounded-lg border dark:border-gray-800 bg-card">
             {/* Sticky so the date stays visible while scrolling a long day. */}
             <header
               className={cn(
-                'sticky top-0 z-10 flex items-center justify-between gap-3 border-b bg-card/95 px-4 py-2.5 backdrop-blur',
+                'sticky top-0 z-10 flex items-center justify-between gap-3 border-b dark:border-gray-800 bg-card/95 px-4 py-2.5 backdrop-blur',
                 isToday && 'border-l-4 border-l-primary'
               )}
             >
@@ -175,14 +175,14 @@ export function TimesheetList({
                 Nothing logged
               </div>
             ) : (
-              <ul className="divide-y">
+              <ul className="divide-y dark:divide-gray-800">
                 {dayEntries.map((entry) => {
                   const style = STATUS_STYLE[entry.status] ?? STATUS_STYLE.draft;
                   const StatusIcon = style.icon;
                   const isTaskLinked = !!(entry.taskId || entry.subtaskId);
 
                   return (
-                    <li key={entry.id}>
+                    <li key={entry.id} className="relative">
                       <button
                         type="button"
                         onClick={() => onOpenEntry(entry)}
@@ -242,7 +242,7 @@ export function TimesheetList({
         );
       })}
 
-      <div className="flex items-center justify-between rounded-lg border bg-muted/30 px-4 py-3 text-sm">
+      <div className="flex items-center justify-between rounded-lg border dark:border-gray-800 bg-muted/30 px-4 py-3 text-sm">
         <span className="text-muted-foreground">
           {loggedDays} of {days.length} days logged
         </span>

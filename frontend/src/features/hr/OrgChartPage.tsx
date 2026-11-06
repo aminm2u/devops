@@ -17,7 +17,7 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { PageHeader } from '@/components/layout/PageHeader';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
@@ -317,8 +317,7 @@ export function OrgChartPage() {
         </div>
       )}
 
-      <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
-        <Card className="overflow-hidden">
+      <Card className="overflow-hidden">
           <div className="flex flex-wrap items-center gap-2 border-b border-border/60 px-3 py-2">
             <div className="relative min-w-[180px] flex-1">
               <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -376,6 +375,11 @@ export function OrgChartPage() {
             onMouseDown={(e) => {
               if (e.button !== 0) return;
               if ((e.target as HTMLElement).closest('[data-org-node]')) return;
+              // The drawer blocks outside presses so a second card can be picked
+              // without closing it, which leaves the empty canvas as the way to
+              // dismiss. Pressing it also starts a pan; a pan that never moves
+              // is a click, so both read correctly.
+              setSelectedId(null);
               setPointer({ x: e.clientX - pan.x, y: e.clientY - pan.y });
             }}
             onMouseMove={(e) => {
@@ -574,44 +578,56 @@ export function OrgChartPage() {
           </div>
         </Card>
 
-        {/* Inspector */}
-        <Card className="h-fit">
-          <CardHeader className="pb-3">
-            <CardTitle className="flex items-center gap-2 text-sm">
+      {/* Inspector — a drawer rather than a column, so the chart gets the full
+          width until someone is actually picked. It is non-modal and has no
+          backdrop: the canvas underneath has to stay clickable, which is how
+          you move from one person to the next without dismissing the panel. */}
+      <Sheet
+        open={selected != null}
+        onOpenChange={(open) => {
+          if (!open) setSelectedId(null);
+        }}
+        modal={false}
+      >
+        <SheetContent
+          side="right"
+          hideOverlay
+          // Without this, clicking a second card reads as an "outside" press and
+          // Radix closes the panel — but picking someone else while the drawer
+          // is open is the main way to use it.
+          onInteractOutside={(e) => e.preventDefault()}
+          className="w-full sm:max-w-sm lg:max-w-sm"
+        >
+          <SheetHeader>
+            <SheetTitle className="flex items-center gap-2 text-sm">
               <UserCheck className="h-4 w-4" />
-              {selected ? 'Person' : 'Inspector'}
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4 text-sm">
-            {!selected && (
-              <p className="text-xs text-muted-foreground">
-                Select someone on the chart to see their position, roles and line to the top.
-              </p>
+              {selected?.name ?? 'Person'}
+            </SheetTitle>
+            {selected && (
+              <SheetDescription>
+                {selected.positionName ?? selected.departmentName ?? 'No position assigned'}
+              </SheetDescription>
             )}
-
+          </SheetHeader>
+          <SheetBody className="space-y-4 text-sm">
             {selected && (
               <>
-                <div className="flex items-start gap-3">
-                  <UserAvatar user={selected} size="lg" />
-                  <div className="min-w-0">
-                    <p className="truncate font-semibold">{selected.name}</p>
+                <div className="flex items-center gap-3">
+                  <UserAvatar user={selected} size="lg" className="shrink-0" />
+                  <div className="min-w-0 flex-1">
                     <p className="truncate text-xs text-muted-foreground">{selected.email}</p>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      {selected.positionName ?? 'No position assigned'}
-                    </p>
+                    <div className="mt-1.5 flex flex-wrap gap-1">
+                      {selected.roles.length === 0 ? (
+                        <span className="text-xs text-muted-foreground">No role assigned</span>
+                      ) : (
+                        selected.roles.map((role) => (
+                          <Badge key={role} variant="secondary" className="text-[10px]">
+                            {role}
+                          </Badge>
+                        ))
+                      )}
+                    </div>
                   </div>
-                </div>
-
-                <div className="flex flex-wrap gap-1">
-                  {selected.roles.length === 0 ? (
-                    <span className="text-xs text-muted-foreground">No role assigned</span>
-                  ) : (
-                    selected.roles.map((role) => (
-                      <Badge key={role} variant="secondary" className="text-[10px]">
-                        {role}
-                      </Badge>
-                    ))
-                  )}
                 </div>
 
                 <Separator />
@@ -701,9 +717,9 @@ export function OrgChartPage() {
                 )}
               </>
             )}
-          </CardContent>
-        </Card>
-      </div>
+          </SheetBody>
+        </SheetContent>
+      </Sheet>
 
       <DepartmentSheet
         open={showDepartments}

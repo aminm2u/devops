@@ -141,9 +141,16 @@ export interface OrgTree {
  * Flat rather than nested: the chart needs to re-parent, collapse and pan
  * individual nodes without rebuilding a deep tree, and a flat map lets the
  * client do that in constant time. `reportIds` is the only structure it needs.
+ *
+ * The platform owner is left out: that account is a system administrator
+ * rather than an employee in the reporting structure, and it already cannot
+ * report to anyone (`PUT /org/users/:id/manager` refuses). Left in, it would
+ * sit alone as a second, unrelated peak at the top of the canvas. Anyone whose
+ * `directManagerId` points at it is re-rooted by the `byId.has` check below,
+ * so no edge is left dangling.
  */
 export async function loadOrgTree(): Promise<OrgTree> {
-  const [users, departments, roleRows] = await Promise.all([
+  const [allUsers, departments, roleRows] = await Promise.all([
     prisma.user.findMany({
       where: { isActive: true },
       select: {
@@ -177,6 +184,13 @@ export async function loadOrgTree(): Promise<OrgTree> {
       select: { modelId: true, role: { select: { name: true } } },
     }),
   ]);
+
+  // Derived from the rows already fetched rather than from `superAdminUserIds`,
+  // which would cost a second round trip for the same answer.
+  const hidden = new Set(
+    roleRows.filter((row) => row.role.name === "super-admin").map((row) => row.modelId)
+  );
+  const users = allUsers.filter((user) => !hidden.has(user.id));
 
   const rolesByUser = new Map<number, string[]>();
   for (const row of roleRows) {

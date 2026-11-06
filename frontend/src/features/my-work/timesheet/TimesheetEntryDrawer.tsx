@@ -1,10 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   CheckCircle2,
   RotateCcw,
   Save,
   Send,
-  Timer,
   Trash2,
   XCircle,
 } from 'lucide-react';
@@ -87,7 +86,6 @@ export function TimesheetEntryDrawer({
   const [workDate, setWorkDate] = useState('');
   const [hours, setHours] = useState('');
   const [description, setDescription] = useState('');
-  const [source, setSource] = useState<'task' | 'adhoc'>('adhoc');
   const [taskId, setTaskId] = useState('');
   const [subtaskId, setSubtaskId] = useState('');
   const [categoryValue, setCategoryValue] = useState('');
@@ -107,7 +105,6 @@ export function TimesheetEntryDrawer({
       setWorkDate(entry.workDate);
       setHours(String(entry.hours));
       setDescription(entry.description);
-      setSource(entry.taskId || entry.subtaskId ? 'task' : 'adhoc');
       setTaskId(entry.taskId ? String(entry.taskId) : '');
       setSubtaskId(entry.subtaskId ? String(entry.subtaskId) : '');
       setCategoryValue(entry.categoryValue);
@@ -115,17 +112,35 @@ export function TimesheetEntryDrawer({
       setWorkDate(defaultDate || todayLocal());
       setHours('');
       setDescription('');
-      setSource('adhoc');
       setTaskId('');
       setSubtaskId('');
       setCategoryValue('');
     }
   }, [open, entry, defaultDate]);
 
-  const tasks = enrollable?.tasks ?? [];
+  // An entry can outlive the enrollment it was logged against — the person may
+  // have left the project since. The saved task is still in the select value,
+  // so it must also be in the options, or the trigger renders blank and a save
+  // would look like it had dropped the link.
+  const enrolledTasks = enrollable?.tasks ?? [];
+  const tasks = useMemo(() => {
+    if (entry?.task && !enrolledTasks.some((task) => task.id === entry.task!.id)) {
+      return [
+        {
+          id: entry.task.id,
+          title: entry.task.title,
+          projectId: entry.projectId ?? 0,
+          projectName: entry.project?.name ?? 'Project',
+          subtasks: [],
+        },
+        ...enrolledTasks,
+      ];
+    }
+    return enrolledTasks;
+  }, [enrollable, entry]);
   const categories = enrollable?.categories ?? [];
   const selectedTask = tasks.find((task) => String(task.id) === taskId);
-  const isTaskLinked = source === 'task' && !!taskId;
+  const isTaskLinked = !!taskId;
 
   const parsedHours = Math.round(parseFloat(hours || '0') * 4) / 4;
   const canSave =
@@ -190,13 +205,11 @@ export function TimesheetEntryDrawer({
           <SheetBody className="space-y-5">
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label>Date</Label>
+                <Label className="dark:text-gray-400 text-gray-800">Date</Label>
                 <DatePicker value={workDate} onChange={setWorkDate} disabled={locked} />
               </div>
               <div className="space-y-2">
-                <Label className="flex items-center gap-1">
-                  <Timer className="h-3 w-3" /> Hours
-                </Label>
+                <Label className="dark:text-gray-400 text-gray-800">Hours</Label>
                 <Input
                   type="number"
                   min="0.25"
@@ -212,102 +225,7 @@ export function TimesheetEntryDrawer({
             </div>
 
             <div className="space-y-2">
-              <Label>Work done</Label>
-              <Textarea
-                value={description}
-                onChange={(event) => setDescription(event.target.value)}
-                placeholder="What did you work on?"
-                rows={4}
-                disabled={locked}
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label>Source</Label>
-              <div className="flex gap-2">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant={source === 'task' ? 'default' : 'outline'}
-                  onClick={() => !locked && setSource('task')}
-                  disabled={locked}
-                >
-                  Project task
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant={source === 'adhoc' ? 'default' : 'outline'}
-                  onClick={() => {
-                    if (locked) return;
-                    setSource('adhoc');
-                    setTaskId('');
-                    setSubtaskId('');
-                  }}
-                  disabled={locked}
-                >
-                  Ad-hoc activity
-                </Button>
-              </div>
-              <p className="text-xs text-muted-foreground">
-                {tasks.length === 0
-                  ? 'You are not assigned to any open task, so only ad-hoc activities are available.'
-                  : 'Only tasks on projects you are enrolled in are listed.'}
-              </p>
-            </div>
-
-            {source === 'task' && (
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div className="space-y-2">
-                  <Label>Task</Label>
-                  <Select
-                    value={taskId}
-                    onValueChange={(value) => {
-                      setTaskId(value);
-                      setSubtaskId('');
-                    }}
-                    disabled={locked || tasks.length === 0}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select a task..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {tasks.map((task) => (
-                        <SelectItem key={task.id} value={String(task.id)}>
-                          {task.title}
-                          <span className="ml-1 text-muted-foreground">({task.projectName})</span>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>Subtask</Label>
-                  <Select
-                    value={subtaskId || 'none'}
-                    onValueChange={(value) => setSubtaskId(value === 'none' ? '' : value)}
-                    disabled={locked || !selectedTask}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="None" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">None</SelectItem>
-                      {(selectedTask?.subtasks ?? [])
-                        .filter((subtask) => subtask.claimable)
-                        .map((subtask) => (
-                          <SelectItem key={subtask.id} value={String(subtask.id)}>
-                            {subtask.title}
-                          </SelectItem>
-                        ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-            )}
-
-            <div className="space-y-2">
-              <Label>Category</Label>
+              <Label className="dark:text-gray-400 text-gray-800">Category</Label>
               {isTaskLinked ? (
                 <div className="flex items-center gap-2">
                   <Badge variant="outline" className="gap-1 border-primary/30 text-primary">
@@ -330,6 +248,76 @@ export function TimesheetEntryDrawer({
                 </Select>
               )}
             </div>
+
+            <div className="space-y-2">
+              <Label className="dark:text-gray-400 text-gray-800">Work done</Label>
+              <Textarea
+                value={description}
+                onChange={(event) => setDescription(event.target.value)}
+                placeholder="What did you work on?"
+                rows={4}
+                disabled={locked}
+              />
+            </div>
+
+            {/* Linking to a task is what feeds project contribution numbers, so
+                the picker stays — but it is optional, and picking one is the
+                only thing the old "Source" toggle did. Category below carries
+                the same information for ad-hoc work, which is why the toggle
+                was redundant. */}
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label className="dark:text-gray-400 text-gray-800">Project task (optional)</Label>
+                <Select
+                  value={taskId || 'none'}
+                  onValueChange={(value) => {
+                    setTaskId(value === 'none' ? '' : value);
+                    setSubtaskId('');
+                  }}
+                  disabled={locked || tasks.length === 0}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="No task" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">No task — log an activity</SelectItem>
+                    {tasks.map((task) => (
+                      <SelectItem key={task.id} value={String(task.id)}>
+                        {task.title}
+                        <span className="ml-1 text-muted-foreground">({task.projectName})</span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label className="dark:text-gray-400 text-gray-800">Subtask</Label>
+                <Select
+                  value={subtaskId || 'none'}
+                  onValueChange={(value) => setSubtaskId(value === 'none' ? '' : value)}
+                  disabled={locked || !selectedTask}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="None" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">None</SelectItem>
+                    {(selectedTask?.subtasks ?? [])
+                      .filter((subtask) => subtask.claimable)
+                      .map((subtask) => (
+                        <SelectItem key={subtask.id} value={String(subtask.id)}>
+                          {subtask.title}
+                        </SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {tasks.length === 0
+                ? 'You have no open task to link, so this is logged as an activity under the category you pick.'
+                : 'Linking a task records the hours against its project. Leave it empty to log a standalone activity.'}
+            </p>
 
             {entry?.status === 'rejected' && entry.rejectReason && (
               <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-600 dark:text-red-400">

@@ -140,7 +140,7 @@ export function TeamTab({ project, refetch }: { project: any; refetch: () => voi
       </div>
 
       {!isMember && !project.allowSelfEnroll && !canManageTeam && (
-        <p className="rounded-lg border bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
+        <p className="rounded-lg border dark:border-gray-800 bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
           This project is not open to self-enrollment. Ask the project lead to add you.
         </p>
       )}

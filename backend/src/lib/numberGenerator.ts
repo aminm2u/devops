@@ -1,5 +1,39 @@
 import prisma from "../config/database.js";
 
+/** The reference type that issues employee numbers. */
+export const EMPLOYEE_REF_TYPE = "employee";
+
+/**
+ * Defaults for types the app cannot run without but that a database may predate.
+ * Only these are created on demand — a missing procurement config stays a hard
+ * error, because guessing a prefix for a purchase order would be worse than
+ * failing loudly.
+ */
+const SELF_SEEDING_CONFIGS: Record<
+  string,
+  { prefix: string; separator: string; yearFormat: string; digitPadding: number }
+> = {
+  // Matches the shape of the numbers already in the directory (EMP-001,
+  // EMP-007): no year segment, three digits. A new hire should not appear in a
+  // visibly different series from the staff hired before them.
+  employee: { prefix: "EMP", separator: "-", yearFormat: "NONE", digitPadding: 3 },
+};
+
+/**
+ * Create the default config for a self-seeding type if the row is missing.
+ * Idempotent, so it is safe to call on every read of the numbering settings.
+ */
+export async function ensureReferenceConfig(refType: string): Promise<void> {
+  const defaults = SELF_SEEDING_CONFIGS[refType];
+  if (!defaults) return;
+
+  await prisma.referenceNumberConfig.upsert({
+    where: { refType },
+    update: {},
+    create: { refType, ...defaults, currentCounter: 1 },
+  });
+}
+
 /**
  * Generate an atomic reference number using the reference_number_configs table.
  * Uses a Prisma transaction with atomic increment to prevent race conditions.
@@ -13,7 +47,11 @@ export async function generateReferenceNumber(refType: string): Promise<string> 
   });
 
   if (!config) {
-    throw new Error(`No reference number config found for type: ${refType}`);
+    if (!SELF_SEEDING_CONFIGS[refType]) {
+      throw new Error(`No reference number config found for type: ${refType}`);
+    }
+    await ensureReferenceConfig(refType);
+    return generateReferenceNumber(refType);
   }
 
   // Use a transaction to atomically increment the counter
@@ -37,19 +75,7 @@ export async function generateReferenceNumber(refType: string): Promise<string> 
     return { ...current, currentCounter: counter };
   });
 
-  // Build the reference number
-  const year = new Date().getFullYear();
-  const yearStr =
-    updated.yearFormat === "YY"
-      ? String(year).slice(-2)
-      : String(year);
-
-  const counterStr = String(updated.currentCounter).padStart(
-    updated.digitPadding,
-    "0"
-  );
-
-  return `${updated.prefix}${updated.separator}${yearStr}${updated.separator}${counterStr}`;
+  return formatReferenceNumber(updated);
 }
 
 /**
@@ -61,19 +87,36 @@ export async function previewNextReferenceNumber(refType: string): Promise<strin
   });
 
   if (!config) {
-    throw new Error(`No reference number config found for type: ${refType}`);
+    if (!SELF_SEEDING_CONFIGS[refType]) {
+      throw new Error(`No reference number config found for type: ${refType}`);
+    }
+    await ensureReferenceConfig(refType);
+    return previewNextReferenceNumber(refType);
   }
 
-  const year = new Date().getFullYear();
-  const yearStr =
-    config.yearFormat === "YY"
-      ? String(year).slice(-2)
-      : String(year);
+  return formatReferenceNumber(config);
+}
 
-  const counterStr = String(config.currentCounter).padStart(
-    config.digitPadding,
-    "0"
-  );
+export function formatReferenceNumber(config: {
+  prefix: string;
+  separator: string;
+  yearFormat: string;
+  digitPadding: number;
+  currentCounter: number;
+}): string {
+  const year = new Date().getFullYear();
+  const counterStr = String(config.currentCounter).padStart(config.digitPadding, "0");
+
+  // `NONE` omits the year segment *and* its separator. Employee numbers are
+  // the case for it: a staff number is for life, so dating it by hiring year
+  // both changes the format annually and makes the counter restart, which
+  // reads as a different series to anyone looking at a list.
+  if (config.yearFormat === "NONE") {
+    return `${config.prefix}${config.separator}${counterStr}`;
+  }
+
+  const yearStr =
+    config.yearFormat === "YY" ? String(year).slice(-2) : String(year);
 
   return `${config.prefix}${config.separator}${yearStr}${config.separator}${counterStr}`;
 }

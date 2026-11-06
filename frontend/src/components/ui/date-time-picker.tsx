@@ -174,8 +174,10 @@ export function DateTimePicker({
             // `flex` (not the Button default `inline-flex`): this trigger is a
             // form control and must be block-level like Input/SelectTrigger,
             // otherwise margins don't collapse with the Label above and the
-            // label-to-control gap doubles.
-            'flex h-9 w-full justify-between px-3 text-left font-normal',
+            // label-to-control gap doubles. `bg-transparent` likewise matches
+            // those controls — `outline` would paint `bg-background`, which is
+            // a different surface from the `bg-card` the field sits on.
+            'flex h-9 w-full justify-between bg-transparent px-3 text-left font-normal',
             !value && 'text-muted-foreground',
             className
           )}

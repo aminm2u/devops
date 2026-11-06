@@ -62,7 +62,9 @@ export function MultiSelect({
           role="combobox"
           aria-expanded={open}
           className={cn(
-            "w-full justify-between min-h-[40px] h-auto flex-wrap gap-1",
+            // See the note in combobox.tsx: a form control takes the card's
+            // fill (`bg-transparent`), not the `outline` variant's page fill.
+            "w-full justify-between min-h-[40px] h-auto flex-wrap gap-1 bg-transparent",
             className
           )}
         >

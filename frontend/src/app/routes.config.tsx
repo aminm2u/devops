@@ -4,7 +4,6 @@ import {
   Activity,
   AlertTriangle,
   BarChart3,
-  Bell,
   Building2,
   CalendarDays,
   ClipboardCheck,
@@ -28,9 +27,7 @@ import {
   SlidersHorizontal,
   Timer,
   Truck,
-  UserCog,
   Users,
-  UsersRound,
 } from 'lucide-react';
 
 import { LoginPage } from '@/features/auth/LoginPage';
@@ -68,12 +65,13 @@ import { InternalProjectListPage } from '@/features/procurement/InternalProjectL
 import { UsersPage } from '@/features/hr/UsersPage';
 import { UserDetailPage } from '@/features/hr/UserDetailPage';
 import { OrgChartPage } from '@/features/hr/OrgChartPage';
-import { TeamsPage } from '@/features/hr/TeamsPage';
 import { AccessControlPage } from '@/features/admin/AccessControlPage';
 import { ActivityLogPage } from '@/features/admin/ActivityLogPage';
 import { AdminSettingsPage } from '@/features/admin/settings/AdminSettingsPage';
 import { SettingsPage } from '@/features/account/digital-me/SettingsPage';
-import { NotificationsPage } from '@/features/account/notifications/NotificationsPage';
+// The Notifications page is parked (see the commented entry in APP_ROUTES).
+// Re-import it here — `NotificationsPage`, plus `Bell` from lucide — when that
+// block is switched back on.
 import { ForbiddenPage } from '@/features/system/ForbiddenPage';
 import { ComponentShowcasePage } from '@/features/system/ComponentShowcasePage';
 
@@ -180,21 +178,27 @@ export const APP_ROUTES: AppRoute[] = [
     // not depend on a role.
     path: 'helpdesk',
     element: <HelpdeskPage />,
-    meta: { title: 'Support', nav: { group: 'mywork', label: 'Support', icon: Headphones } },
+    meta: { title: 'Ticket', nav: { group: 'mywork', label: 'Ticket', icon: Headphones } },
   },
+  // HIDE THIS FIRST
+  // {
+  //   // Personal, like the calendar: your own notification list, no capability.
+  //   path: 'notifications',
+  //   element: <NotificationsPage />,
+  //   meta: {
+  //     title: 'Notifications',
+  //     nav: { group: 'mywork', label: 'Notifications', icon: Bell },
+  //   },
+  // },
   {
-    // Personal, like the calendar: your own notification list, no capability.
-    path: 'notifications',
-    element: <NotificationsPage />,
-    meta: {
-      title: 'Notifications',
-      nav: { group: 'mywork', label: 'Notifications', icon: Bell },
-    },
-  },
-  {
+    // Digital Me is reached from the avatar menu in the top bar, not the
+    // sidebar, so it carries no `nav` — it is a destination that just is not
+    // a sidebar entry. No permission either: it is every signed-in user's own
+    // profile, and each section inside it gates itself (the Nginx tab on
+    // `admin.integration.manage`).
     path: 'settings',
     element: <SettingsPage />,
-    meta: { title: 'Digital Me', nav: { group: 'mywork', label: 'Digital Me', icon: UserCog } },
+    meta: { title: 'Digital Me' },
   },
   {
     path: 'helpdesk/:id',
@@ -434,15 +438,6 @@ export const APP_ROUTES: AppRoute[] = [
       nav: { group: 'hr', label: 'Org Chart', icon: Network },
     },
   },
-  {
-    path: 'hr/teams',
-    element: <TeamsPage />,
-    meta: {
-      title: 'Teams',
-      permission: 'hr.team.view',
-      nav: { group: 'hr', label: 'Teams', icon: UsersRound },
-    },
-  },
 
   // ── Administration ──────────────────────────────────────────────────────
   {
@@ -459,9 +454,20 @@ export const APP_ROUTES: AppRoute[] = [
     element: <AdminSettingsPage />,
     meta: {
       title: 'Settings',
-      // One page, two grants: a timesheet admin sees only the timesheet tabs,
-      // and the tab list is filtered by `can()` inside the page.
-      anyOf: ['timesheet.settings.manage', 'procurement.settings.manage'],
+      // One page, four grants. The tab list is filtered by `can()` inside the
+      // page, and Reference Data further filters its group picker: an
+      // `admin.settings.manage` holder sees the key/value lists, an HR manager
+      // sees Positions, a helpdesk manager sees Helpdesk categories. Admitting
+      // them all here is what lets each reach their own list — without it,
+      // folding those two screens into Reference Data would have taken them
+      // away from the roles that own them.
+      anyOf: [
+        'timesheet.settings.manage',
+        'procurement.settings.manage',
+        'admin.settings.manage',
+        'hr.org.manage',
+        'helpdesk.ticket.manage',
+      ],
       nav: { group: 'admin', label: 'Settings', icon: SlidersHorizontal },
     },
   },
@@ -515,9 +521,14 @@ export const LEGACY_REDIRECTS: { from: string; to: string }[] = [
   { from: 'payments', to: '/procurement/payments' },
   { from: 'profile', to: '/settings' },
   { from: 'admin/users', to: '/hr/users' },
-  { from: 'settings/timesheet', to: '/admin/settings?tab=timesheet-categories' },
+  // Teams are no longer a page: membership and leadership are edited on the
+  // employee record, so the old address lands on the directory.
+  { from: 'hr/teams', to: '/hr/users' },
+  // Timesheet categories are a group in Reference Data now, so the old
+  // timesheet-settings addresses land on the tab that holds them.
+  { from: 'settings/timesheet', to: '/admin/settings?tab=reference-data' },
   { from: 'settings/procurement', to: '/admin/settings?tab=approval-policies' },
-  { from: 'admin/settings/timesheet', to: '/admin/settings?tab=timesheet-categories' },
+  { from: 'admin/settings/timesheet', to: '/admin/settings?tab=reference-data' },
   { from: 'admin/settings/procurement', to: '/admin/settings?tab=approval-policies' },
 ];
 

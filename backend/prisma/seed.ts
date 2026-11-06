@@ -60,6 +60,9 @@ async function main() {
   await prisma.permission.deleteMany();
   await prisma.role.deleteMany();
   await prisma.user.deleteMany();
+  // Units before departments: `units.department_id` cascades, but deleting the
+  // parent explicitly keeps the reset order readable rather than relying on it.
+  await prisma.unit.deleteMany();
   await prisma.department.deleteMany();
   await prisma.position.deleteMany();
   await prisma.employmentType.deleteMany();
@@ -91,6 +94,29 @@ async function main() {
       { code: 'OPS', name: 'Operations' },
     ],
     skipDuplicates: true,
+  });
+
+  // Units sit inside a department, so they are created after the departments
+  // they belong to. A person's `unit_id` is what the directory shows between
+  // department and position; it is optional everywhere, and a department with
+  // no units (Finance, below) is a normal state rather than an omission.
+  const unitITInfra = await prisma.unit.create({
+    data: { name: 'Infrastructure', code: 'INFRA', departmentId: deptIT.id, sortOrder: 1 },
+  });
+  const unitITApps = await prisma.unit.create({
+    data: { name: 'Application Development', code: 'APPS', departmentId: deptIT.id, sortOrder: 2 },
+  });
+  const unitITSupport = await prisma.unit.create({
+    data: { name: 'IT Support', code: 'SUPPORT', departmentId: deptIT.id, sortOrder: 3 },
+  });
+  const unitHRPeople = await prisma.unit.create({
+    data: { name: 'People Operations', code: 'PEOPLE', departmentId: deptHR.id, sortOrder: 1 },
+  });
+  const unitHRPayroll = await prisma.unit.create({
+    data: { name: 'Payroll & Benefits', code: 'PAYROLL', departmentId: deptHR.id, sortOrder: 2 },
+  });
+  const unitPMODelivery = await prisma.unit.create({
+    data: { name: 'Project Delivery', code: 'DELIVERY', departmentId: deptPMO.id, sortOrder: 1 },
   });
 
   const posDev = await prisma.position.create({ data: { name: 'Software Engineer', gradeLevel: 3 } });
@@ -190,6 +216,7 @@ async function main() {
       emailVerifiedAt: new Date(),
       employeeId: "EMP-001",
       departmentId: deptIT.id,
+      unitId: unitITInfra.id,
       positionId: posManager.id,
       employmentTypeId: empPerm.id,
       joinDate: new Date("2018-01-02"),
@@ -216,6 +243,7 @@ async function main() {
       emailVerifiedAt: new Date(),
       employeeId: "EMP-002",
       departmentId: deptHR.id,
+      unitId: unitHRPeople.id,
       positionId: posManager.id,
       employmentTypeId: empPerm.id,
       joinDate: new Date("2019-04-08"),
@@ -234,6 +262,7 @@ async function main() {
       emailVerifiedAt: new Date(),
       employeeId: "EMP-003",
       departmentId: deptIT.id,
+      unitId: unitITInfra.id,
       positionId: posDevOps.id,
       employmentTypeId: empPerm.id,
       joinDate: new Date("2021-03-10"),
@@ -257,6 +286,7 @@ async function main() {
       emailVerifiedAt: new Date(),
       employeeId: "EMP-004",
       departmentId: deptIT.id,
+      unitId: unitITApps.id,
       positionId: posDev.id,
       employmentTypeId: empContract.id,
       joinDate: new Date("2022-06-01"),
@@ -280,6 +310,7 @@ async function main() {
       emailVerifiedAt: new Date(),
       employeeId: "EMP-005",
       departmentId: deptIT.id,
+      unitId: unitITApps.id,
       positionId: posManager.id,
       employmentTypeId: empPerm.id,
       joinDate: new Date("2019-11-20"),
@@ -322,6 +353,7 @@ async function main() {
       emailVerifiedAt: new Date(),
       employeeId: "EMP-007",
       departmentId: deptHR.id,
+      unitId: unitHRPayroll.id,
       positionId: posDev.id,
       employmentTypeId: empContract.id,
       joinDate: new Date("2023-08-14"),
@@ -358,12 +390,23 @@ async function main() {
     email: string;
     employeeId: string;
     departmentId: number;
+    /** Optional: a person may sit directly in a department without a unit. */
+    unitId?: number;
     positionId: number;
     employmentTypeId: number;
     joinDate: string;
   }) => {
     const user = await prisma.user.create({
-      data: { ...input, password: testPassword, isActive: true, emailVerifiedAt: new Date() },
+      data: {
+        ...input,
+        // `joinDate` arrives as a bare "YYYY-MM-DD" string from the callers
+        // below; Prisma wants a Date, and spreading the input would otherwise
+        // hand the string straight to a DateTime column.
+        joinDate: new Date(input.joinDate),
+        password: testPassword,
+        isActive: true,
+        emailVerifiedAt: new Date(),
+      },
     });
     await prisma.notificationPreference.create({
       data: { userId: user.id, email: true, inApp: true, sound: true },
@@ -383,6 +426,7 @@ async function main() {
     email: "azfar@map2u.com.my",
     employeeId: "EMP-101",
     departmentId: deptIT.id,
+    unitId: unitITInfra.id,
     positionId: posDeptHead.id,
     employmentTypeId: empPerm.id,
     joinDate: "2019-02-04",
@@ -396,6 +440,7 @@ async function main() {
     email: "zakaria@map2u.com.my",
     employeeId: "EMP-102",
     departmentId: deptPMO.id,
+    unitId: unitPMODelivery.id,
     positionId: posDeptHead.id,
     employmentTypeId: empPerm.id,
     joinDate: "2020-07-13",
@@ -411,6 +456,7 @@ async function main() {
     email: "amin@map2u.com.my",
     employeeId: "EMP-103",
     departmentId: deptIT.id,
+    unitId: unitITInfra.id,
     positionId: posTeamLead.id,
     employmentTypeId: empPerm.id,
     joinDate: "2021-09-06",
@@ -423,6 +469,7 @@ async function main() {
     email: "aiman@map2u.com.my",
     employeeId: "EMP-104",
     departmentId: deptIT.id,
+    unitId: unitITInfra.id,
     positionId: posDevOps.id,
     employmentTypeId: empPerm.id,
     joinDate: "2023-01-16",
@@ -436,6 +483,7 @@ async function main() {
     email: "wafiy@map2u.com.my",
     employeeId: "EMP-105",
     departmentId: deptPMO.id,
+    unitId: unitPMODelivery.id,
     positionId: posProjMgr.id,
     employmentTypeId: empPerm.id,
     joinDate: "2022-03-21",
@@ -1386,6 +1434,19 @@ async function main() {
   console.log("Seeding reference number configurations...");
 
   const numberConfigs = [
+    // Employment is not dated: a staff number is for life, and the seeded
+    // directory already uses this shape (EMP-001 … EMP-007). The counter starts
+    // past those seven because the next hire is issued by the generator, and a
+    // counter sitting at 1 would spend its first attempts colliding with the
+    // numbers this seed just wrote.
+    {
+      refType: "employee",
+      prefix: "EMP",
+      separator: "-",
+      yearFormat: "NONE",
+      digitPadding: 3,
+      startFrom: 8,
+    },
     { refType: "req", prefix: "REQ", separator: "-", yearFormat: "YYYY", digitPadding: 4 },
     { refType: "rfq", prefix: "RFQ", separator: "-", yearFormat: "YYYY", digitPadding: 4 },
     { refType: "po", prefix: "PO", separator: "-", yearFormat: "YYYY", digitPadding: 5 },
@@ -1397,16 +1458,17 @@ async function main() {
   ];
 
   for (const config of numberConfigs) {
+    const { startFrom, ...rest } = config as typeof config & { startFrom?: number };
     await prisma.referenceNumberConfig.upsert({
-      where: { refType: config.refType },
+      where: { refType: rest.refType },
       update: {},
       create: {
-        refType: config.refType,
-        prefix: config.prefix,
-        separator: config.separator,
-        yearFormat: config.yearFormat,
-        digitPadding: config.digitPadding,
-        currentCounter: 1,
+        refType: rest.refType,
+        prefix: rest.prefix,
+        separator: rest.separator,
+        yearFormat: rest.yearFormat,
+        digitPadding: rest.digitPadding,
+        currentCounter: startFrom ?? 1,
       },
     });
   }

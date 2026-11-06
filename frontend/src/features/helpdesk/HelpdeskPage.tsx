@@ -132,6 +132,32 @@ export function HelpdeskPage() {
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [showCreateDialog, setShowCreateDialog] = useState(false);
 
+  // The API pages this list (20 a page by default). Without a page number the
+  // twenty-first ticket a person ever raised was unreachable.
+  const [page, setPage] = useState(1);
+  const LIMIT = 20;
+
+  /**
+   * Narrowing the result set invalidates the page number: page 3 of a list that
+   * now has one page is blank, and the user reads that as "no tickets".
+   */
+  const changeSearch = (value: string) => {
+    setSearch(value);
+    setPage(1);
+  };
+  const changeStatus = (value: string) => {
+    setStatusFilter(value);
+    setPage(1);
+  };
+  const changePriority = (value: string) => {
+    setPriorityFilter(value);
+    setPage(1);
+  };
+  const changeCategory = (value: string) => {
+    setCategoryFilter(value);
+    setPage(1);
+  };
+
   // Stats
   const { data: statsData } = useQuery({
     queryKey: ['helpdesk-stats'],
@@ -161,13 +187,15 @@ export function HelpdeskPage() {
 
   // Tickets
   const { data, isLoading } = useQuery({
-    queryKey: ['helpdesk-tickets', search, statusFilter, priorityFilter, categoryFilter],
+    queryKey: ['helpdesk-tickets', search, statusFilter, priorityFilter, categoryFilter, page],
     queryFn: async () => {
       const params = new URLSearchParams();
       if (search) params.append('search', search);
       if (statusFilter !== 'all') params.append('status', statusFilter);
       if (priorityFilter !== 'all') params.append('priority', priorityFilter);
       if (categoryFilter !== 'all') params.append('categoryId', categoryFilter);
+      params.append('page', String(page));
+      params.append('limit', String(LIMIT));
       const res = await apiClient.get(`/helpdesk/tickets?${params.toString()}`);
       return res.data;
     },
@@ -186,7 +214,11 @@ export function HelpdeskPage() {
       navigate(`/helpdesk/${data.data.id}`);
     },
     onError: (err: any) => {
-      toast.error(err.response?.data?.error || 'Failed to create ticket');
+      // A 400 comes back as { error: "Validation failed", errors: { field: [msg] } },
+      // so show the field message rather than the generic headline.
+      const errors = err?.response?.data?.errors as Record<string, string[]> | undefined;
+      const first = errors && Object.values(errors).flat()[0];
+      toast.error(first || err?.response?.data?.error || 'Failed to create ticket');
     },
   });
 
@@ -199,6 +231,9 @@ export function HelpdeskPage() {
   const categories: HelpdeskCategory[] = categoriesData || [];
   const projects: { id: number; name: string; slug: string; status: string }[] = projectsData || [];
   const tickets: HelpdeskTicket[] = data?.data || [];
+  // The list endpoint pages server-side and reports back how many pages there
+  // are; `data.data` alone is just the current slice.
+  const meta = data?.meta || { currentPage: 1, lastPage: 1, total: 0 };
 
   const columns: DataTableColumn<HelpdeskTicket>[] = [
     {
@@ -456,12 +491,12 @@ export function HelpdeskPage() {
         onRowClick={(ticket) => navigate(`/helpdesk/${ticket.id}`)}
         search={{
           value: search,
-          onChange: setSearch,
+          onChange: changeSearch,
           placeholder: 'Search tickets...',
         }}
         filters={
           <>
-            <Select value={statusFilter} onValueChange={setStatusFilter}>
+            <Select value={statusFilter} onValueChange={changeStatus}>
               <SelectTrigger className="w-full sm:w-[150px]">
                 <SelectValue placeholder="All Status" />
               </SelectTrigger>
@@ -474,7 +509,7 @@ export function HelpdeskPage() {
                 ))}
               </SelectContent>
             </Select>
-            <Select value={priorityFilter} onValueChange={setPriorityFilter}>
+            <Select value={priorityFilter} onValueChange={changePriority}>
               <SelectTrigger className="w-full sm:w-[150px]">
                 <SelectValue placeholder="All Priority" />
               </SelectTrigger>
@@ -485,7 +520,7 @@ export function HelpdeskPage() {
                 ))}
               </SelectContent>
             </Select>
-            <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+            <Select value={categoryFilter} onValueChange={changeCategory}>
               <SelectTrigger className="w-full sm:w-[180px]">
                 <SelectValue placeholder="All Categories" />
               </SelectTrigger>
@@ -502,6 +537,13 @@ export function HelpdeskPage() {
         }
         emptyIcon={Headphones}
         emptyTitle="No tickets found"
+        pagination={{
+          page: meta.currentPage,
+          totalPages: meta.lastPage,
+          onPageChange: setPage,
+          totalItems: meta.total,
+          itemsPerPage: LIMIT,
+        }}
       />
 
       {/* Create Dialog */}
@@ -575,7 +617,7 @@ function CreateTicketDialog({
       isSubmitting={isSubmitting}
     >
       <div className="space-y-2">
-        <Label>Title *</Label>
+        <Label className='dark:text-gray-400 text-gray-800'>Title *</Label>
         <Input
           value={form.title}
           onChange={(e) => setForm({ ...form, title: e.target.value })}
@@ -584,7 +626,7 @@ function CreateTicketDialog({
       </div>
 
       <div className="space-y-2">
-        <Label>Description</Label>
+        <Label className='dark:text-gray-400 text-gray-800'>Description</Label>
         <Textarea
           value={form.description}
           onChange={(e) => setForm({ ...form, description: e.target.value })}
@@ -595,7 +637,7 @@ function CreateTicketDialog({
 
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2">
-          <Label>Priority</Label>
+          <Label className='dark:text-gray-400 text-gray-800'>Priority</Label>
           <Select value={form.priority} onValueChange={(v: HelpdeskTicketPriority) => setForm({ ...form, priority: v })}>
             <SelectTrigger>
               <SelectValue />
@@ -608,7 +650,7 @@ function CreateTicketDialog({
           </Select>
         </div>
         <div className="space-y-2">
-          <Label>Category</Label>
+          <Label className='dark:text-gray-400 text-gray-800'>Category</Label>
           <Select
             value={form.categoryId ? String(form.categoryId) : 'none'}
             onValueChange={(v) => setForm({ ...form, categoryId: v === 'none' ? null : Number(v) })}
@@ -629,7 +671,7 @@ function CreateTicketDialog({
       </div>
 
       <div className="space-y-2">
-        <Label>Related Project</Label>
+        <Label className='dark:text-gray-400 text-gray-800'>Related Project</Label>
         <Select
           value={form.projectId ? String(form.projectId) : 'none'}
           onValueChange={(v) => setForm({ ...form, projectId: v === 'none' ? null : Number(v) })}
@@ -652,7 +694,7 @@ function CreateTicketDialog({
       </div>
 
       <div className="space-y-2">
-        <Label>Source</Label>
+        <Label className='dark:text-gray-400 text-gray-800'>Source</Label>
         <Select value={form.source} onValueChange={(v) => setForm({ ...form, source: v })}>
           <SelectTrigger>
             <SelectValue />
@@ -665,13 +707,13 @@ function CreateTicketDialog({
         </Select>
       </div>
 
-      <div className="border-t pt-4">
+      {/* <div className="border-t border-gray-200 dark:border-gray-600 pt-4">
         <Label className="font-semibold">Contact Information</Label>
       </div>
 
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2">
-          <Label>Contact Name</Label>
+          <Label className='dark:text-gray-400 text-gray-800'>Contact Name</Label>
           <Input
             value={form.contactName}
             onChange={(e) => setForm({ ...form, contactName: e.target.value })}
@@ -679,7 +721,7 @@ function CreateTicketDialog({
           />
         </div>
         <div className="space-y-2">
-          <Label>Contact Email</Label>
+          <Label className='dark:text-gray-400 text-gray-800'>Contact Email</Label>
           <Input
             type="email"
             value={form.contactEmail}
@@ -690,13 +732,13 @@ function CreateTicketDialog({
       </div>
 
       <div className="space-y-2">
-        <Label>Contact Phone</Label>
+        <Label className='dark:text-gray-400 text-gray-800'>Contact Phone</Label>
         <Input
           value={form.contactPhone}
           onChange={(e) => setForm({ ...form, contactPhone: e.target.value })}
           placeholder="Phone number"
         />
-      </div>
+      </div> */}
     </FormDialog>
   );
 }

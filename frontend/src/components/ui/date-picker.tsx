@@ -84,7 +84,12 @@ export function DatePicker({
             // form control and must be block-level like Input/SelectTrigger.
             // Inline-level boxes don't collapse margins with the Label above,
             // so inline-flex would double the label-to-control gap.
-            'flex h-9 w-full justify-between px-3 text-left font-normal',
+            //
+            // `bg-transparent`, also like Input/SelectTrigger: the `outline`
+            // variant paints `bg-background`, but form controls sit on cards
+            // (`bg-card`), and in dark mode those two surfaces differ — the
+            // field would read as a darker hole punched in the card.
+            'flex h-9 w-full justify-between bg-transparent px-3 text-left font-normal',
             !value && 'text-muted-foreground',
             className
           )}

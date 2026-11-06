@@ -107,7 +107,10 @@ export function RichListBox({
           aria-expanded={open}
           disabled={disabled}
           className={cn(
-            'w-full justify-between font-normal text-left h-9 px-3',
+            // `bg-transparent` overrides the `outline` variant's `bg-background`
+            // so this sits on a card exactly like Input/SelectTrigger do —
+            // same border colour, same fill, same height.
+            'w-full justify-between font-normal text-left h-9 px-3 bg-transparent',
             !selectedItem && 'text-muted-foreground',
             className
           )}
@@ -128,7 +131,7 @@ export function RichListBox({
       >
         <Command>
           <CommandInput placeholder={searchPlaceholder} className="h-9" />
-          <CommandList className="max-h-[280px] overflow-y-auto">
+          <CommandList className="max-h-[280px] overflow-y-auto border-r border-l border-b dark:border-gray-800">
             <CommandEmpty className="py-4 text-center text-xs text-muted-foreground">
               {emptyMessage}
             </CommandEmpty>
@@ -153,7 +156,7 @@ export function RichListBox({
                         {ItemIcon ? (
                           <ItemIcon className="h-4 w-4 shrink-0 text-muted-foreground" />
                         ) : (
-                          <div className="w-4 shrink-0" />
+                          null
                         )}
                         <div className="flex flex-col min-w-0 flex-1">
                           <span className="text-sm font-medium truncate">

@@ -12,6 +12,14 @@ import apiClient from '@/api/client';
 export type TeamType = 'devops' | 'support' | 'project' | 'ops';
 export type TeamRole = 'lead' | 'assistant_lead' | 'member';
 
+/** Type labels, kept beside the union they describe so they cannot drift. */
+export const TEAM_TYPE_LABEL: Record<TeamType, string> = {
+  devops: 'DevOps',
+  support: 'Support',
+  project: 'Project',
+  ops: 'Operations',
+};
+
 export interface TeamMemberSummary {
   id: number;
   name: string;
@@ -44,27 +52,24 @@ export interface MyTeam {
   department: { id: number; name: string } | null;
 }
 
+/** What `POST /teams` returns — the new row, without the list's derived counts. */
+export interface CreatedTeam {
+  id: number;
+  name: string;
+  slug: string;
+  type: TeamType;
+}
+
 export const teamsApi = {
   list: () => apiClient.get('/teams').then((r) => r.data.data as Team[]),
   mine: () => apiClient.get('/teams/mine').then((r) => r.data.data as MyTeam[]),
-  get: (id: number) => apiClient.get(`/teams/${id}`).then((r) => r.data.data as Team),
   create: (payload: {
     name: string;
     type?: TeamType;
     description?: string | null;
     departmentId?: number | null;
     projectId?: number | null;
-  }) => apiClient.post('/teams', payload).then((r) => r.data.data as Team),
-  update: (
-    id: number,
-    payload: Partial<
-      Pick<Team, 'name' | 'description' | 'isActive' | 'type'> & {
-        departmentId: number | null;
-        projectId: number | null;
-      }
-    >
-  ) => apiClient.put(`/teams/${id}`, payload).then((r) => r.data.data as Team),
-  remove: (id: number) => apiClient.delete(`/teams/${id}`),
+  }) => apiClient.post('/teams', payload).then((r) => r.data.data as CreatedTeam),
   addMember: (id: number, userId: number, teamRole: TeamRole = 'member') =>
     apiClient.post(`/teams/${id}/members`, { userId, teamRole }).then((r) => r.data.data),
   removeMember: (id: number, userId: number) => apiClient.delete(`/teams/${id}/members/${userId}`),

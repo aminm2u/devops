@@ -34,8 +34,14 @@ const SheetOverlay = React.forwardRef<
 ));
 SheetOverlay.displayName = DialogPrimitive.Overlay.displayName;
 
+/**
+ * `border-border` is not decoration here — without a colour class, Tailwind's
+ * `border-*` utilities fall back to its default `#e5e7eb`, which is a near-white
+ * line against the dark background. One override in the shared component fixes
+ * every drawer in the app; per-caller classes were never going to cover them.
+ */
 const sheetVariants = cva(
-  'fixed z-50 flex flex-col gap-4 bg-background shadow-xl transition ease-in-out data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:duration-200 data-[state=open]:duration-300',
+  'fixed z-50 flex flex-col gap-4 bg-background shadow-xl transition ease-in-out border-border data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:duration-200 data-[state=open]:duration-300',
   {
     variants: {
       side: {
@@ -56,14 +62,20 @@ interface SheetContentProps
     VariantProps<typeof sheetVariants> {
   /** Hide the default close button when the content supplies its own. */
   hideClose?: boolean;
+  /**
+   * Skip the dimming backdrop. For a non-modal panel the user is meant to keep
+   * interacting with the page behind it — an inspector over a canvas, say —
+   * where a scrim would swallow the clicks it exists to serve.
+   */
+  hideOverlay?: boolean;
 }
 
 const SheetContent = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Content>,
   SheetContentProps
->(({ side = 'right', className, children, hideClose, ...props }, ref) => (
+>(({ side = 'right', className, children, hideClose, hideOverlay, ...props }, ref) => (
   <SheetPortal>
-    <SheetOverlay />
+    {!hideOverlay && <SheetOverlay />}
     <DialogPrimitive.Content
       ref={ref}
       className={cn(sheetVariants({ side }), className)}

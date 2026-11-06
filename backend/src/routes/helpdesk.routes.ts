@@ -5,8 +5,10 @@ import { authorize } from "../rbac/authorize.js";
 import { can } from "../rbac/effective.js";
 import { scopeFilter, withScope } from "../rbac/authorize.js";
 import { requirePermission } from "../middleware/rbac.js";
+import { validate } from "../middleware/validate.js";
 import { RequestWithUser } from "../types/index.js";
 import { logActivity } from "../middleware/activity.js";
+import { AppError, NotFoundError } from "../lib/errors.js";
 import { resolveTeamId } from "../lib/teamScope.js";
 import { generateSlug } from "../lib/slug.js";
 import { availablePeriods, monthlyReport } from "../services/helpdeskReport.service.js";
@@ -17,6 +19,17 @@ const router = Router();
 
 // ==================== Validation Schemas ====================
 
+/**
+ * An empty text input means "not given", not "invalid".
+ *
+ * The create dialog pre-fills the contact fields from the reporter's own
+ * profile and lets them clear them, so `""` reaches the API as a normal case.
+ * `z.string().email()` rejected it, and because the parse sat inside the
+ * route's 500 catch the user saw "Internal server error" for clearing a field.
+ */
+const blankToNull = <T extends z.ZodTypeAny>(schema: T) =>
+  z.preprocess((value) => (typeof value === "string" && value.trim() === "" ? null : value), schema);
+
 const createTicketSchema = z.object({
   projectId: z.number().int().positive().optional().nullable(),
   /** Which team owns the ticket. Defaults to the reporter's only team. */
@@ -25,11 +38,13 @@ const createTicketSchema = z.object({
   description: z.string().optional().nullable(),
   priority: z.enum(["low", "medium", "high", "urgent"]).optional(),
   categoryId: z.number().int().positive().optional().nullable(),
-  source: z.enum(["web", "email", "phone", "walk-in"]).optional(),
+  /** Must match the seeded `ticket_source` reference group, or the form can
+   *  offer a value this schema rejects. */
+  source: z.enum(["web", "email", "phone", "chat", "walk-in"]).optional(),
   assignedTo: z.number().int().positive().optional().nullable(),
   contactName: z.string().optional().nullable(),
-  contactEmail: z.string().email().optional().nullable(),
-  contactPhone: z.string().optional().nullable(),
+  contactEmail: blankToNull(z.string().email().nullable()).optional(),
+  contactPhone: blankToNull(z.string().nullable()).optional(),
   metadata: z.record(z.unknown()).optional().nullable(),
 });
 
@@ -61,6 +76,11 @@ const createCategorySchema = z.object({
   color: z.string().optional().nullable(),
   sortOrder: z.number().int().optional(),
 });
+
+/** `isActive` is how a category is retired and restored, so it is writable. */
+const updateCategorySchema = createCategorySchema
+  .extend({ isActive: z.boolean().optional() })
+  .partial();
 
 // ==================== Visibility scope ====================
 
@@ -229,13 +249,19 @@ router.get(
 
 // ==================== Categories ====================
 
+/**
+ * `?includeInactive=true` is for the admin screen only — the pickers that fill
+ * a ticket form must never offer a retired category, but the person who
+ * retired it needs to see it to bring it back.
+ */
 router.get(
   "/categories",
   authenticate,
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
+      const includeInactive = req.query.includeInactive === "true";
       const categories = await prisma.helpdeskCategory.findMany({
-        where: { isActive: true },
+        where: includeInactive ? {} : { isActive: true },
         orderBy: { sortOrder: "asc" },
         include: { _count: { select: { tickets: true } } },
       });
@@ -243,6 +269,137 @@ router.get(
     } catch (error) {
       console.error("Error fetching categories:", error);
       res.status(500).json({ error: "Internal server error" });
+    }
+  }
+);
+
+router.post(
+  "/categories",
+  authenticate,
+  requirePermission("helpdesk.ticket.manage"),
+  validate(createCategorySchema),
+  async (req: RequestWithUser, res: Response, next: NextFunction) => {
+    try {
+      const data = req.body as z.infer<typeof createCategorySchema>;
+      const name = data.name.trim();
+
+      // `name` is @unique, but the index is case-SENSITIVE, so "Hardware Issue"
+      // and "hardware issue" would both be created. Two categories that differ
+      // only in case are indistinguishable in the picker, so refuse here.
+      // A retired match still counts: restoring it is the intended path.
+      const clash = await prisma.helpdeskCategory.findFirst({
+        where: { name: { equals: name, mode: "insensitive" } },
+      });
+      if (clash) {
+        throw new AppError(
+          409,
+          clash.isActive
+            ? `A category named "${clash.name}" already exists`
+            : `"${clash.name}" exists but is retired — restore it instead of creating a duplicate`
+        );
+      }
+
+      const category = await prisma.helpdeskCategory.create({ data: { ...data, name } });
+
+      await logActivity({
+        description: `Helpdesk category "${category.name}" created`,
+        subjectType: "HelpdeskCategory",
+        subjectId: category.id,
+        event: "created",
+        causerId: req.user!.id,
+      });
+
+      res.status(201).json({ data: category, message: "Category created" });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+router.put(
+  "/categories/:id",
+  authenticate,
+  requirePermission("helpdesk.ticket.manage"),
+  validate(updateCategorySchema),
+  async (req: RequestWithUser, res: Response, next: NextFunction) => {
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isFinite(id)) throw new AppError(400, "Invalid category id");
+
+      const existing = await prisma.helpdeskCategory.findUnique({ where: { id } });
+      if (!existing) throw new NotFoundError("Category not found");
+
+      const body = req.body as z.infer<typeof updateCategorySchema>;
+      if (body.name && body.name.trim().toLowerCase() !== existing.name.toLowerCase()) {
+        const clash = await prisma.helpdeskCategory.findFirst({
+          where: { name: { equals: body.name.trim(), mode: "insensitive" } },
+        });
+        if (clash) throw new AppError(409, `A category named "${clash.name}" already exists`);
+      }
+
+      const category = await prisma.helpdeskCategory.update({
+        where: { id },
+        data: {
+          ...(body.name !== undefined ? { name: body.name.trim() } : {}),
+          ...(body.description !== undefined ? { description: body.description } : {}),
+          ...(body.icon !== undefined ? { icon: body.icon } : {}),
+          ...(body.color !== undefined ? { color: body.color } : {}),
+          ...(body.sortOrder !== undefined ? { sortOrder: body.sortOrder } : {}),
+          ...(body.isActive !== undefined ? { isActive: body.isActive } : {}),
+        },
+      });
+
+      await logActivity({
+        description: `Helpdesk category "${existing.name}" updated`,
+        subjectType: "HelpdeskCategory",
+        subjectId: category.id,
+        event: "updated",
+        causerId: req.user!.id,
+      });
+
+      res.json({ data: category, message: "Category updated" });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+/**
+ * Deleting a category is a retire, not a row removal.
+ *
+ * Tickets keep pointing at their category forever, so a real delete would
+ * either fail on the foreign key or rewrite history. Flipping `is_active`
+ * takes it out of every picker while leaving the tickets that used it fully
+ * readable — and `PUT` can bring it back if it was retired by mistake.
+ */
+router.delete(
+  "/categories/:id",
+  authenticate,
+  requirePermission("helpdesk.ticket.manage"),
+  async (req: RequestWithUser, res: Response, next: NextFunction) => {
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isFinite(id)) throw new AppError(400, "Invalid category id");
+
+      const existing = await prisma.helpdeskCategory.findUnique({ where: { id } });
+      if (!existing) throw new NotFoundError("Category not found");
+
+      const category = await prisma.helpdeskCategory.update({
+        where: { id },
+        data: { isActive: false },
+      });
+
+      await logActivity({
+        description: `Helpdesk category "${existing.name}" retired`,
+        subjectType: "HelpdeskCategory",
+        subjectId: category.id,
+        event: "deleted",
+        causerId: req.user!.id,
+      });
+
+      res.json({ data: category, message: "Category retired" });
+    } catch (error) {
+      next(error);
     }
   }
 );
@@ -268,22 +425,6 @@ router.get(
       res.json({ data: projects });
     } catch (error) {
       console.error("Error fetching projects:", error);
-      res.status(500).json({ error: "Internal server error" });
-    }
-  }
-);
-
-router.post(
-  "/categories",
-  authenticate,
-  requirePermission("helpdesk.ticket.manage"),
-  async (req: RequestWithUser, res: Response, next: NextFunction) => {
-    try {
-      const data = createCategorySchema.parse(req.body);
-      const category = await prisma.helpdeskCategory.create({ data });
-      res.status(201).json({ data: category, message: "Category created" });
-    } catch (error) {
-      console.error("Error creating category:", error);
       res.status(500).json({ error: "Internal server error" });
     }
   }
@@ -414,9 +555,10 @@ router.post(
   "/tickets",
   authenticate,
   requirePermission("helpdesk.ticket.create"),
+  validate(createTicketSchema),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
-      const data = createTicketSchema.parse(req.body);
+      const data = req.body as z.infer<typeof createTicketSchema>;
       const user = req.user;
 
       // Generate slug
@@ -603,8 +745,7 @@ router.post(
 
       res.status(201).json({ data: ticket, message: "Ticket created" });
     } catch (error) {
-      console.error("Error creating ticket:", error);
-      res.status(500).json({ error: "Internal server error" });
+      next(error);
     }
   }
 );
@@ -613,10 +754,11 @@ router.put(
   "/tickets/:id",
   authenticate,
   requirePermission("helpdesk.ticket.manage"),
+  validate(updateTicketSchema),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const id = parseInt(req.params.id);
-      const data = updateTicketSchema.parse(req.body);
+      const data = req.body as z.infer<typeof updateTicketSchema>;
 
       const existing = await prisma.helpdeskTicket.findFirst({
         where: { id, isActive: true, deletedAt: null },
@@ -657,8 +799,7 @@ router.put(
 
       res.json({ data: ticket, message: "Ticket updated" });
     } catch (error) {
-      console.error("Error updating ticket:", error);
-      res.status(500).json({ error: "Internal server error" });
+      next(error);
     }
   }
 );
@@ -705,10 +846,11 @@ router.delete(
 router.put(
   "/tickets/:id/status",
   authenticate,
+  validate(updateStatusSchema),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const id = parseInt(req.params.id);
-      const data = updateStatusSchema.parse(req.body);
+      const data = req.body as z.infer<typeof updateStatusSchema>;
       const userId = req.user?.id;
 
       const existing = await prisma.helpdeskTicket.findFirst({
@@ -808,8 +950,7 @@ router.put(
 
       res.json({ data: ticket, message: "Status updated" });
     } catch (error) {
-      console.error("Error updating status:", error);
-      res.status(500).json({ error: "Internal server error" });
+      next(error);
     }
   }
 );
@@ -818,10 +959,11 @@ router.put(
   "/tickets/:id/assign",
   authenticate,
   requirePermission("helpdesk.ticket.manage"),
+  validate(assignTicketSchema),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const id = parseInt(req.params.id);
-      const data = assignTicketSchema.parse(req.body);
+      const data = req.body as z.infer<typeof assignTicketSchema>;
 
       const existing = await prisma.helpdeskTicket.findFirst({
         where: { id, isActive: true, deletedAt: null },
@@ -888,8 +1030,7 @@ router.put(
 
       res.json({ data: ticket, message: "Ticket assigned" });
     } catch (error) {
-      console.error("Error assigning ticket:", error);
-      res.status(500).json({ error: "Internal server error" });
+      next(error);
     }
   }
 );
@@ -897,10 +1038,11 @@ router.put(
 router.put(
   "/tickets/:id/satisfaction",
   authenticate,
+  validate(satisfactionSchema),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const id = parseInt(req.params.id);
-      const data = satisfactionSchema.parse(req.body);
+      const data = req.body as z.infer<typeof satisfactionSchema>;
 
       const existing = await prisma.helpdeskTicket.findFirst({
         where: { id, isActive: true, deletedAt: null },
@@ -927,8 +1069,7 @@ router.put(
 
       res.json({ data: ticket, message: "Thank you for your feedback" });
     } catch (error) {
-      console.error("Error submitting satisfaction:", error);
-      res.status(500).json({ error: "Internal server error" });
+      next(error);
     }
   }
 );
@@ -973,10 +1114,11 @@ router.get(
 router.post(
   "/tickets/:id/comments",
   authenticate,
+  validate(createCommentSchema),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const ticketId = parseInt(req.params.id);
-      const data = createCommentSchema.parse(req.body);
+      const data = req.body as z.infer<typeof createCommentSchema>;
       const user = req.user;
 
       const ticket = await prisma.helpdeskTicket.findFirst({
@@ -1026,8 +1168,7 @@ router.post(
 
       res.status(201).json({ data: comment, message: "Comment added" });
     } catch (error) {
-      console.error("Error creating comment:", error);
-      res.status(500).json({ error: "Internal server error" });
+      next(error);
     }
   }
 );

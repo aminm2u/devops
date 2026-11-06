@@ -51,17 +51,17 @@ import { can } from '@/lib/roles';
 function getStatusBadge(status: HelpdeskTicketStatus) {
   switch (status) {
     case 'open':
-      return <Badge className="bg-blue-100 text-blue-700"><Clock className="h-3 w-3 mr-1" />Open</Badge>;
+      return <Badge className="bg-blue-100 text-blue-700 hover:bg-blue-200"><Clock className="h-3 w-3 mr-1" />Open</Badge>;
     case 'in_progress':
-      return <Badge className="bg-yellow-100 text-yellow-700"><Loader2 className="h-3 w-3 mr-1 animate-spin" />In Progress</Badge>;
+      return <Badge className="bg-yellow-100 text-yellow-700 hover:bg-yellow-200"><Loader2 className="h-3 w-3 mr-1 animate-spin" />In Progress</Badge>;
     case 'awaiting_response':
-      return <Badge className="bg-orange-100 text-orange-700"><MessageSquare className="h-3 w-3 mr-1" />Awaiting Response</Badge>;
+      return <Badge className="bg-orange-100 text-orange-700 hover:bg-orange-200"><MessageSquare className="h-3 w-3 mr-1" />Awaiting Response</Badge>;
     case 'resolved':
-      return <Badge className="bg-green-100 text-green-700"><CheckCircle className="h-3 w-3 mr-1" />Resolved</Badge>;
+      return <Badge className="bg-green-100 text-green-700 hover:bg-green-200"><CheckCircle className="h-3 w-3 mr-1" />Resolved</Badge>;
     case 'closed':
-      return <Badge className="bg-gray-100 text-gray-700"><CheckCircle className="h-3 w-3 mr-1" />Closed</Badge>;
+      return <Badge className="bg-gray-100 text-gray-700 hover:bg-gray-200"><CheckCircle className="h-3 w-3 mr-1" />Closed</Badge>;
     case 'reopened':
-      return <Badge className="bg-purple-100 text-purple-700"><AlertTriangle className="h-3 w-3 mr-1" />Reopened</Badge>;
+      return <Badge className="bg-purple-100 text-purple-700 hover:bg-purple-200"><AlertTriangle className="h-3 w-3 mr-1" />Reopened</Badge>;
     default:
       return <Badge variant="outline">{status}</Badge>;
   }
@@ -70,13 +70,13 @@ function getStatusBadge(status: HelpdeskTicketStatus) {
 function getPriorityBadge(priority: HelpdeskTicketPriority) {
   switch (priority) {
     case 'urgent':
-      return <Badge className="bg-red-600 text-gray-100">Urgent</Badge>;
+      return <Badge className="bg-red-600 text-gray-100 hover:bg-red-700">Urgent</Badge>;
     case 'high':
-      return <Badge className="bg-red-100 text-red-700">High</Badge>;
+      return <Badge className="bg-red-100 text-red-700 hover:bg-red-200">High</Badge>;
     case 'medium':
-      return <Badge className="bg-yellow-100 text-yellow-700">Medium</Badge>;
+      return <Badge className="bg-yellow-100 text-yellow-700 hover:bg-yellow-200">Medium</Badge>;
     case 'low':
-      return <Badge className="bg-green-100 text-green-700">Low</Badge>;
+      return <Badge className="bg-green-100 text-green-700 hover:bg-green-200">Low</Badge>;
     default:
       return <Badge variant="outline">{priority}</Badge>;
   }
@@ -132,13 +132,20 @@ export function HelpdeskTicketDetailPage() {
     enabled: !!id,
   });
 
-  // Fetch users for assignment
+  // The assignment dropdown is the only consumer of this list, and opening it
+  // is itself gated on `helpdesk.ticket.manage` — the same permission the API
+  // checks. Fetching it unconditionally meant a reporter loading their own
+  // ticket got a 403 (twice, once per retry) and a toast each time, for data
+  // the page has no control to show. Ask only when the answer can be used.
+  const managesQueue = can(user, 'helpdesk.ticket.manage');
+
   const { data: usersData } = useQuery({
     queryKey: ['helpdesk-users'],
     queryFn: async () => {
       const res = await apiClient.get('/helpdesk/users');
       return res.data;
     },
+    enabled: managesQueue,
   });
 
   // Mutations
@@ -202,7 +209,11 @@ export function HelpdeskTicketDetailPage() {
       toast.success('Comment added');
     },
     onError: (err: any) => {
-      toast.error(err.response?.data?.error || 'Failed to add comment');
+      // A 400 carries a per-field map; the headline alone ("Validation failed")
+      // does not tell the user which box to fix.
+      const errors = err?.response?.data?.errors as Record<string, string[]> | undefined;
+      const first = errors && Object.values(errors).flat()[0];
+      toast.error(first || err?.response?.data?.error || 'Failed to add comment');
     },
   });
 
@@ -262,9 +273,10 @@ export function HelpdeskTicketDetailPage() {
   // permission the assign, update and delete routes actually require, so a
   // team-scoped manager sees these controls even though they do not hold it
   // org-wide. A reporter keeps the one action the API grants them: reopening.
+  // `managesQueue` is computed above, where it decides whether the assignee
+  // list is fetched at all.
   const isOwnTicket = ticket.reportedBy === user?.id;
   const isAssignedToMe = ticket.assignedTo === user?.id;
-  const managesQueue = can(user, 'helpdesk.ticket.manage');
   const canEdit = managesQueue || isAssignedToMe || isOwnTicket;
   const canDelete = managesQueue;
   const canAssign = managesQueue;
@@ -302,7 +314,7 @@ export function HelpdeskTicketDetailPage() {
               <CardTitle className="text-base">Description</CardTitle>
             </CardHeader>
             <CardContent>
-              <p className="whitespace-pre-wrap text-sm">
+              <p className="whitespace-pre-wrap text-sm dark:text-gray-400 text-gray-800">
                 {ticket.description || 'No description provided'}
               </p>
             </CardContent>
@@ -324,7 +336,7 @@ export function HelpdeskTicketDetailPage() {
                     className={`p-3 rounded-lg ${
                       comment.isInternal
                         ? 'bg-yellow-50 border border-yellow-200'
-                        : 'bg-gray-50'
+                        : 'bg-gray-500/10 dark:bg-gray-800'
                     }`}
                   >
                     <div className="flex items-center gap-2 mb-2">
@@ -333,7 +345,7 @@ export function HelpdeskTicketDetailPage() {
                           {comment.user?.name?.charAt(0) || '?'}
                         </AvatarFallback>
                       </Avatar>
-                      <span className="text-sm font-medium">{comment.user?.name || 'Unknown'}</span>
+                      <span className="text-sm text-gray-800 dark:text-gray-400 font-medium">{comment.user?.name || 'Unknown'}</span>
                       {comment.isInternal && (
                         <Badge variant="outline" className="text-xs bg-yellow-100">
                           <Lock className="h-3 w-3 mr-1" />
@@ -344,7 +356,7 @@ export function HelpdeskTicketDetailPage() {
                         {formatRelativeTime(comment.createdAt)}
                       </span>
                     </div>
-                    <p className="text-sm whitespace-pre-wrap">{comment.content}</p>
+                    <p className="text-sm whitespace-pre-wrap text-gray-800 dark:text-gray-400">{comment.content}</p>
                   </div>
                 ))
               ) : (
@@ -355,7 +367,7 @@ export function HelpdeskTicketDetailPage() {
 
               {/* Add Comment */}
               {canChangeStatus && (
-                <div className="border-t pt-4">
+                <div className="border-t pt-4 border-gray-200 dark:border-gray-800">
                   <Textarea
                     value={newComment}
                     onChange={(e) => setNewComment(e.target.value)}

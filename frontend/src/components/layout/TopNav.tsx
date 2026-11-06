@@ -5,9 +5,9 @@ import {
   Moon,
   Sun,
   LogOut,
-  UserCog,
   PanelLeftClose,
   PanelLeftOpen,
+  UserCog,
 } from 'lucide-react';
 import { NotificationBell } from '@/components/notifications/NotificationBell';
 import { Button } from '@/components/ui/button';

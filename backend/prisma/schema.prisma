@@ -18,6 +18,9 @@ model Department {
   parentId  Int?     @map("parent_id")
   employees User[]
   teams     Team[]
+  /// Sub-divisions of this department. A unit is meaningless without one, so
+  /// `units.department_id` is required — see the `Unit` model.
+  units     Unit[]
   createdAt DateTime @default(now()) @map("created_at")
 
   manager  User?        @relation("DepartmentManager", fields: [managerId], references: [id], onDelete: SetNull)
@@ -35,6 +38,36 @@ model Position {
   employees  User[]
 
   @@map("positions")
+}
+
+/// A sub-division of one department — "Infrastructure" inside IT, "Payroll"
+/// inside HR.
+///
+/// This is a real table rather than a `reference_data` group because the
+/// department is part of the unit's identity: a flat key/value list could not
+/// say which department an "Operations" unit belongs to, and two departments
+/// may legitimately each have one. The FK is required and cascades on delete,
+/// so removing a department takes its units with it instead of orphaning them.
+///
+/// `users.unit_id` is nullable and set to null when its unit goes away: losing
+/// a unit is a loss of detail, not a reason to refuse the delete outright.
+model Unit {
+  id           Int      @id @default(autoincrement())
+  name         String
+  code         String?
+  departmentId Int      @map("department_id")
+  sortOrder    Int      @default(0) @map("sort_order")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  department Department @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  employees  User[]
+
+  /// One unit name per department — "Operations" may exist in two departments,
+  /// but not twice in the same one.
+  @@unique([departmentId, name])
+  @@index([departmentId])
+  @@map("units")
 }
 
 model EmploymentType {
@@ -77,6 +110,9 @@ model User {
   employeeId       String?   @unique @map("employee_id")
   joinDate         DateTime? @map("join_date")
   departmentId     Int?      @map("department_id")
+  /// The unit a person sits in. Belongs to `departmentId` — the API keeps the
+  /// two consistent so a unit can never outlive its own department on a record.
+  unitId           Int?      @map("unit_id")
   positionId       Int?      @map("position_id")
   employmentTypeId Int?      @map("employment_type_id")
   directManagerId  Int?      @map("direct_manager_id")
@@ -86,6 +122,7 @@ model User {
 
   // Relations
   department     Department?     @relation(fields: [departmentId], references: [id])
+  unit           Unit?           @relation(fields: [unitId], references: [id], onDelete: SetNull)
   position       Position?       @relation(fields: [positionId], references: [id])
   employmentType EmploymentType? @relation(fields: [employmentTypeId], references: [id])
   directManager  User?           @relation("ManagerToEmployee", fields: [directManagerId], references: [id])

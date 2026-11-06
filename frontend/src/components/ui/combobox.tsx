@@ -94,7 +94,10 @@ export function Combobox({
           aria-expanded={open}
           disabled={disabled}
           className={cn(
-            'w-full justify-between font-normal text-left h-9 px-3',
+            // `bg-transparent` overrides the `outline` variant's
+            // `bg-background`: a form control must take the card's fill, like
+            // Input/SelectTrigger, not the page's.
+            'w-full justify-between font-normal text-left h-9 px-3 bg-transparent',
             !selectedOption && 'text-muted-foreground',
             className
           )}

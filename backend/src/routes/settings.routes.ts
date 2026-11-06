@@ -6,6 +6,9 @@ import { validate } from "../middleware/validate.js";
 import { RequestWithUser } from "../types/index.js";
 import { logActivity } from "../middleware/activity.js";
 import prisma from "../config/database.js";
+import { can } from "../rbac/effective.js";
+import { ForbiddenError, UnauthorizedError } from "../lib/errors.js";
+import { EMPLOYEE_REF_TYPE, ensureReferenceConfig, formatReferenceNumber } from "../lib/numberGenerator.js";
 
 const router = Router();
 
@@ -162,6 +165,51 @@ router.delete(
 
 // ── Reference Data ───────────────────────────────────────────────────────────
 
+/**
+ * Which grant writes a given reference-data group.
+ *
+ * Most groups are plain master data under `admin.settings.manage`. A few are
+ * configuration for one module and are edited by that module's own screen:
+ * `timesheet_category` is the timesheet category list. Those keep working for
+ * whoever holds the module grant, so that moving the editor into the shared
+ * Reference Data tab did not take the list away from the people who already
+ * had it. `admin.settings.manage` still writes everything.
+ */
+const GROUP_WRITE_PERMISSION: Record<string, string> = {
+  timesheet_category: "timesheet.settings.manage",
+};
+
+/**
+ * Guard for reference-data writes.
+ *
+ * Runs after `authenticate`, so `req.access` is populated and the group is
+ * already on `req.params.group` (or `req.body` for the reorder route).
+ */
+function requireReferenceDataWrite(groupFrom: "params" | "body" = "params") {
+  return (req: RequestWithUser, _res: Response, next: NextFunction): void => {
+    if (!req.user || !req.access) {
+      return next(new UnauthorizedError("Authentication required"));
+    }
+
+    const raw = groupFrom === "params" ? req.params.group : req.body?.group;
+    const modulePermission = typeof raw === "string" ? GROUP_WRITE_PERMISSION[raw] : undefined;
+
+    // `admin.settings.manage` is the default owner of every group; the module
+    // grant, when there is one, is an additional way in rather than a
+    // replacement.
+    if (can(req.access, "admin.settings.manage", "all")) return next();
+    if (modulePermission && can(req.access, modulePermission, "all")) return next();
+
+    return next(
+      new ForbiddenError(
+        modulePermission
+          ? `Requires one of the following permissions: admin.settings.manage, ${modulePermission}`
+          : "Requires one of the following permissions: admin.settings.manage"
+      )
+    );
+  };
+}
+
 const upsertReferenceDataSchema = z.object({
   value: z.string().min(1).max(100),
   label: z.string().min(1).max(255),
@@ -179,14 +227,19 @@ const reorderReferenceDataSchema = z.object({
 });
 
 // GET /api/settings/reference-data/:group - Get reference data by group
+//
+// `includeInactive=true` is for editors, which have to show the rows they are
+// meant to reactivate. Every dropdown omits it and keeps getting only the
+// active values — a deactivated category must not reappear in a timesheet form.
 router.get(
   "/reference-data/:group",
   authenticate,
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const group = req.params.group as string;
+      const includeInactive = req.query.includeInactive === "true";
       const items = await prisma.referenceData.findMany({
-        where: { group, isActive: true },
+        where: includeInactive ? { group } : { group, isActive: true },
         orderBy: { sortOrder: "asc" },
       });
 
@@ -226,7 +279,7 @@ router.get(
 router.post(
   "/reference-data/:group",
   authenticate,
-  requirePermission("admin.settings.manage"),
+  requireReferenceDataWrite(),
   validate(upsertReferenceDataSchema),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
@@ -252,7 +305,7 @@ router.post(
 router.put(
   "/reference-data/:group/:id",
   authenticate,
-  requirePermission("admin.settings.manage"),
+  requireReferenceDataWrite(),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const id = parseInt(req.params.id as string, 10);
@@ -277,7 +330,7 @@ router.put(
 router.delete(
   "/reference-data/:group/:id",
   authenticate,
-  requirePermission("admin.settings.manage"),
+  requireReferenceDataWrite(),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const id = parseInt(req.params.id as string, 10);
@@ -297,7 +350,7 @@ router.delete(
 router.put(
   "/reference-data/:group/reorder",
   authenticate,
-  requirePermission("admin.settings.manage"),
+  requireReferenceDataWrite(),
   validate(reorderReferenceDataSchema),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
@@ -324,7 +377,7 @@ router.put(
 const updateNumberingSchema = z.object({
   prefix: z.string().min(1).max(20).optional(),
   separator: z.string().min(1).max(5).optional(),
-  yearFormat: z.enum(["YYYY", "YY"]).optional(),
+  yearFormat: z.enum(["YYYY", "YY", "NONE"]).optional(),
   digitPadding: z.number().int().min(3).max(8).optional(),
   currentCounter: z.number().int().min(0).optional(),
 });
@@ -335,20 +388,21 @@ router.get(
   authenticate,
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
+      // Employee numbers are issued by the app itself, so their config must
+      // exist even on a database seeded before that was true — otherwise the
+      // row HR needs to edit is the one row missing from this table.
+      await ensureReferenceConfig(EMPLOYEE_REF_TYPE);
+
       const configs = await prisma.referenceNumberConfig.findMany({
         orderBy: { refType: "asc" },
       });
 
-      // Add computed example for each config
-      const data = configs.map((c) => {
-        const year = new Date().getFullYear();
-        const yearStr = c.yearFormat === "YY" ? String(year).slice(-2) : String(year);
-        const counterStr = String(c.currentCounter).padStart(c.digitPadding, "0");
-        return {
-          ...c,
-          example: `${c.prefix}${c.separator}${yearStr}${c.separator}${counterStr}`,
-        };
-      });
+      // Add computed example for each config — via the generator's own
+      // formatter, so the preview cannot drift from what actually gets issued.
+      const data = configs.map((c) => ({
+        ...c,
+        example: formatReferenceNumber(c),
+      }));
 
       res.status(200).json({ success: true, data });
     } catch (error) {
@@ -358,10 +412,17 @@ router.get(
 );
 
 // PUT /api/settings/numbering/:refType - Update a reference number config
+//
+// `procurement.settings.manage` is accepted alongside `admin.settings.manage`
+// because that is what the permission is *for* — its catalog description reads
+// "Manage approval policies, numbering and reference data" — and because the
+// Numbering tab that exposes these fields is itself gated on it. Without this,
+// the finance role could open the tab, see nine editable rows and get a 403 on
+// every save.
 router.put(
   "/numbering/:refType",
   authenticate,
-  requirePermission("admin.settings.manage"),
+  requirePermission("admin.settings.manage", "procurement.settings.manage"),
   validate(updateNumberingSchema),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {

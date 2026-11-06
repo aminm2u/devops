@@ -11,6 +11,7 @@ import prisma from "../config/database.js";
 import { sendWelcomeEmail } from "../services/notification.service.js";
 import { MODEL_USER } from "../rbac/effective.js";
 import { assertNoManagerCycle, managerChain } from "../lib/org.js";
+import { EMPLOYEE_REF_TYPE, generateReferenceNumber } from "../lib/numberGenerator.js";
 
 const router = Router();
 
@@ -50,6 +51,7 @@ const createUserSchema = z.object({
   roles: z.array(z.string()).optional(),
   employeeId: z.string().optional().nullable(),
   departmentId: z.number().int().positive().optional().nullable(),
+  unitId: z.number().int().positive().optional().nullable(),
   positionId: z.number().int().positive().optional().nullable(),
   employmentTypeId: z.number().int().positive().optional().nullable(),
   directManagerId: z.number().int().positive().optional().nullable(),
@@ -63,11 +65,57 @@ const updateUserSchema = z.object({
   isActive: z.boolean().optional(),
   employeeId: z.string().optional().nullable(),
   departmentId: z.number().int().positive().optional().nullable(),
+  unitId: z.number().int().positive().optional().nullable(),
   positionId: z.number().int().positive().optional().nullable(),
   employmentTypeId: z.number().int().positive().optional().nullable(),
   directManagerId: z.number().int().positive().optional().nullable(),
   joinDate: z.string().datetime().optional().nullable(),
 });
+
+/**
+ * Keep a person's unit and department agreeing.
+ *
+ * A unit exists only inside one department, so `users.unit_id` and
+ * `users.department_id` have to name the same place. Two rules follow:
+ *
+ *  - Choosing a unit implies its department. The form sends both, but sending
+ *    only `unitId` must not leave the pair half-applied.
+ *  - Choosing a department other than the unit's clears the unit. Leaving it
+ *    would show somebody in Finance while their unit still says IT.
+ *
+ * Returns the two ids to write. A null unit is always allowed.
+ */
+async function resolveUnitAssignment(input: {
+  departmentId: number | null | undefined;
+  unitId: number | null | undefined;
+  currentDepartmentId: number | null;
+  currentUnitId: number | null;
+}): Promise<{ departmentId: number | null | undefined; unitId: number | null | undefined }> {
+  const { departmentId, unitId } = input;
+
+  if (unitId) {
+    const unit = await prisma.unit.findUnique({
+      where: { id: unitId },
+      select: { departmentId: true, name: true },
+    });
+    if (!unit) throw new AppError(400, "Unit not found");
+
+    if (departmentId !== undefined && departmentId !== null && departmentId !== unit.departmentId) {
+      throw new AppError(400, "That unit belongs to a different department");
+    }
+    return { departmentId: unit.departmentId, unitId };
+  }
+
+  // Explicitly clearing the unit.
+  if (unitId === null) return { departmentId, unitId: null };
+
+  // No unit in the payload: switching department drops a unit from the old one.
+  if (departmentId !== undefined && departmentId !== input.currentDepartmentId) {
+    return { departmentId, unitId: null };
+  }
+
+  return { departmentId, unitId };
+}
 
 /** The super-admin account must survive every directory operation. */
 async function isSoleSuperAdmin(userId: number): Promise<boolean> {
@@ -77,6 +125,28 @@ async function isSoleSuperAdmin(userId: number): Promise<boolean> {
     where: { roleId: role.id, modelType: MODEL_USER },
   });
   return holder?.modelId === userId;
+}
+
+/**
+ * Issue the next employee number.
+ *
+ * The counter is shared with the imported numbers already in the table, which
+ * were typed by hand ("EMP-001", "M2U100") rather than generated. The first
+ * generated number therefore starts from the configured counter — an admin sets
+ * it on Settings → Numbering to land above whatever the legacy set already
+ * uses. `employee_id` is unique, so a collision surfaces as a 409 from the
+ * generator loop rather than silently overwriting somebody's number.
+ */
+async function issueEmployeeNumber(): Promise<string> {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const candidate = await generateReferenceNumber(EMPLOYEE_REF_TYPE);
+    const clash = await prisma.user.findUnique({ where: { employeeId: candidate } });
+    if (!clash) return candidate;
+  }
+  throw new AppError(
+    409,
+    "Could not issue a unique employee number — raise the counter in Settings → Numbering"
+  );
 }
 
 // GET /api/admin/users — paginated directory with roles, department, manager.
@@ -126,6 +196,7 @@ router.get(
             joinDate: true,
             createdAt: true,
             department: { select: { id: true, name: true, code: true } },
+            unit: { select: { id: true, name: true, code: true } },
             position: { select: { id: true, name: true } },
             employmentType: { select: { id: true, name: true } },
             directManager: { select: { id: true, name: true } },
@@ -212,10 +283,12 @@ router.get(
           createdAt: true,
           updatedAt: true,
           departmentId: true,
+          unitId: true,
           positionId: true,
           employmentTypeId: true,
           directManagerId: true,
           department: { select: { id: true, name: true, code: true } },
+          unit: { select: { id: true, name: true, code: true } },
           position: { select: { id: true, name: true, gradeLevel: true } },
           employmentType: { select: { id: true, name: true } },
           directManager: { select: { id: true, name: true, email: true } },
@@ -277,6 +350,7 @@ router.post(
         roles,
         employeeId,
         departmentId,
+        unitId,
         positionId,
         employmentTypeId,
         directManagerId,
@@ -290,6 +364,13 @@ router.post(
         const manager = await prisma.user.findUnique({ where: { id: directManagerId } });
         if (!manager) throw new AppError(400, "Reporting manager not found");
       }
+
+      const placement = await resolveUnitAssignment({
+        departmentId,
+        unitId,
+        currentDepartmentId: null,
+        currentUnitId: null,
+      });
 
       const requestedRoles = roles?.length ? roles : ["employee"];
       if (requestedRoles.includes("super-admin")) {
@@ -309,14 +390,22 @@ router.post(
         }
       }
 
+      // Employee numbers are issued here, not typed by the caller: two HR
+      // admins adding people at the same moment must not pick the same number,
+      // and the format is a setting (Settings → Numbering). A caller-supplied
+      // value is still honoured — imports carry legacy numbers — but the field
+      // is read-only in the UI, so in practice this is the generator's output.
+      const issuedEmployeeId = employeeId?.trim() || (await issueEmployeeNumber());
+
       const user = await prisma.$transaction(async (tx) => {
         const created = await tx.user.create({
           data: {
             name,
             email,
             password: await bcrypt.hash(password, 12),
-            employeeId: employeeId ?? null,
-            departmentId: departmentId ?? null,
+            employeeId: issuedEmployeeId,
+            departmentId: placement.departmentId ?? null,
+            unitId: placement.unitId ?? null,
             positionId: positionId ?? null,
             employmentTypeId: employmentTypeId ?? null,
             directManagerId: directManagerId ?? null,
@@ -403,13 +492,23 @@ router.put(
         await assertNoManagerCycle(userId, body.directManagerId ?? null);
       }
 
+      // Placement is resolved as a pair: a unit drags its department with it,
+      // and switching department drops a unit that belonged to the old one.
+      const placement = await resolveUnitAssignment({
+        departmentId: body.departmentId,
+        unitId: body.unitId,
+        currentDepartmentId: user.departmentId,
+        currentUnitId: user.unitId,
+      });
+
       const data: Record<string, unknown> = {};
       if (body.name !== undefined) data.name = body.name;
       if (body.email !== undefined) data.email = body.email;
       if (body.isActive !== undefined) data.isActive = body.isActive;
       if (body.password) data.password = await bcrypt.hash(body.password, 12);
       if (body.employeeId !== undefined) data.employeeId = body.employeeId;
-      if (body.departmentId !== undefined) data.departmentId = body.departmentId;
+      if (placement.departmentId !== undefined) data.departmentId = placement.departmentId;
+      if (placement.unitId !== undefined) data.unitId = placement.unitId;
       if (body.positionId !== undefined) data.positionId = body.positionId;
       if (body.employmentTypeId !== undefined) data.employmentTypeId = body.employmentTypeId;
       if (body.directManagerId !== undefined) data.directManagerId = body.directManagerId;
@@ -436,6 +535,58 @@ router.put(
         success: true,
         data: { id: updated.id, name: updated.name, email: updated.email },
         message: "User updated successfully",
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+// POST /api/admin/users/:id/employee-number — issue a number to someone who
+// has none.
+//
+// Numbers are issued automatically at creation, but two kinds of account reach
+// the directory without passing through that route: self-registered users
+// (`auth.service.register`) and anyone imported before this feature existed.
+// Without this endpoint their Employee ID would read "Not issued" forever —
+// a row nobody can fix from the UI.
+router.post(
+  "/users/:id/employee-number",
+  authenticate,
+  authorize({ permission: "hr.user.manage" }),
+  async (req: RequestWithUser, res: Response, next: NextFunction) => {
+    try {
+      const userId = parseInt(req.params.id as string, 10);
+      if (!Number.isFinite(userId)) throw new AppError(400, "Invalid user id");
+
+      const user = await prisma.user.findUnique({ where: { id: userId } });
+      if (!user) throw new NotFoundError("User not found");
+      if (user.employeeId) {
+        throw new AppError(409, `${user.name} already has employee number ${user.employeeId}`);
+      }
+
+      const employeeId = await issueEmployeeNumber();
+      // Conditional write: if two admins press the button at once, the second
+      // update matches no row rather than overwriting the first number.
+      const { count } = await prisma.user.updateMany({
+        where: { id: userId, employeeId: null },
+        data: { employeeId },
+      });
+      if (count === 0) throw new AppError(409, "An employee number was issued concurrently");
+
+      await logActivity({
+        description: `Employee number ${employeeId} issued to "${user.name}"`,
+        subjectType: "App\\Models\\User",
+        subjectId: userId,
+        event: "updated",
+        causerId: req.user!.id,
+        properties: { changed: ["employeeId"], employeeId },
+      });
+
+      res.status(200).json({
+        success: true,
+        data: { id: userId, employeeId },
+        message: "Employee number issued",
       });
     } catch (error) {
       next(error);
