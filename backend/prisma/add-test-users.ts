@@ -5,7 +5,7 @@
  * destructive on a database that already holds demo data. This script applies
  * the same changes additively and is safe to run more than once:
  *
- *   npx tsx prisma/add-test-users.ts
+ *   node prisma/run-seed.mjs users
  *
  * Every step is an upsert or a guarded create, so a second run is a no-op. The
  * accounts it creates:
@@ -13,8 +13,13 @@
  *   azfar@map2u.com.my    IT manager              (department head of IT)
  *   zakaria@map2u.com.my  PMO manager             (department head of PMO)
  *   amin@map2u.com.my     DevOps team lead
- *   aiman@map2u.com.my    DevOps engineer
+ *   aiman@map2u.com.my    HR payroll employee
  *   wafiy@map2u.com.my    Project manager
+ *
+ * `aiman@` is intentionally the HR employee, not a DevOps engineer: `seed.ts`
+ * already creates Fakhrul Irfan as the DevOps engineer under that same block,
+ * and giving a second person the same email violates the unique constraint on
+ * `users.email`.
  *
  * All five sign in with `ChangeMe!2026`, the same credential the super admin
  * uses, so there is one password to remember while testing.
@@ -57,9 +62,9 @@ const TEST_USERS: TestUser[] = [
     roleName: DEPARTMENT_HEAD_ROLE,
   },
   {
-    name: "Zakaria",
+    name: "Zakaria Mat Rani",
     email: "zakaria@map2u.com.my",
-    employeeId: "EMP-102",
+    employeeId: "EMP-005",
     departmentCode: "PMO",
     positionName: "Department Manager",
     positionGrade: 6,
@@ -68,26 +73,26 @@ const TEST_USERS: TestUser[] = [
     managerEmail: "azfar@map2u.com.my",
   },
   {
-    name: "Amin",
+    name: "Che Mohd Amin Khalili",
     email: "amin@map2u.com.my",
-    employeeId: "EMP-103",
+    employeeId: "EMP-003",
     departmentCode: "IT",
     positionName: "Team Lead",
     positionGrade: 5,
-    joinDate: "2021-09-06",
+    joinDate: "2021-03-10",
     roleName: "devops-team-lead",
     managerEmail: "azfar@map2u.com.my",
   },
   {
-    name: "Aiman",
+    name: "Aiman Mu'izz",
     email: "aiman@map2u.com.my",
-    employeeId: "EMP-104",
-    departmentCode: "IT",
-    positionName: "DevOps Engineer",
+    employeeId: "EMP-007",
+    departmentCode: "HR",
+    positionName: "Software Engineer",
     positionGrade: 4,
-    joinDate: "2023-01-16",
-    roleName: "devops-engineer",
-    managerEmail: "amin@map2u.com.my",
+    joinDate: "2023-08-14",
+    roleName: "employee",
+    managerEmail: "hr@map2u.com.my",
   },
   {
     name: "Wafiy",
@@ -190,9 +195,13 @@ async function main() {
     (await prisma.employmentType.findFirst({ where: { name: "Permanent" } })) ??
     (await prisma.employmentType.create({ data: { name: "Permanent" } }));
 
+  const deptHR = await prisma.department.findUnique({ where: { code: "HR" } });
+  if (!deptHR) throw new Error("Department HR is missing — run the full seed first");
+
   const departmentByCode = new Map([
     ["IT", deptIT],
     ["PMO", deptPMO],
+    ["HR", deptHR],
   ]);
 
   const userIdByEmail = new Map<string, number>();
@@ -284,7 +293,6 @@ async function main() {
     }));
 
   const aminId = userIdByEmail.get("amin@map2u.com.my")!;
-  const aimanId = userIdByEmail.get("aiman@map2u.com.my")!;
   const wafiyId = userIdByEmail.get("wafiy@map2u.com.my")!;
   const zakariaId = userIdByEmail.get("zakaria@map2u.com.my")!;
 
@@ -297,7 +305,6 @@ async function main() {
     });
     for (const [teamId, userId, teamRole] of [
       [opsTeam.id, aminId, "lead"],
-      [opsTeam.id, aimanId, "member"],
       [pmoTeam.id, wafiyId, "lead"],
       [pmoTeam.id, zakariaId, "member"],
     ] as [number, number, string][]) {
@@ -324,14 +331,10 @@ async function main() {
       (await prisma.projectRole.findFirst({ where: { name } }))?.id ?? 0;
     const managerRoleId = await roleId("Project Manager");
     const leadRoleId = await roleId("Team Lead");
-    const developerRoleId = await roleId("Developer");
 
     const assignments: { projectId: number; userId: number; projectRoleId: number }[] = [];
     for (const project of projects) {
       if (managerRoleId) assignments.push({ projectId: project.id, userId: wafiyId, projectRoleId: managerRoleId });
-    }
-    if (developerRoleId && projects[1]) {
-      assignments.push({ projectId: projects[1].id, userId: aimanId, projectRoleId: developerRoleId });
     }
     if (leadRoleId && projects[2]) {
       assignments.push({ projectId: projects[2].id, userId: aminId, projectRoleId: leadRoleId });

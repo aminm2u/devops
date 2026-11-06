@@ -236,7 +236,7 @@ async function main() {
 
   const hrManager = await prisma.user.create({
     data: {
-      name: "Nurul Aina",
+      name: "Suraya Hanim",
       email: "hr@map2u.com.my",
       password: hashedPassword,
       isActive: true,
@@ -255,15 +255,15 @@ async function main() {
 
   const devopsLead = await prisma.user.create({
     data: {
-      name: "Sarah Chen",
-      email: "devops-lead@map2u.com.my",
+      name: "Che Mohd Amin Khalili",
+      email: "amin@map2u.com.my",
       password: hashedPassword,
       isActive: true,
       emailVerifiedAt: new Date(),
       employeeId: "EMP-003",
       departmentId: deptIT.id,
       unitId: unitITInfra.id,
-      positionId: posDevOps.id,
+      positionId: posTeamLead.id,
       employmentTypeId: empPerm.id,
       joinDate: new Date("2021-03-10"),
       directManagerId: itAdmin.id,
@@ -279,15 +279,15 @@ async function main() {
 
   const engineer = await prisma.user.create({
     data: {
-      name: "Raj Kumar",
-      email: "engineer@map2u.com.my",
+      name: "Fakhrul Irfan",
+      email: "fakhrul.irfan@map2u.com.my",
       password: hashedPassword,
       isActive: true,
       emailVerifiedAt: new Date(),
       employeeId: "EMP-004",
       departmentId: deptIT.id,
       unitId: unitITApps.id,
-      positionId: posDev.id,
+      positionId: posDevOps.id,
       employmentTypeId: empContract.id,
       joinDate: new Date("2022-06-01"),
       directManagerId: devopsLead.id,
@@ -303,17 +303,17 @@ async function main() {
 
   const pmo = await prisma.user.create({
     data: {
-      name: "Lim Wei Sheng",
-      email: "pmo@map2u.com.my",
+      name: "Zakaria Mat Rani",
+      email: "zakaria@map2u.com.my",
       password: hashedPassword,
       isActive: true,
       emailVerifiedAt: new Date(),
       employeeId: "EMP-005",
-      departmentId: deptIT.id,
-      unitId: unitITApps.id,
-      positionId: posManager.id,
+      departmentId: deptPMO.id,
+      unitId: unitPMODelivery.id,
+      positionId: posDeptHead.id,
       employmentTypeId: empPerm.id,
-      joinDate: new Date("2019-11-20"),
+      joinDate: new Date("2020-07-13"),
       directManagerId: itAdmin.id,
     },
   });
@@ -327,8 +327,8 @@ async function main() {
 
   const finance = await prisma.user.create({
     data: {
-      name: "Tan Mei Ling",
-      email: "finance@map2u.com.my",
+      name: "Izzlee Lujaini",
+      email: "izzlee@map2u.com.my",
       password: hashedPassword,
       isActive: true,
       emailVerifiedAt: new Date(),
@@ -346,8 +346,8 @@ async function main() {
 
   const employee = await prisma.user.create({
     data: {
-      name: "Ahmad Faiz",
-      email: "employee@map2u.com.my",
+      name: "Aiman Mu'izz",
+      email: "aiman@map2u.com.my",
       password: hashedPassword,
       isActive: true,
       emailVerifiedAt: new Date(),
@@ -433,49 +433,25 @@ async function main() {
   });
   await assignRole(azfar.id, "department-head");
 
+  // The four people below already exist from the block above — they were
+  // created there because the demo projects, teams and incidents reference them
+  // by id. Creating them a second time under the same email violates the unique
+  // constraint on users.email, so this block only adds what the earlier records
+  // do not already carry (extra roles, reporting lines, project membership).
+
   // PMO manager — heads the PMO department (nested under IT), so reports to
   // Azfar, which is also what makes IT a two-tier org chart to look at.
-  const zakaria = await makeTestUser({
-    name: "Zakaria",
-    email: "zakaria@map2u.com.my",
-    employeeId: "EMP-102",
-    departmentId: deptPMO.id,
-    unitId: unitPMODelivery.id,
-    positionId: posDeptHead.id,
-    employmentTypeId: empPerm.id,
-    joinDate: "2020-07-13",
-  });
+  const zakaria = pmo;
   await assignRole(zakaria.id, "department-head");
   await prisma.user.update({ where: { id: zakaria.id }, data: { directManagerId: azfar.id } });
 
   // DevOps team lead and his engineer, both inside IT. The lead reports to the
   // IT manager, the engineer to the lead — a chain the timesheet approver
   // resolver walks.
-  const amin = await makeTestUser({
-    name: "Amin",
-    email: "amin@map2u.com.my",
-    employeeId: "EMP-103",
-    departmentId: deptIT.id,
-    unitId: unitITInfra.id,
-    positionId: posTeamLead.id,
-    employmentTypeId: empPerm.id,
-    joinDate: "2021-09-06",
-  });
-  await assignRole(amin.id, "devops-team-lead");
+  const amin = devopsLead;
   await prisma.user.update({ where: { id: amin.id }, data: { directManagerId: azfar.id } });
 
-  const aiman = await makeTestUser({
-    name: "Aiman",
-    email: "aiman@map2u.com.my",
-    employeeId: "EMP-104",
-    departmentId: deptIT.id,
-    unitId: unitITInfra.id,
-    positionId: posDevOps.id,
-    employmentTypeId: empPerm.id,
-    joinDate: "2023-01-16",
-  });
-  await assignRole(aiman.id, "devops-engineer");
-  await prisma.user.update({ where: { id: aiman.id }, data: { directManagerId: amin.id } });
+  const aiman = engineer;
 
   // Project manager inside the PMO, reporting to the PMO manager.
   const wafiy = await makeTestUser({
@@ -531,13 +507,11 @@ async function main() {
   });
   await prisma.teamMember.createMany({
     data: [
-      // Sarah Chen keeps the team but hands over day-to-day leadership: the
-      // route that promotes a lead demotes the incumbent to assistant lead, so
-      // the seed has to reproduce that same shape or the chart shows two leads.
-      { teamId: opsTeam.id, userId: devopsLead.id, teamRole: "assistant_lead" },
+      // Che Mohd Amin Khalili leads the DevOps team and his engineer reports to
+      // him. Both are the same records the project and incident data above
+      // already point at, so each person appears here exactly once.
       { teamId: opsTeam.id, userId: amin.id, teamRole: "lead" },
       { teamId: opsTeam.id, userId: aiman.id, teamRole: "member" },
-      { teamId: opsTeam.id, userId: engineer.id, teamRole: "member" },
       { teamId: opsTeam.id, userId: itAdmin.id, teamRole: "member" },
       { teamId: supportTeam.id, userId: employee.id, teamRole: "lead" },
       { teamId: pmoTeam.id, userId: wafiy.id, teamRole: "lead" },
@@ -715,12 +689,13 @@ async function main() {
   // Give the named test accounts a project to land on. A project manager with
   // no project opens an empty list, and a DevOps engineer with no team
   // membership cannot be assigned a task — both make the pages untestable.
+  // `team_assignments` is unique on (project, user), and Amin and Aiman were
+  // already placed above, so they are not repeated here.
   await prisma.teamAssignment.createMany({
     data: [
       { projectId: project1.id, userId: wafiy.id, projectRoleId: prManager.id },
       { projectId: project2.id, userId: wafiy.id, projectRoleId: prManager.id },
       { projectId: project3.id, userId: wafiy.id, projectRoleId: prManager.id },
-      { projectId: project2.id, userId: aiman.id, projectRoleId: prDeveloper.id },
       { projectId: project3.id, userId: amin.id, projectRoleId: prLead.id },
       { projectId: project1.id, userId: azfar.id, projectRoleId: prLead.id },
       { projectId: project2.id, userId: zakaria.id, projectRoleId: prLead.id },
