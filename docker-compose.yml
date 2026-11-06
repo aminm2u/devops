@@ -51,6 +51,7 @@ services:
       JWT_SECRET: ${JWT_SECRET:-your-super-secret-jwt-key-change-in-production}
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
       PORT: 8080
+      FRONTEND_URL: ${FRONTEND_URL:-}
     depends_on:
       database:
         condition: service_healthy
