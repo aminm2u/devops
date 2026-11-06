@@ -189,7 +189,7 @@ async function main() {
           scope: grant.scope,
         };
       })
-      .filter((row): row is { roleId: number; permissionId: number; scope: string } => row !== null);
+      .filter((row): row is NonNullable<typeof row> => row !== null);
 
     if (rows.length) await prisma.roleHasPermission.createMany({ data: rows });
     console.log(

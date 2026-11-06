@@ -40,7 +40,7 @@ docker compose up --build
 docker compose exec backend npx prisma db push
 
 # Seed the database with initial data
-docker compose exec backend npm run db:seed
+docker compose exec backend npm run db:seed:built
 ```
 
 ### 5. Access the application
@@ -86,10 +86,14 @@ docker compose logs -f frontend
 docker compose exec database psql -U devops -d devops
 
 # Reset database (WARNING: destroys all data)
-docker compose exec backend npm run db:reset
+docker compose exec backend npx prisma db push --force-reset
+docker compose exec backend npm run db:seed:built
 
 # Re-seed database
-docker compose exec backend npm run db:seed
+docker compose exec backend npm run db:seed:built
+
+# Add the named test accounts without wiping existing data (idempotent)
+docker compose exec backend npm run db:seed:users:built
 ```
 
 ### Backend Operations

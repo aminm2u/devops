@@ -132,7 +132,7 @@ async function ensureRole(roleName: string) {
       const permissionId = idByName.get(grant.name);
       return permissionId ? { roleId: role.id, permissionId, scope: grant.scope } : null;
     })
-    .filter((row): row is { roleId: number; permissionId: number; scope: string } => row !== null);
+    .filter((row): row is NonNullable<typeof row> => row !== null);
 
   if (rows.length) await prisma.roleHasPermission.createMany({ data: rows, skipDuplicates: true });
   console.log(`  + role ${role.name.padEnd(20)} ${rows.length} permissions`);
@@ -321,10 +321,10 @@ async function main() {
     console.log("  ! no projects found — skipping project membership");
   } else {
     const roleId = async (name: string) =>
-      (await prisma.projectRole.findFirst({ where: { name } })).id;
-    const managerRoleId = await roleId("Project Manager").catch(() => 0);
-    const leadRoleId = await roleId("Team Lead").catch(() => 0);
-    const developerRoleId = await roleId("Developer").catch(() => 0);
+      (await prisma.projectRole.findFirst({ where: { name } }))?.id ?? 0;
+    const managerRoleId = await roleId("Project Manager");
+    const leadRoleId = await roleId("Team Lead");
+    const developerRoleId = await roleId("Developer");
 
     const assignments: { projectId: number; userId: number; projectRoleId: number }[] = [];
     for (const project of projects) {

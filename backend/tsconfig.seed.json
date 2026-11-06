@@ -1,0 +1,16 @@
+{
+  // Seed scripts live outside `src/` and import from it (`../src/rbac/catalog.js`).
+  // The production image only ships `dist/`, so a raw source runner like tsx
+  // cannot resolve those imports. This config compiles the seed entrypoints —
+  // plus everything they pull in from src/ — into dist-seed, mirroring the
+  // src/ layout so the relative `.js` specifiers keep working at runtime.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": "./dist-seed",
+    "declaration": false,
+    "declarationMap": false,
+    "noEmitOnError": false
+  },
+  "include": ["prisma/seed.ts", "prisma/add-test-users.ts"]
+}

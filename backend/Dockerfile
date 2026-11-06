@@ -19,6 +19,11 @@ COPY . .
 # Build TypeScript — tsc emits JS regardless of type errors; || true ensures Docker build succeeds
 RUN npx tsc || true
 
+# Compile the seed scripts as well. They live outside src/ and import from it,
+# so they must be emitted alongside the rest of the tree; the production stage
+# has no `tsx` and no source files to run them from.
+RUN npx tsc -p tsconfig.seed.json || true
+
 # Production stage
 FROM node:20-slim AS production
 
@@ -39,6 +44,7 @@ RUN npx prisma generate
 
 # Copy built files from builder
 COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/dist-seed ./dist-seed
 
 # Create uploads directory
 RUN mkdir -p /app/uploads

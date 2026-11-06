@@ -8,7 +8,10 @@
     "start": "node dist/index.js",
     "db:push": "prisma db push",
     "db:seed": "tsx prisma/seed.ts",
-    "db:reset": "prisma db push --force-reset && tsx prisma/seed.ts"
+    "db:reset": "prisma db push --force-reset && tsx prisma/seed.ts",
+    "db:seed:built": "node dist-seed/prisma/seed.js",
+    "db:seed:users:built": "node dist-seed/prisma/add-test-users.js",
+    "seed:build": "tsc -p tsconfig.seed.json"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",
