@@ -12,7 +12,7 @@ import { Eye, Send, Trash2, Check } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { useReferenceData, toSelectOptions } from '@/hooks/useReferenceData';
 import { Can } from '@/components/Can';
-import toast from 'react-hot-toast';
+import toast from '@/lib/toast';
 
 interface PurchaseOrder {
   id: number;

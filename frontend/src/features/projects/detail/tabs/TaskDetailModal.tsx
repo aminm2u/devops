@@ -16,7 +16,7 @@ import {
 import { DatePicker } from '@/components/ui/date-picker';
 import { todayLocal } from '@/lib/utils';
 import apiClient from '@/api/client';
-import toast from 'react-hot-toast';
+import toast from '@/lib/toast';
 import { useSocket } from '@/hooks/useSocket';
 import { SubtaskChecklist } from '@/components/tasks/SubtaskChecklist';
 import { useAuth } from '@/hooks/useAuth';

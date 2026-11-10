@@ -18,14 +18,24 @@ router.get(
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const [
-        departments,
+        divisions,
         positions,
         employmentTypes,
         projectTypes,
         projectRoles,
-        units,
+        allUnits,
       ] = await Promise.all([
-        prisma.department.findMany({ orderBy: { name: "asc" } }),
+        // The `division` reference group is the authoritative department list:
+        // every picker that offers departments reads it, so a Department row
+        // whose division entry was removed (or never promoted) must not appear
+        // here either — otherwise the Units panel keeps grouping under a
+        // department the Reference Data page says does not exist. Rows are
+        // returned in the reference list's own order, not alphabetically, so
+        // this screen matches what the Reference Data page shows.
+        prisma.referenceData.findMany({
+          where: { group: "division", isActive: true },
+          orderBy: { sortOrder: "asc" },
+        }),
         // `_count.employees` is what the Positions admin screen reads to show
         // why a delete will be refused; without it the column is always 0.
         prisma.position.findMany({
@@ -40,6 +50,21 @@ router.get(
           include: { _count: { select: { employees: true } } },
         }),
       ]);
+
+      const departments = await prisma.department.findMany({
+        where: { code: { in: divisions.map((d) => d.value) } },
+      });
+      const departmentOrder = new Map(divisions.map((d, index) => [d.value, index]));
+      departments.sort(
+        (a, b) =>
+          (departmentOrder.get(a.code) ?? Number.MAX_SAFE_INTEGER) -
+          (departmentOrder.get(b.code) ?? Number.MAX_SAFE_INTEGER)
+      );
+
+      // Units of a department that is no longer in the reference list are not
+      // offered either — a unit is meaningless without its department.
+      const departmentIds = new Set(departments.map((d) => d.id));
+      const units = allUnits.filter((u) => departmentIds.has(u.departmentId));
 
       res.status(200).json({
         success: true,

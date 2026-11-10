@@ -47,7 +47,7 @@ import apiClient from '@/api/client';
 import { useAuth } from '@/hooks/useAuth';
 import { useReferenceData, toSelectOptions } from '@/hooks/useReferenceData';
 import { cn, getStatusColor, formatStatus } from '@/lib/utils';
-import toast from 'react-hot-toast';
+import toast from '@/lib/toast';
 
 interface InfrastructureNode {
   id: number;

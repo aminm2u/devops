@@ -29,7 +29,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { useReferenceData, toSelectOptions } from '@/hooks/useReferenceData';
 import { RequisitionForm, RequisitionItem } from '@/types';
 import { formatDate } from '@/lib/utils';
-import toast from 'react-hot-toast';
+import toast from '@/lib/toast';
 
 const emptyItem: RequisitionItem = {
   description: '',

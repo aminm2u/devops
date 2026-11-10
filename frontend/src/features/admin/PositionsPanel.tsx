@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import toast from 'react-hot-toast';
+import toast from '@/lib/toast';
 import { Plus, Pencil, Trash2, Briefcase } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -98,7 +98,7 @@ export function PositionsPanel() {
     <div>
       <div className="flex items-center justify-between gap-3 border-b border-border/40 p-4">
         <div>
-          <h3 className="text-sm font-semibold">Positions</h3>
+          <h3 className="text-sm font-semibold dark:text-gray-300 text-gray-800">Positions</h3>
           <p className="text-xs text-muted-foreground">
             Job titles available on an employee&apos;s HR record. Grade level is optional and orders
             seniority where a workflow needs it.
@@ -141,10 +141,10 @@ export function PositionsPanel() {
           <TableBody>
             {sorted.map((position) => (
               <TableRow key={position.id}>
-                <TableCell className="pl-4 font-medium">{position.name}</TableCell>
+                <TableCell className="pl-4 font-medium dark:text-gray-400 text-gray-800">{position.name}</TableCell>
                 <TableCell>
                   {position.gradeLevel != null ? (
-                    <Badge variant="outline" className="font-mono font-normal">
+                    <Badge variant="outline" className="font-mono font-normal dark:text-gray-400 text-gray-800">
                       G{position.gradeLevel}
                     </Badge>
                   ) : (
@@ -152,7 +152,7 @@ export function PositionsPanel() {
                   )}
                 </TableCell>
                 <TableCell className="tabular-nums text-muted-foreground">
-                  {position._count?.employees ?? 0}
+                  <span className="dark:text-gray-400 text-gray-800">{position._count?.employees ?? 0}</span>
                 </TableCell>
                 <TableCell className="pr-4 text-right">
                   <div className="flex items-center justify-end gap-1">

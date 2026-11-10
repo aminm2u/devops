@@ -38,7 +38,7 @@ import { profileApi } from '@/api/profile';
 import { MicrosoftIntegration } from '@/components/settings/MicrosoftIntegration';
 import { playNotificationChime } from '@/shared/lib/notificationSound';
 import { cn, formatDate } from '@/lib/utils';
-import toast from 'react-hot-toast';
+import toast from '@/lib/toast';
 import * as notificationsApi from '@/api/notifications';
 
 // ── Settings storage helpers ──────────────────────────────────────────────────

@@ -7,7 +7,7 @@ import { RequestWithUser } from "../types/index.js";
 import { logActivity } from "../middleware/activity.js";
 import prisma from "../config/database.js";
 import { can } from "../rbac/effective.js";
-import { ForbiddenError, UnauthorizedError } from "../lib/errors.js";
+import { AppError, ForbiddenError, NotFoundError, UnauthorizedError } from "../lib/errors.js";
 import { EMPLOYEE_REF_TYPE, ensureReferenceConfig, formatReferenceNumber } from "../lib/numberGenerator.js";
 
 const router = Router();
@@ -302,6 +302,15 @@ router.post(
 );
 
 // PUT /api/settings/reference-data/:group/:id - Update reference data item
+//
+// `division` is the exception to a plain update: the division entry is the
+// authoritative department list, and rows join to departments by
+// `departments.code = reference_data.value`. Renaming the label without
+// renaming the department row leaves the two describing the same place with
+// different words — the Units panel and org chart would keep showing the old
+// name. The label is therefore pushed onto the department row in the same
+// transaction. The value (the join key) is not editable here, so the link
+// cannot be broken by a rename.
 router.put(
   "/reference-data/:group/:id",
   authenticate,
@@ -309,15 +318,44 @@ router.put(
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const id = parseInt(req.params.id as string, 10);
-      const item = await prisma.referenceData.update({
-        where: { id },
-        data: {
-          ...(req.body.label !== undefined && { label: req.body.label }),
-          ...(req.body.sortOrder !== undefined && { sortOrder: req.body.sortOrder }),
-          ...(req.body.metadata !== undefined && { metadata: req.body.metadata }),
-          ...(req.body.isActive !== undefined && { isActive: req.body.isActive }),
-        },
-      });
+      const existing = await prisma.referenceData.findUnique({ where: { id } });
+      if (!existing) {
+        return res.status(404).json({ success: false, message: "Reference data not found" });
+      }
+
+      const newLabel = req.body.label as string | undefined;
+      const labelChanged =
+        existing.group === "division" && newLabel !== undefined && newLabel.trim() !== "" && newLabel !== existing.label;
+
+      // Renaming a division renames its department row, whatever the row
+      // currently says (the row may have drifted from every previous label) —
+      // unless another department already uses the new name, which the org
+      // chart treats as a duplicate and refuses on create.
+      const renameClash = labelChanged
+        ? await prisma.department.findFirst({
+            where: { name: { equals: newLabel!.trim(), mode: "insensitive" }, code: { not: existing.value } },
+          })
+        : null;
+
+      const [, item] = await prisma.$transaction([
+        ...(labelChanged && !renameClash
+          ? [
+              prisma.department.updateMany({
+                where: { code: existing.value },
+                data: { name: newLabel!.trim() },
+              }),
+            ]
+          : []),
+        prisma.referenceData.update({
+          where: { id },
+          data: {
+            ...(req.body.label !== undefined && { label: req.body.label }),
+            ...(req.body.sortOrder !== undefined && { sortOrder: req.body.sortOrder }),
+            ...(req.body.metadata !== undefined && { metadata: req.body.metadata }),
+            ...(req.body.isActive !== undefined && { isActive: req.body.isActive }),
+          },
+        }),
+      ]);
 
       res.status(200).json({ success: true, data: item, message: "Reference data updated" });
     } catch (error) {
@@ -327,6 +365,16 @@ router.put(
 );
 
 // DELETE /api/settings/reference-data/:group/:id - Soft delete reference data
+//
+// `division` is the exception to the soft-delete: a division entry is the
+// authoritative list of departments (the org chart, the unit picker and the
+// user department filter all read it), so leaving its Department row alive
+// after the entry is removed means the "deleted" department keeps appearing —
+// its units keep rendering on the Units panel, its staff keep showing it on
+// their records. Removing a division therefore retires the department row too,
+// under the same guards the org chart's own delete uses: refused while people
+// or sub-departments still point at it. Units are not a guard — a unit is
+// detail, not a placement, and it cascades away with its department.
 router.delete(
   "/reference-data/:group/:id",
   authenticate,
@@ -334,10 +382,56 @@ router.delete(
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const id = parseInt(req.params.id as string, 10);
-      await prisma.referenceData.update({
-        where: { id },
-        data: { isActive: false },
-      });
+      const item = await prisma.referenceData.findUnique({ where: { id } });
+
+      if (!item) {
+        throw new NotFoundError("Reference data not found");
+      }
+      if (item.group !== req.params.group) {
+        throw new AppError(400, "Reference data does not belong to this group");
+      }
+
+      if (item.group === "division") {
+        const department = await prisma.department.findUnique({
+          where: { code: item.value },
+          include: { _count: { select: { employees: true, children: true } } },
+        });
+
+        if (department) {
+          if (department._count.employees > 0) {
+            throw new AppError(
+              409,
+              `Cannot remove "${item.label}": ${department._count.employees} employee(s) still belong to this department. Move them first.`
+            );
+          }
+          if (department._count.children > 0) {
+            throw new AppError(
+              409,
+              `Cannot remove "${item.label}": ${department._count.children} sub-department(s) still sit under it. Remove those first.`
+            );
+          }
+
+          await prisma.$transaction([
+            prisma.referenceData.update({
+              where: { id },
+              data: { isActive: false },
+            }),
+            prisma.department.delete({ where: { id: department.id } }),
+          ]);
+        } else {
+          // No department row was ever promoted from this entry (it exists
+          // only as reference data) — just soft-delete the entry.
+          await prisma.referenceData.update({
+            where: { id },
+            data: { isActive: false },
+          });
+        }
+      } else {
+        await prisma.referenceData.update({
+          where: { id },
+          data: { isActive: false },
+        });
+      }
 
       res.status(200).json({ success: true, message: "Reference data removed" });
     } catch (error) {

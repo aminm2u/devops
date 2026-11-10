@@ -31,7 +31,7 @@ import { StatCard } from '@/components/stat-card';
 import { ProgressBar } from '@/components/progress-bar';
 import { DataTable, type DataTableColumn } from '@/components/DataTable';
 import apiClient from '@/api/client';
-import toast from 'react-hot-toast';
+import toast from '@/lib/toast';
 import { useReferenceData, toSelectOptions } from '@/hooks/useReferenceData';
 import type { BudgetItem, BudgetExpenditure, BudgetSummary, BudgetCategorySummary, BudgetForm, ExpenditureForm } from '@/types';
 

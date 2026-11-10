@@ -7,7 +7,7 @@ import {
   Inbox,
   XCircle,
 } from 'lucide-react';
-import toast from 'react-hot-toast';
+import toast from '@/lib/toast';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { DataTable, type DataTableColumn } from '@/components/DataTable';
 import { Badge } from '@/components/ui/badge';

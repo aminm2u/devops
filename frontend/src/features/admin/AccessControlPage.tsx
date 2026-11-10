@@ -12,7 +12,7 @@ import {
   Trash2,
   UserCog,
 } from 'lucide-react';
-import toast from 'react-hot-toast';
+import toast from '@/lib/toast';
 import apiClient from '@/api/client';
 import { accessApi, type MatrixPayload, type RoleSummary } from '@/api/access';
 import type { PermissionScope } from '@/types';

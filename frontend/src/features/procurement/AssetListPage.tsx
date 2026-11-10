@@ -13,7 +13,7 @@ import { Can } from '@/components/Can';
 import { DataTable, type DataTableColumn } from '@/components/DataTable';
 import { StatusBadge } from '@/components/ui/status-badge';
 import { Plus, Pencil, Trash2 } from 'lucide-react';
-import toast from 'react-hot-toast';
+import toast from '@/lib/toast';
 import { useReferenceData, toSelectOptions } from '@/hooks/useReferenceData';
 
 interface Asset {

@@ -22,7 +22,7 @@ import { StatusBadge } from '@/components/ui/status-badge';
 import { InfoRow, DetailList } from '@/components/info-row';
 import { DataTable, type DataTableColumn } from '@/components/DataTable';
 import { ArrowLeft, Plus, Send, Award, Trash2 } from 'lucide-react';
-import toast from 'react-hot-toast';
+import toast from '@/lib/toast';
 
 interface RfqItem {
   id: number;

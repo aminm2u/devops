@@ -15,7 +15,7 @@ import { StatusBadge } from '@/components/ui/status-badge';
 import { useReferenceData, toSelectOptions } from '@/hooks/useReferenceData';
 import { ProgressBar } from '@/components/progress-bar';
 import { Plus, Pencil, Trash2 } from 'lucide-react';
-import toast from 'react-hot-toast';
+import toast from '@/lib/toast';
 
 interface InternalProject {
   id: number;

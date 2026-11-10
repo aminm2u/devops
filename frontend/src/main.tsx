@@ -24,6 +24,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
           <App />
           <Toaster
             position="top-right"
+            gutter={8}
             toastOptions={{
               duration: 4000,
               style: {

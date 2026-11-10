@@ -10,7 +10,7 @@ import { PageHeader } from '@/components/layout/PageHeader';
 import { DataTable, type DataTableColumn } from '@/components/DataTable';
 import { StatusBadge } from '@/components/ui/status-badge';
 import { Eye, Trash2, PackageOpen } from 'lucide-react';
-import toast from 'react-hot-toast';
+import toast from '@/lib/toast';
 
 interface GoodsReceipt {
   id: number;

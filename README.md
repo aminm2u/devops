@@ -11,6 +11,10 @@ A centralized internal DevOps operations platform built with Node.js, Express, a
 - **Real-Time**: Socket.IO
 - **Containerization**: Docker, Docker Compose
 
+## Deployment
+
+For production deployment on a Linux server (Docker Compose, TLS, backups, troubleshooting), see [DEPLOYMENT.md](DEPLOYMENT.md). For general Docker usage, see [DOCKER.md](DOCKER.md).
+
 ## Development Environment Setup
 
 ### Prerequisites

@@ -38,7 +38,7 @@ import {
   HelpdeskTicketPriority,
 } from '@/types';
 import { formatDate, formatRelativeTime } from '@/lib/utils';
-import toast from 'react-hot-toast';
+import toast from '@/lib/toast';
 import { useAuth } from '@/hooks/useAuth';
 import { useSocket } from '@/hooks/useSocket';
 import { useEffect } from 'react';
@@ -324,8 +324,8 @@ export function HelpdeskTicketDetailPage() {
           <Card>
             <CardHeader>
               <CardTitle className="text-base flex items-center gap-2">
-                <MessageSquare className="h-4 w-4" />
-                Comments ({ticket.comments?.length || 0})
+                <MessageSquare className="h-4 w-4 dark:text-gray-500 text-gray-800" />
+                <span className="dark:text-gray-400 text-gray-800">Comments ({ticket.comments?.length || 0})</span>
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -420,7 +420,7 @@ export function HelpdeskTicketDetailPage() {
                 <>
                   {ticket.status === 'open' && (
                     <Button
-                      className="w-full justify-start"
+                      className="w-full justify-start dark:text-gray-500 text-gray-800"
                       variant="outline"
                       onClick={() => updateStatusMutation.mutate({ status: 'in_progress' })}
                     >
@@ -430,7 +430,7 @@ export function HelpdeskTicketDetailPage() {
                   )}
                   {['open', 'in_progress', 'reopened'].includes(ticket.status) && (
                     <Button
-                      className="w-full justify-start"
+                      className="w-full justify-start dark:text-gray-500 text-gray-800"
                       variant="outline"
                       onClick={() => updateStatusMutation.mutate({ status: 'awaiting_response' })}
                     >
@@ -452,7 +452,7 @@ export function HelpdeskTicketDetailPage() {
               {ticket.status === 'resolved' && (
                 <>
                   <Button
-                    className="w-full justify-start"
+                    className="w-full justify-start dark:text-gray-500 text-gray-800"
                     variant="outline"
                     onClick={() => updateStatusMutation.mutate({ status: 'closed' })}
                   >
@@ -512,19 +512,19 @@ export function HelpdeskTicketDetailPage() {
             <CardContent className="space-y-3 text-sm">
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Source</span>
-                <span className="capitalize">{ticket.source}</span>
+                <span className="capitalize dark:text-gray-500 text-gray-800">{ticket.source}</span>
               </div>
               <Separator />
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Created</span>
-                <span>{formatDate(ticket.createdAt)}</span>
+                <span className="dark:text-gray-500 text-gray-800">{formatDate(ticket.createdAt)}</span>
               </div>
               <Separator />
               {ticket.resolvedAt && (
                 <>
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Resolved</span>
-                    <span>{formatDate(ticket.resolvedAt)}</span>
+                    <span className="dark:text-gray-500 text-gray-800">{formatDate(ticket.resolvedAt)}</span>
                   </div>
                   <Separator />
                 </>
@@ -533,7 +533,7 @@ export function HelpdeskTicketDetailPage() {
                 <>
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Closed</span>
-                    <span>{formatDate(ticket.closedAt)}</span>
+                    <span className="dark:text-gray-500 text-gray-800">{formatDate(ticket.closedAt)}</span>
                   </div>
                   <Separator />
                 </>
@@ -603,19 +603,19 @@ export function HelpdeskTicketDetailPage() {
                 {ticket.contactName && (
                   <div>
                     <span className="text-muted-foreground">Name:</span>{' '}
-                    <span>{ticket.contactName}</span>
+                    <span className='dark:text-gray-300 text-gray-800'>{ticket.contactName}</span>
                   </div>
                 )}
                 {ticket.contactEmail && (
                   <div>
                     <span className="text-muted-foreground">Email:</span>{' '}
-                    <span>{ticket.contactEmail}</span>
+                    <span className='dark:text-gray-300 text-gray-800'>{ticket.contactEmail}</span>
                   </div>
                 )}
                 {ticket.contactPhone && (
                   <div>
                     <span className="text-muted-foreground">Phone:</span>{' '}
-                    <span>{ticket.contactPhone}</span>
+                    <span className='dark:text-gray-300 text-gray-800'>{ticket.contactPhone}</span>
                   </div>
                 )}
               </CardContent>

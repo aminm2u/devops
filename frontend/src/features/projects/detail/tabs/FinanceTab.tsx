@@ -13,7 +13,7 @@ import { StatusBadge } from '@/components/ui/status-badge';
 import { RequisitionFormDialog } from '@/components/requisitions/RequisitionFormDialog';
 import { useAuth } from '@/hooks/useAuth';
 import apiClient from '@/api/client';
-import toast from 'react-hot-toast';
+import toast from '@/lib/toast';
 
 export function FinanceTab({ project, refetch }: { project: any, refetch: () => void }) {
   const { user, can } = useAuth();

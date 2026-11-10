@@ -39,7 +39,7 @@ import apiClient from '@/api/client';
 import { useReferenceData, toSelectOptions } from '@/hooks/useReferenceData';
 import { RequisitionForm } from '@/types';
 import { formatDate } from '@/lib/utils';
-import toast from 'react-hot-toast';
+import toast from '@/lib/toast';
 
 function formatCurrency(amount: number): string {
   return new Intl.NumberFormat('en-MY', {

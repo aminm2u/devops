@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Users, Plus, Shield, Calendar, AlertTriangle, Pencil, Trash2, X } from 'lucide-react';
@@ -20,10 +20,12 @@ import { UserAvatar } from '@/components/ui/UserAvatar';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { DataTable, type DataTableColumn } from '@/components/DataTable';
 import { useAuth } from '@/hooks/useAuth';
+import { useReferenceData } from '@/hooks/useReferenceData';
 import apiClient from '@/api/client';
 import { accessApi } from '@/api/access';
+import { orgApi, type OrgDepartment } from '@/api/org';
 import { formatDate } from '@/lib/utils';
-import toast from 'react-hot-toast';
+import toast from '@/lib/toast';
 
 interface User {
   id: number;
@@ -55,6 +57,10 @@ export function UsersPage() {
   const [showRoleDialog, setShowRoleDialog] = useState<User | null>(null);
   const [showDeleteDialog, setShowDeleteDialog] = useState<User | null>(null);
 
+  // '' means no department filter. The value is a department id, not a
+  // division code, because the server filters on users.department_id.
+  const [departmentFilter, setDepartmentFilter] = useState('all');
+
   const [formName, setFormName] = useState('');
   const [formEmail, setFormEmail] = useState('');
   const [formPassword, setFormPassword] = useState('');
@@ -62,10 +68,11 @@ export function UsersPage() {
   const [selectedRole, setSelectedRole] = useState('');
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ['users', search, page],
+    queryKey: ['users', search, page, departmentFilter],
     queryFn: async () => {
       const params: any = { page, limit: PAGE_SIZE };
       if (search) params.search = search;
+      if (departmentFilter !== 'all') params.departmentId = departmentFilter;
       const res = await apiClient.get('/admin/users', { params });
       return res.data;
     },
@@ -138,6 +145,37 @@ export function UsersPage() {
   });
 
   const assignableRoles = availableRoles.filter((role) => role.isAssignable);
+
+  /**
+   * The department filter dropdown, driven by the Reference Data page.
+   *
+   * The reference list is the source of the options (the `division` group is
+   * what the Reference Data page configures as departments), but a reference
+   * entry alone cannot filter anything — `users.department_id` points at a
+   * department row. So each entry is mapped to its department row by code,
+   * exactly as the UserDetailPage picker does. Divisions that have not been
+   * promoted to departments on the org chart are listed but disabled, because
+   * "it is not in the dropdown" is a worse answer than "it is not a department
+   * yet — add it on the org chart".
+   */
+  const { data: departmentRefs = [] } = useReferenceData('division');
+  const { data: orgTree } = useQuery({
+    queryKey: ['org-tree'],
+    queryFn: () => orgApi.getTree(),
+    staleTime: 5 * 60 * 1000,
+    enabled: isAdmin,
+  });
+
+  const departmentOptions = useMemo(() => {
+    const departments: OrgDepartment[] = orgTree?.departments ?? [];
+    const byCode = new Map(departments.map((dept) => [dept.code, dept]));
+    return departmentRefs.map((ref) => ({
+      id: byCode.get(ref.value)?.id ?? null,
+      label: ref.label,
+    }));
+  }, [departmentRefs, orgTree]);
+
+  const hasAnyDepartment = departmentOptions.some((opt) => opt.id !== null);
 
   const users: User[] = data?.data || [];
   const meta = data?.meta;
@@ -365,6 +403,33 @@ export function UsersPage() {
           onChange: (v) => { setSearch(v); setPage(1); },
           placeholder: 'Search users by name or email...',
         }}
+        filters={
+          hasAnyDepartment ? (
+            <Select
+              value={departmentFilter}
+              onValueChange={(v) => { setDepartmentFilter(v); setPage(1); }}
+            >
+              <SelectTrigger className="w-full sm:w-[200px]">
+                <SelectValue placeholder="All Departments" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Departments</SelectItem>
+                {/* Inactive reference entries are filtered out at the source by
+                    the reference-data endpoint; unmapped ones stay visible but
+                    disabled so the list matches what Reference Data configures. */}
+                {departmentOptions.map((opt) => (
+                  <SelectItem
+                    key={opt.label}
+                    value={opt.id !== null ? String(opt.id) : `unmapped:${opt.label}`}
+                    disabled={opt.id === null}
+                  >
+                    {opt.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          ) : undefined
+        }
         pagination={{
           page,
           totalPages: lastPage ?? 1,

@@ -13,7 +13,7 @@ import { StatusBadge } from '@/components/ui/status-badge';
 import { Plus, Send, Trash2, Check } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { Can } from '@/components/Can';
-import toast from 'react-hot-toast';
+import toast from '@/lib/toast';
 import { useReferenceData, toSelectOptions } from '@/hooks/useReferenceData';
 
 interface Payment {

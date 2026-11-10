@@ -11,7 +11,7 @@ import { UserPlus, UserCheck, UserMinus } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import apiClient from '@/api/client';
 import { projectsApi } from '@/api/projects';
-import toast from 'react-hot-toast';
+import toast from '@/lib/toast';
 
 /**
  * The project team.

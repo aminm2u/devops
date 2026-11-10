@@ -10,7 +10,7 @@ import { PageHeader } from '@/components/layout/PageHeader';
 import { DataTable, type DataTableColumn } from '@/components/DataTable';
 import { ArrowLeft, Send } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
-import toast from 'react-hot-toast';
+import toast from '@/lib/toast';
 
 interface PoDetail {
   id: number;

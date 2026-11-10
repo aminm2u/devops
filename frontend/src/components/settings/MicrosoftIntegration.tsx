@@ -22,7 +22,7 @@ import { microsoftApi } from '@/api/microsoft';
 import { useReferenceData, toSelectOptions } from '@/hooks/useReferenceData';
 import type { MicrosoftAppConfig, MicrosoftCalendarEvent, MicrosoftAccountStatus } from '@/api/microsoft';
 import { format } from 'date-fns';
-import toast from 'react-hot-toast';
+import toast from '@/lib/toast';
 
 /**
  * Microsoft Teams integration card shown on the consolidated Profile page.

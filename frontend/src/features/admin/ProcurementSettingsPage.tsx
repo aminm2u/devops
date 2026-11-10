@@ -52,7 +52,7 @@ import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Skeleton } from '@/components/ui/skeleton';
 import apiClient from '@/api/client';
 import { useAuth } from '@/hooks/useAuth';
-import toast from 'react-hot-toast';
+import toast from '@/lib/toast';
 
 function formatCurrency(amount: number): string {
   return new Intl.NumberFormat('en-MY', {
@@ -1411,7 +1411,7 @@ export function ReferenceDataTab() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead className="w-12 pl-2">Order</TableHead>
+                <TableHead className="w-12 pl-4">Order</TableHead>
                 <TableHead>Label</TableHead>
                 <TableHead>Value</TableHead>
                 <TableHead className="text-right pr-4">Actions</TableHead>
@@ -1456,7 +1456,14 @@ export function ReferenceDataTab() {
           open
           onOpenChange={(open) => !open && setDeleting(null)}
           title="Remove reference data?"
-          description={`"${displayLabel(deleting.label)}" will be hidden from dropdowns that use the "${humaniseGroup(deleting.group)}" group.`}
+          // `division` is not a soft hide: its department row is removed too,
+          // units included, so the confirmation says so rather than letting the
+          // admin discover it on the org chart afterwards.
+          description={
+            deleting.group === 'division'
+              ? `"${displayLabel(deleting.label)}" will be removed from every dropdown that uses it, and its department — with its units — will be deleted. This is refused while employees or sub-departments remain.`
+              : `"${displayLabel(deleting.label)}" will be hidden from dropdowns that use the "${humaniseGroup(deleting.group)}" group.`
+          }
           confirmLabel="Remove"
           onConfirm={() => deleteMutation.mutate(deleting)}
           isConfirming={deleteMutation.isPending}

@@ -87,11 +87,14 @@ async function main() {
   });
   await prisma.department.createMany({
     data: [
-      { code: 'DMA', name: 'Digital Marketing & Analytics' },
+      { code: 'DMA', name: 'Data Management & Analytics' },
       { code: 'BD', name: 'Business Development' },
-      { code: 'DI', name: 'Digital Innovation' },
+      { code: 'IT', name: 'Information Technology' },
+      { code: 'HR', name: 'Human Resources' },
+      { code: 'FIN', name: 'Finance' },
       { code: 'ADMIN', name: 'Administration' },
-      { code: 'OPS', name: 'Operations' },
+      { code: 'PDS', name: 'Project Delivery Services' },
+      { code: 'CS', name: 'CorporateServices' },
     ],
     skipDuplicates: true,
   });
@@ -100,14 +103,20 @@ async function main() {
   // they belong to. A person's `unit_id` is what the directory shows between
   // department and position; it is optional everywhere, and a department with
   // no units (Finance, below) is a normal state rather than an omission.
-  const unitITInfra = await prisma.unit.create({
-    data: { name: 'Infrastructure', code: 'INFRA', departmentId: deptIT.id, sortOrder: 1 },
+  const unitITDevOps = await prisma.unit.create({
+    data: { name: 'DevOps', code: 'DEVOPS', departmentId: deptIT.id, sortOrder: 1 },
   });
   const unitITApps = await prisma.unit.create({
-    data: { name: 'Application Development', code: 'APPS', departmentId: deptIT.id, sortOrder: 2 },
+    data: { name: 'Application Development', code: 'DEV', departmentId: deptIT.id, sortOrder: 2 },
   });
-  const unitITSupport = await prisma.unit.create({
-    data: { name: 'IT Support', code: 'SUPPORT', departmentId: deptIT.id, sortOrder: 3 },
+  const unitITSAs = await prisma.unit.create({
+    data: { name: 'System Analyst', code: 'SA', departmentId: deptIT.id, sortOrder: 3 },
+  });
+  const unitITUIUX = await prisma.unit.create({
+    data: { name: 'UI/UX Designer', code: 'UIUX', departmentId: deptIT.id, sortOrder: 4 },
+  });
+  const unitITDigital = await prisma.unit.create({
+    data: { name: 'Digital Innovation', code: 'DI', departmentId: deptIT.id, sortOrder: 5 },
   });
   const unitHRPeople = await prisma.unit.create({
     data: { name: 'People Operations', code: 'PEOPLE', departmentId: deptHR.id, sortOrder: 1 },
@@ -115,16 +124,22 @@ async function main() {
   const unitHRPayroll = await prisma.unit.create({
     data: { name: 'Payroll & Benefits', code: 'PAYROLL', departmentId: deptHR.id, sortOrder: 2 },
   });
-  const unitPMODelivery = await prisma.unit.create({
-    data: { name: 'Project Delivery', code: 'DELIVERY', departmentId: deptPMO.id, sortOrder: 1 },
+  const unitPMOPm = await prisma.unit.create({
+    data: { name: 'Project Manager', code: 'PM', departmentId: deptPMO.id, sortOrder: 1 },
   });
 
-  const posDev = await prisma.position.create({ data: { name: 'Software Engineer', gradeLevel: 3 } });
-  const posDevOps = await prisma.position.create({ data: { name: 'DevOps Engineer', gradeLevel: 4 } });
-  const posManager = await prisma.position.create({ data: { name: 'IT Manager', gradeLevel: 6 } });
-  const posDeptHead = await prisma.position.create({ data: { name: 'Department Manager', gradeLevel: 6 } });
-  const posTeamLead = await prisma.position.create({ data: { name: 'Team Lead', gradeLevel: 5 } });
-  const posProjMgr = await prisma.position.create({ data: { name: 'Project Manager', gradeLevel: 5 } });
+  const posChief = await prisma.position.create({ data: { name: 'Chief', gradeLevel: 20 } });
+  const posDeputyChief = await prisma.position.create({ data: { name: 'Deputy Chief', gradeLevel: 19 } });
+  const posHod = await prisma.position.create({ data: { name: 'Head of Department', gradeLevel: 18 } });
+  const posDeptHead = await prisma.position.create({ data: { name: 'General Manager', gradeLevel: 17 } });
+  const posManager = await prisma.position.create({ data: { name: 'Manager', gradeLevel: 16 } });
+  const posAsstManager = await prisma.position.create({ data: { name: 'Assistant Manager', gradeLevel: 15 } });
+  const posTeamLead = await prisma.position.create({ data: { name: 'Team Lead', gradeLevel: 10 } });
+  const posAsstTeamLead = await prisma.position.create({ data: { name: 'Assistant Team Lead', gradeLevel: 9 } });
+  const posSrExec = await prisma.position.create({ data: { name: 'Senior Executive', gradeLevel: 5 } });
+  const posJrExec = await prisma.position.create({ data: { name: 'Junior Executive', gradeLevel: 3 } });
+  const posProtege = await prisma.position.create({ data: { name: 'Protege', gradeLevel: 2 } });
+  const posIntern = await prisma.position.create({ data: { name: 'Intern', gradeLevel: 1 } });
 
   const empPerm = await prisma.employmentType.create({ data: { name: 'Permanent' } });
   const empContract = await prisma.employmentType.create({ data: { name: 'Contract' } });
@@ -132,7 +147,11 @@ async function main() {
   const ptInternal = await prisma.projectType.create({ data: { name: 'Internal Tool' } });
   const ptExternal = await prisma.projectType.create({ data: { name: 'Client Project' } });
 
+  const prDirector = await prisma.projectRole.create({ data: { name: 'Project Director' } });
   const prManager = await prisma.projectRole.create({ data: { name: 'Project Manager' } });
+  const prAssistantManager = await prisma.projectRole.create({ data: { name: 'Assistant Project Manager' } });
+  const prConsultant = await prisma.projectRole.create({ data: { name: 'Project Consultant' } });
+  const prSubjectMatterExpert = await prisma.projectRole.create({ data: { name: 'Subject Matter Expert' } });
   const prLead = await prisma.projectRole.create({ data: { name: 'Team Lead' } });
   const prDeveloper = await prisma.projectRole.create({ data: { name: 'Developer' } });
 
@@ -216,8 +235,8 @@ async function main() {
       emailVerifiedAt: new Date(),
       employeeId: "EMP-001",
       departmentId: deptIT.id,
-      unitId: unitITInfra.id,
-      positionId: posManager.id,
+      unitId: null, // IT admin is not in a unit; they are above the units in the org chart
+      positionId: null, // IT admin is not in a position; they are above the positions in the org chart
       employmentTypeId: empPerm.id,
       joinDate: new Date("2018-01-02"),
     },
@@ -243,7 +262,7 @@ async function main() {
       emailVerifiedAt: new Date(),
       employeeId: "EMP-002",
       departmentId: deptHR.id,
-      unitId: unitHRPeople.id,
+      unitId: null,
       positionId: posManager.id,
       employmentTypeId: empPerm.id,
       joinDate: new Date("2019-04-08"),
@@ -262,7 +281,7 @@ async function main() {
       emailVerifiedAt: new Date(),
       employeeId: "EMP-003",
       departmentId: deptIT.id,
-      unitId: unitITInfra.id,
+      unitId: unitITDevOps.id,
       positionId: posTeamLead.id,
       employmentTypeId: empPerm.id,
       joinDate: new Date("2021-03-10"),
@@ -287,7 +306,7 @@ async function main() {
       employeeId: "EMP-004",
       departmentId: deptIT.id,
       unitId: unitITApps.id,
-      positionId: posDevOps.id,
+      positionId: posAsstTeamLead.id,
       employmentTypeId: empContract.id,
       joinDate: new Date("2022-06-01"),
       directManagerId: devopsLead.id,
@@ -310,7 +329,7 @@ async function main() {
       emailVerifiedAt: new Date(),
       employeeId: "EMP-005",
       departmentId: deptPMO.id,
-      unitId: unitPMODelivery.id,
+      unitId: unitPMOPm.id,
       positionId: posDeptHead.id,
       employmentTypeId: empPerm.id,
       joinDate: new Date("2020-07-13"),
@@ -333,8 +352,8 @@ async function main() {
       isActive: true,
       emailVerifiedAt: new Date(),
       employeeId: "EMP-006",
-      departmentId: deptFIN.id,
-      positionId: posManager.id,
+      departmentId: deptPMO.id,
+      positionId: posSrExec.id,
       employmentTypeId: empPerm.id,
       joinDate: new Date("2020-02-17"),
       directManagerId: itAdmin.id,
@@ -352,9 +371,9 @@ async function main() {
       isActive: true,
       emailVerifiedAt: new Date(),
       employeeId: "EMP-007",
-      departmentId: deptHR.id,
-      unitId: unitHRPayroll.id,
-      positionId: posDev.id,
+      departmentId: deptIT.id,
+      unitId: unitITDevOps.id,
+      positionId: posSrExec.id,
       employmentTypeId: empContract.id,
       joinDate: new Date("2023-08-14"),
       directManagerId: hrManager.id,
@@ -426,7 +445,7 @@ async function main() {
     email: "azfar@map2u.com.my",
     employeeId: "EMP-101",
     departmentId: deptIT.id,
-    unitId: unitITInfra.id,
+    unitId: unitITApps.id,
     positionId: posDeptHead.id,
     employmentTypeId: empPerm.id,
     joinDate: "2019-02-04",
@@ -459,8 +478,8 @@ async function main() {
     email: "wafiy@map2u.com.my",
     employeeId: "EMP-105",
     departmentId: deptPMO.id,
-    unitId: unitPMODelivery.id,
-    positionId: posProjMgr.id,
+    unitId: unitPMOPm.id,
+    positionId: posManager.id,
     employmentTypeId: empPerm.id,
     joinDate: "2022-03-21",
   });

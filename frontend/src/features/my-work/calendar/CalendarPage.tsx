@@ -12,7 +12,7 @@ import { TimeEntryFormDialog } from '@/components/timesheet/TimeEntryFormDialog'
 import { useCalendarEvents } from '@/hooks/useTimeEntries';
 import { microsoftApi } from '@/api/microsoft';
 import type { TimeEntry, CalendarTaskEvent, CalendarMeetingEvent } from '@/types';
-import toast from 'react-hot-toast';
+import toast from '@/lib/toast';
 
 const localizer = dateFnsLocalizer({
   format,
@@ -158,7 +158,7 @@ export function CalendarPage() {
     if (e.kind === 'meeting') {
       const m = e.payload as CalendarMeetingEvent;
       if (m.attended || m.timeEntryId != null) {
-        toast('This meeting is already logged in your timesheet');
+        toast.info('This meeting is already logged in your timesheet');
       } else {
         logAttendanceMutation.mutate(m);
       }

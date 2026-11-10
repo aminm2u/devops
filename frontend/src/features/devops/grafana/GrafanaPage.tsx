@@ -35,7 +35,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import apiClient from '@/api/client';
 import { cn } from '@/lib/utils';
-import toast from 'react-hot-toast';
+import toast from '@/lib/toast';
 import type { AxiosRequestConfig } from 'axios';
 
 // ── Types ────────────────────────────────────────────────────────────────────

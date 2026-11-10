@@ -1,5 +1,5 @@
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
-import toast from 'react-hot-toast';
+import toast from '@/lib/toast';
 
 const apiClient = axios.create({
   baseURL: '/api',

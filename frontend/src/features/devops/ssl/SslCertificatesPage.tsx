@@ -33,7 +33,7 @@ import apiClient from '@/api/client';
 import { useAuth } from '@/hooks/useAuth';
 import { useReferenceData, toSelectOptions } from '@/hooks/useReferenceData';
 import { formatDate, formatStatus } from '@/lib/utils';
-import toast from 'react-hot-toast';
+import toast from '@/lib/toast';
 
 interface SslCertificate {
   id: number;

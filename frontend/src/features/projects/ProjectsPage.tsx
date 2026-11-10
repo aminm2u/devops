@@ -34,7 +34,7 @@ import {
   truncate,
 } from '@/lib/utils';
 import type { ProjectFilters, Project } from '@/types';
-import toast from 'react-hot-toast';
+import toast from '@/lib/toast';
 
 function ProjectCardSkeleton() {
   return (

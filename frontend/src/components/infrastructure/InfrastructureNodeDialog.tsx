@@ -12,7 +12,7 @@ import { FormField } from '@/components/ui/form-field';
 import { FormGrid } from '@/components/ui/form-grid';
 import apiClient from '@/api/client';
 import { useReferenceData, toSelectOptions } from '@/hooks/useReferenceData';
-import toast from 'react-hot-toast';
+import toast from '@/lib/toast';
 
 interface InfrastructureNode {
   id: number;

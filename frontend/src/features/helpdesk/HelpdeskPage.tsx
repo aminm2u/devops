@@ -44,7 +44,7 @@ import {
   User,
 } from '@/types';
 import { formatRelativeTime } from '@/lib/utils';
-import toast from 'react-hot-toast';
+import toast from '@/lib/toast';
 import { can } from '@/lib/roles';
 
 // ── Role Helpers ─────────────────────────────────────────────────────────────
@@ -693,7 +693,7 @@ function CreateTicketDialog({
         </p>
       </div>
 
-      <div className="space-y-2">
+      {/* <div className="space-y-2">
         <Label className='dark:text-gray-400 text-gray-800'>Source</Label>
         <Select value={form.source} onValueChange={(v) => setForm({ ...form, source: v })}>
           <SelectTrigger>
@@ -705,7 +705,7 @@ function CreateTicketDialog({
             ))}
           </SelectContent>
         </Select>
-      </div>
+      </div> */}
 
       {/* <div className="border-t border-gray-200 dark:border-gray-600 pt-4">
         <Label className="font-semibold">Contact Information</Label>

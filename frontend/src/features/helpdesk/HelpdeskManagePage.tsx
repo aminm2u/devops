@@ -40,7 +40,7 @@ import {
   HelpdeskCategory,
   HelpdeskStats,
 } from '@/types';
-import toast from 'react-hot-toast';
+import toast from '@/lib/toast';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 

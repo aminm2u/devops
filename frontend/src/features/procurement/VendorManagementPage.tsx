@@ -11,7 +11,7 @@ import { DataTable, type DataTableColumn } from '@/components/DataTable';
 import { Plus, Pencil, Trash2, Star } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { Can } from '@/components/Can';
-import toast from 'react-hot-toast';
+import toast from '@/lib/toast';
 
 interface Vendor {
   id: number;

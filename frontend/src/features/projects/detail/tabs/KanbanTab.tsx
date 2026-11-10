@@ -13,7 +13,7 @@ import { StatusBadge } from '@/components/ui/status-badge';
 import { DatePicker } from '@/components/ui/date-picker';
 import { Calendar, Plus, Trash2, CheckSquare } from 'lucide-react';
 import apiClient from '@/api/client';
-import toast from 'react-hot-toast';
+import toast from '@/lib/toast';
 import { TaskDetailModal } from './TaskDetailModal';
 import { useAuth } from '@/hooks/useAuth';
 import { useReferenceData, toSelectOptions } from '@/hooks/useReferenceData';

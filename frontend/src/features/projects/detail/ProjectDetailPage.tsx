@@ -40,7 +40,7 @@ import apiClient from '@/api/client';
 import { useReferenceData, toSelectOptions } from '@/hooks/useReferenceData';
 import { StatusBadge } from '@/components/ui/status-badge';
 import { PageHeader } from '@/components/layout/PageHeader';
-import toast from 'react-hot-toast';
+import toast from '@/lib/toast';
 
 /**
  * One project, eleven views.

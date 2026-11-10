@@ -1,6 +1,6 @@
 import { Fragment, useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import toast from 'react-hot-toast';
+import toast from '@/lib/toast';
 import { Plus, Pencil, Trash2, Boxes, Building2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -198,10 +198,10 @@ export function UnitsPanel() {
                 </TableRow>
                 {units.map((unit) => (
                   <TableRow key={unit.id}>
-                    <TableCell className="pl-8 font-medium">{unit.name}</TableCell>
+                    <TableCell className="pl-8 font-medium dark:text-gray-400 text-gray-800">{unit.name}</TableCell>
                     <TableCell>
                       {unit.code ? (
-                        <Badge variant="outline" className="font-mono font-normal">
+                        <Badge variant="outline" className="font-mono font-normal dark:text-gray-400 text-gray-800">
                           {unit.code}
                         </Badge>
                       ) : (

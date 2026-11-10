@@ -13,7 +13,7 @@ import {
   ChevronDown, ChevronRight, Loader2
 } from 'lucide-react';
 import apiClient from '@/api/client';
-import toast from 'react-hot-toast';
+import toast from '@/lib/toast';
 
 interface SubtaskChecklistProps {
   taskId: number;

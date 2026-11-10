@@ -33,7 +33,7 @@ import { StatusBadge } from '@/components/ui/status-badge';
 import apiClient from '@/api/client';
 import { useReferenceData, toSelectOptions } from '@/hooks/useReferenceData';
 import { formatDate, formatStatus } from '@/lib/utils';
-import toast from 'react-hot-toast';
+import toast from '@/lib/toast';
 
 interface Domain {
   id: number;

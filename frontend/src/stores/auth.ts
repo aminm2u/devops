@@ -3,7 +3,7 @@ import { authApi } from '@/api/auth';
 import { User } from '@/types';
 import { can, hasAnyRole, hasRole, isSuperAdmin, scopeOf } from '@/lib/roles';
 import { disconnectSocket } from '@/hooks/useSocket';
-import toast from 'react-hot-toast';
+import toast from '@/lib/toast';
 
 interface AuthState {
   user: User | null;
