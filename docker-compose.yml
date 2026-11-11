@@ -52,6 +52,18 @@ services:
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
       PORT: 8080
       FRONTEND_URL: ${FRONTEND_URL:-}
+      # Base URL for links in outgoing emails (portal ack, OTP, resets).
+      APP_URL: ${APP_URL:-http://localhost:8080}
+      # Outgoing email (portal OTP + auto-reply, password resets). Values come
+      # from the root .env. Leave SMTP_HOST empty in dev to no-op email to the
+      # logs, or point it at a local MailHog (localhost:1025) to inspect mail.
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_SECURE: ${SMTP_SECURE:-false}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM_ADDRESS: ${SMTP_FROM_ADDRESS:-noreply@devops-platform.local}
+      SMTP_FROM_NAME: ${SMTP_FROM_NAME:-DevOps Platform}
     depends_on:
       database:
         condition: service_healthy

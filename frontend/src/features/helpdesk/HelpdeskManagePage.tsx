@@ -78,6 +78,21 @@ function getPriorityBadge(priority: HelpdeskTicketPriority) {
   return <StatusBadge domain="helpdeskPriority" value={priority} />;
 }
 
+/**
+ * Internal (staff-reported) vs External (portal, no user account) — derived
+ * from the record, not stored, so it stays truthful for every legacy ticket.
+ */
+function getOriginBadge(ticket: HelpdeskTicket) {
+  const external = ticket.source === 'portal' || ticket.reportedBy == null;
+  return external ? (
+    <Badge variant="outline" className="text-purple-600 border-purple-300 dark:text-purple-300 dark:border-purple-700">
+      External
+    </Badge>
+  ) : (
+    <Badge variant="outline" className="text-muted-foreground">Internal</Badge>
+  );
+}
+
 function timeAgo(date: string) {
   const now = new Date();
   const then = new Date(date);
@@ -275,6 +290,11 @@ export function HelpdeskManagePage() {
       render: (ticket) => getStatusBadge(ticket.status),
     },
     {
+      key: 'origin',
+      header: 'Origin',
+      render: (ticket) => getOriginBadge(ticket),
+    },
+    {
       key: 'priority',
       header: 'Priority',
       render: (ticket) => getPriorityBadge(ticket.priority),
@@ -294,14 +314,28 @@ export function HelpdeskManagePage() {
     {
       key: 'reporter',
       header: 'Reporter',
-      render: (ticket) => (
-        <div>
-          <div className="text-sm">{ticket.reporter?.name || '-'}</div>
-          {ticket.reporter?.email && (
-            <div className="text-xs text-muted-foreground truncate max-w-[120px]">{ticket.reporter.email}</div>
-          )}
-        </div>
-      ),
+      render: (ticket) => {
+        // External tickets have no reporter user — the contact fields are the
+        // only identity, so they surface here instead of a dash.
+        if (!ticket.reporter && ticket.contactName) {
+          return (
+            <div>
+              <div className="text-sm">{ticket.contactName}</div>
+              {ticket.contactEmail && (
+                <div className="text-xs text-muted-foreground truncate max-w-[140px]">{ticket.contactEmail}</div>
+              )}
+            </div>
+          );
+        }
+        return (
+          <div>
+            <div className="text-sm">{ticket.reporter?.name || '-'}</div>
+            {ticket.reporter?.email && (
+              <div className="text-xs text-muted-foreground truncate max-w-[120px]">{ticket.reporter.email}</div>
+            )}
+          </div>
+        );
+      },
     },
     {
       key: 'assignedTo',

@@ -480,6 +480,8 @@ export const APP_ROUTES: AppRoute[] = [
 
   // ── Support & utility ───────────────────────────────────────────────────
   { path: 'forbidden', element: <ForbiddenPage />, meta: { title: 'Forbidden' } },
+  // (Helpdesk Portal config lives on the Settings page as a superadmin tab —
+  // /settings?tab=helpdesk-portal — not on a route of its own.)
   // Design-system sandbox. Not a product surface: it renders every primitive
   // with fake data, so it stays behind the platform owner.
   {

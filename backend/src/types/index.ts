@@ -25,4 +25,10 @@ export interface RequestWithUser extends Request {
    * Every guard reads this; nothing should re-derive permissions in a route.
    */
   access?: ResolvedAccess;
+  /**
+   * External portal identity — the verified contact email behind an opaque
+   * portal token. Populated by `requirePortalAuth()` only; `user` and
+   * `access` stay undefined on portal routes by design.
+   */
+  portal?: { email: string; sessionId: number };
 }

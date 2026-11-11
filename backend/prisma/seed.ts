@@ -1356,6 +1356,8 @@ async function main() {
       { value: "phone", label: "Phone", sortOrder: 3 },
       { value: "chat", label: "Chat", sortOrder: 4 },
       { value: "walk-in", label: "Walk-in", sortOrder: 5 },
+      // External portal submissions — the public, unauthenticated channel.
+      { value: "portal", label: "Portal", sortOrder: 6 },
     ],
 
     // ── Projects, assets, timesheet ───────────────────────────────────────

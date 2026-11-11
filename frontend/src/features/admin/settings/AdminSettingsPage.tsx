@@ -7,6 +7,8 @@ import {
   ShieldCheck,
   Hash,
   Database,
+  Globe,
+  Building2,
 } from 'lucide-react';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -16,6 +18,8 @@ import {
   NumberingTab,
   ReferenceDataTab,
 } from '@/features/admin/ProcurementSettingsPage';
+import { HelpdeskPortalSettingsPage } from '@/features/admin/helpdeskPortal/HelpdeskPortalSettingsPage';
+import { CompanySettingsTab } from '@/features/admin/settings/CompanySettingsTab';
 
 /**
  * System settings.
@@ -31,10 +35,12 @@ import {
  */
 
 const TAB_KEYS = [
+  'company',
   'timesheet-rules',
   'approval-policies',
   'numbering',
   'reference-data',
+  'helpdesk-portal',
 ] as const;
 
 type TabKey = (typeof TAB_KEYS)[number];
@@ -57,7 +63,11 @@ type TabKey = (typeof TAB_KEYS)[number];
  * entry in the group picker now, which is why `timesheet.settings.manage`
  * admits this tab: it is the grant that writes that group.
  */
-const TAB_PERMISSION: Record<TabKey, string | string[]> = {
+const TAB_PERMISSION: Record<TabKey, string | string[] | null> = {
+  // Company branding is written through the same settings API as everything
+  // else, so the grant that guards those writes guards this tab too
+  // (superadmins qualify via their wildcard).
+  company: 'admin.settings.manage',
   'timesheet-rules': 'timesheet.settings.manage',
   'approval-policies': 'procurement.settings.manage',
   numbering: 'procurement.settings.manage',
@@ -67,22 +77,27 @@ const TAB_PERMISSION: Record<TabKey, string | string[]> = {
     'helpdesk.ticket.manage',
     'timesheet.settings.manage',
   ],
+  // The portal is a platform-wide surface, not a permission-scoped feature —
+  // the same reasoning that keeps the route `superAdminOnly`. `null` here
+  // means "superadmin only", resolved separately in the visibility filter.
+  'helpdesk-portal': null,
 };
 
 const DEFAULT_TAB: TabKey = 'approval-policies';
 
-/** A tab's grant is satisfied by any one of its permissions. */
-const canSee = (can: (permission: string) => boolean, key: TabKey): boolean => {
+/** A tab's grant is satisfied by any one of its permissions; `null` = superadmin. */
+const canSee = (can: (permission: string) => boolean, isSuperAdmin: boolean, key: TabKey): boolean => {
   const required = TAB_PERMISSION[key];
+  if (required === null) return isSuperAdmin;
   return Array.isArray(required) ? required.some((p) => can(p)) : can(required);
 };
 
 export function AdminSettingsPage() {
-  const { can } = useAuth();
+  const { can, isSuperAdmin } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const requested = searchParams.get('tab') as TabKey | null;
 
-  const visibleTabs = TAB_KEYS.filter((key) => canSee(can, key));
+  const visibleTabs = TAB_KEYS.filter((key) => canSee(can, isSuperAdmin, key));
 
   const resolve = (key: TabKey | null): TabKey => {
     if (key && TAB_KEYS.includes(key) && visibleTabs.includes(key)) return key;
@@ -127,9 +142,11 @@ export function AdminSettingsPage() {
   // entries in the Reference Data group picker, next to the key/value lists
   // they belong with.
   const visible = (key: TabKey) => visibleTabs.includes(key);
+  const showCompany = visible('company');
   const showTimesheet = visible('timesheet-rules');
   const showOther =
     visible('approval-policies') || visible('numbering') || visible('reference-data');
+  const showPortal = visible('helpdesk-portal');
 
   return (
     <div className="animate-fade-in space-y-4">
@@ -141,9 +158,19 @@ export function AdminSettingsPage() {
 
       <Tabs value={tab} onValueChange={changeTab}>
         <TabsList className="flex h-auto w-full flex-wrap justify-start gap-1 p-1">
+          {showCompany && (
+            <TabsTrigger value="company" className="gap-2">
+              <Building2 className="h-3.5 w-3.5" /> Company
+            </TabsTrigger>
+          )}
           {showTimesheet && (
             <TabsTrigger value="timesheet-rules" className="gap-2">
               <ClipboardCheck className="h-3.5 w-3.5" /> Approval Rules
+            </TabsTrigger>
+          )}
+          {showPortal && (
+            <TabsTrigger value="helpdesk-portal" className="gap-2">
+              <Globe className="h-3.5 w-3.5" /> Helpdesk Portal
             </TabsTrigger>
           )}
           {showOther && (
@@ -167,6 +194,12 @@ export function AdminSettingsPage() {
           )}
         </TabsList>
 
+        {showCompany && (
+          <TabsContent value="company" className="mt-4">
+            <CompanySettingsTab />
+          </TabsContent>
+        )}
+
         {showTimesheet && (
           <TabsContent value="timesheet-rules" className="mt-4">
             <TimesheetRulesTab />
@@ -185,6 +218,12 @@ export function AdminSettingsPage() {
               <ReferenceDataTab />
             </TabsContent>
           </>
+        )}
+
+        {showPortal && (
+          <TabsContent value="helpdesk-portal" className="mt-4">
+            <HelpdeskPortalSettingsPage />
+          </TabsContent>
         )}
       </Tabs>
     </div>

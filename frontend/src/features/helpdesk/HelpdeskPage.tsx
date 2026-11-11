@@ -243,6 +243,18 @@ export function HelpdeskPage() {
       className: 'font-mono text-sm text-muted-foreground',
       accessor: (ticket) => ticket.ticketNumber ?? `HD-${String(ticket.id).padStart(4, '0')}`,
     },
+    ...(userRole !== 'viewer'
+      ? [{
+          key: 'origin',
+          header: 'Origin',
+          render: (ticket: HelpdeskTicket) =>
+            ticket.source === 'portal' || ticket.reportedBy == null ? (
+              <Badge variant="outline" className="text-purple-600 border-purple-300 dark:text-purple-300 dark:border-purple-700">External</Badge>
+            ) : (
+              <Badge variant="outline" className="text-muted-foreground">Internal</Badge>
+            ),
+        }]
+      : []),
     {
       key: 'subject',
       header: 'Subject',

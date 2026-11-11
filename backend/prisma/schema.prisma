@@ -1540,6 +1540,9 @@ model HelpdeskTicket {
   @@index([reportedBy])
   @@index([teamId])
   @@index([isActive])
+  /// The external portal resolves "my tickets" by contact email alone, so
+  /// lookup there must not scan the table.
+  @@index([contactEmail])
   @@map("helpdesk_tickets")
 }
 
@@ -1547,6 +1550,10 @@ model HelpdeskComment {
   id         Int       @id @default(autoincrement())
   ticketId   Int       @map("ticket_id")
   userId     Int?      @map("user_id")
+  /// Display name for comments posted by external portal reporters — those
+  /// rows carry `userId: null` because no User exists behind them. Null for
+  /// every internal (staff) comment.
+  authorName String?   @map("author_name")
   content    String    @db.Text
   isInternal Boolean   @default(false) @map("is_internal")
   isActive   Boolean   @default(true) @map("is_active")
@@ -1586,6 +1593,31 @@ model HelpdeskAttachment {
 
   @@index([ticketId])
   @@map("helpdesk_attachments")
+}
+
+/// One row per external portal identity (the reporter's contact email).
+///
+/// The email is the portal's only identifier — an external reporter never
+/// gets a `User` account. `requestOtp` upserts by email, so requesting a new
+/// code rotates the old one and any token issued earlier stops verifying
+/// (its hash lives here too). Codes and tokens are stored as SHA-256 hashes;
+/// the plaintext exists only in the emailed OTP and the one verify response.
+model HelpdeskPortalSession {
+  id             Int       @id @default(autoincrement())
+  email          String    @unique
+  codeHash       String    @map("code_hash")
+  codeExpiresAt  DateTime  @map("code_expires_at")
+  attempts       Int       @default(0)
+  consumedAt     DateTime? @map("consumed_at")
+  tokenHash      String?   @map("token_hash")
+  tokenExpiresAt DateTime? @map("token_expires_at")
+  lastSentAt     DateTime? @map("last_sent_at")
+  requestIp      String?   @map("request_ip")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  @@index([tokenHash])
+  @@map("helpdesk_portal_sessions")
 }
 
 // ==================== System Settings ====================

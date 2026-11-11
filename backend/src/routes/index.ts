@@ -22,6 +22,8 @@ import notificationRoutes from "./notification.routes.js";
 import budgetRoutes from "./budget.routes.js";
 import requisitionRoutes from "./requisition.routes.js";
 import helpdeskRoutes from "./helpdesk.routes.js";
+import helpdeskPortalRoutes from "./helpdesk.public.routes.js";
+import brandingRoutes from "./branding.routes.js";
 import taskRoutes from "./task.routes.js";
 import timesheetRoutes from "./timesheet.routes.js";
 import referenceRoutes from "./reference.routes.js";
@@ -75,6 +77,12 @@ router.use("/assets", assetRoutes);
 router.use("/payments", paymentRoutes);
 router.use("/internal-projects", internalProjectRoutes);
 router.use("/helpdesk", helpdeskRoutes);
+// Public portal — mounted beside (not inside) the authenticated helpdesk
+// router so its routes carry no `authenticate` middleware by construction.
+router.use("/helpdesk/portal", helpdeskPortalRoutes);
+// Company branding — GET routes are public (portal header), upload is
+// admin-gated. See branding.routes.ts.
+router.use("/branding", brandingRoutes);
 router.use("/tasks", taskRoutes);
 router.use("/timesheet", timesheetRoutes);
 router.use("/microsoft", microsoftRoutes);

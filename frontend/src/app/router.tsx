@@ -5,6 +5,10 @@ import { AppLayout } from '@/components/layout/AppLayout';
 import { AuthLayout } from '@/components/layout/AuthLayout';
 import { PermissionRoute, ProtectedRoute, PublicRoute, SuperAdminRoute } from '@/app/guards';
 import { AUTH_ROUTES, APP_ROUTES, LEGACY_REDIRECTS, type AppRoute } from '@/app/routes.config';
+import { PortalLayout } from '@/features/portal/PortalLayout';
+import { PortalSubmitPage } from '@/features/portal/PortalSubmitPage';
+import { PortalTrackPage } from '@/features/portal/PortalTrackPage';
+import { PortalTicketDetailPage } from '@/features/portal/PortalTicketDetailPage';
 
 /**
  * Router.
@@ -42,6 +46,17 @@ export function AppRouter() {
             <Route index element={route.element} />
           </Route>
         ))}
+
+        {/* Public helpdesk portal — outside the ProtectedRoute tree on
+            purpose. No `PublicRoute` wrapper either: that guard bounces
+            logged-in users to `/`, but a staff member must be able to open
+            a portal link. The portal pages manage their own (optional)
+            portal-token session. */}
+        <Route path="/portal" element={<PortalLayout />}>
+          <Route index element={<PortalSubmitPage />} />
+          <Route path="track" element={<PortalTrackPage />} />
+          <Route path="tickets/:publicId" element={<PortalTicketDetailPage />} />
+        </Route>
 
         <Route
           path="/"

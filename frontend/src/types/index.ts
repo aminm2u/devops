@@ -761,6 +761,8 @@ export interface HelpdeskComment {
   id: number;
   ticketId: number;
   userId: number | null;
+  /** Display name for external (portal) comments — `userId` is null there. */
+  authorName?: string | null;
   content: string;
   isInternal: boolean;
   isActive: boolean;

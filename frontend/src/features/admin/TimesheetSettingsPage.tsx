@@ -282,7 +282,7 @@ function RuleDialog({
 
         <div className="grid grid-cols-2 gap-4">
           <div className="space-y-2">
-            <Label className='dark:text-gray-400 text-gray-500'>Category (empty = any)</Label>
+            <Label className='dark:text-gray-400 text-gray-500'>Category</Label>
             <Select value={categoryValue || 'any'} onValueChange={(v) => setCategoryValue(v === 'any' ? '' : v)}>
               <SelectTrigger><SelectValue placeholder="Any category" /></SelectTrigger>
               <SelectContent>
@@ -294,7 +294,7 @@ function RuleDialog({
             </Select>
           </div>
           <div className="space-y-2">
-            <Label className='dark:text-gray-400 text-gray-500'>Project (empty = any)</Label>
+            <Label className='dark:text-gray-400 text-gray-500'>Project</Label>
             <Select value={projectId || 'any'} onValueChange={(v) => setProjectId(v === 'any' ? '' : v)}>
               <SelectTrigger><SelectValue placeholder="Any project" /></SelectTrigger>
               <SelectContent>

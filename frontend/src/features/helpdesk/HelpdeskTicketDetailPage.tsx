@@ -24,6 +24,13 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
 import { RichListBox } from '@/components/ui/rich-listbox';
@@ -41,6 +48,7 @@ import {
   HelpdeskTicketPriority,
   HelpdeskComment,
   HelpdeskAttachment,
+  HelpdeskCategory,
 } from '@/types';
 import { formatDate, formatRelativeTime } from '@/lib/utils';
 import toast from '@/lib/toast';
@@ -193,6 +201,43 @@ export function HelpdeskTicketDetailPage() {
       return res.data.data as { id: number; name: string; email: string }[];
     },
     enabled: managesQueue,
+  });
+
+  // Classification options — same gating as the users list above: only the
+  // people who can edit classification can use the lists, so only they fetch.
+  const { data: categoriesData } = useQuery({
+    queryKey: ['helpdesk-categories'],
+    queryFn: async () => {
+      const res = await apiClient.get('/helpdesk/categories');
+      return res.data.data as HelpdeskCategory[];
+    },
+    enabled: managesQueue,
+  });
+  const { data: projectsData } = useQuery({
+    queryKey: ['helpdesk-projects'],
+    queryFn: async () => {
+      const res = await apiClient.get('/helpdesk/projects');
+      return res.data.data as { id: number; name: string }[];
+    },
+    enabled: managesQueue,
+  });
+
+  // Set/reset category and project — the API accepts both on the general
+  // update route, gated on `helpdesk.ticket.manage` (same permission as
+  // assign). Null resets to "none".
+  const classificationMutation = useMutation({
+    mutationFn: async (patch: { categoryId?: number | null; projectId?: number | null }) => {
+      const res = await apiClient.put(`/helpdesk/tickets/${id}`, patch);
+      return res.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['helpdesk-ticket', id] });
+      queryClient.invalidateQueries({ queryKey: ['helpdesk-tickets-manage'] });
+      toast.success('Ticket classification updated');
+    },
+    onError: (err: any) => {
+      toast.error(err.response?.data?.error || 'Failed to update classification');
+    },
   });
 
   // Mutations
@@ -364,6 +409,15 @@ export function HelpdeskTicketDetailPage() {
           <div className="flex items-center gap-2 mt-1">
             {getStatusBadge(ticket.status)}
             {getPriorityBadge(ticket.priority)}
+            {/* Internal vs external origin — derived from the record, mirroring
+                the queue badge. Portal tickets have no reporter user. */}
+            {(ticket.source === 'portal' || ticket.reportedBy == null) ? (
+              <Badge variant="outline" className="text-purple-600 border-purple-300 dark:text-purple-300 dark:border-purple-700">
+                External
+              </Badge>
+            ) : (
+              <Badge variant="outline" className="text-muted-foreground">Internal</Badge>
+            )}
             {ticket.category && (
               <Badge variant="outline">{ticket.category.name}</Badge>
             )}
@@ -409,13 +463,15 @@ export function HelpdeskTicketDetailPage() {
                       {!mine && (
                         <Avatar className="h-7 w-7 mt-1 shrink-0">
                           <AvatarFallback className="text-xs">
-                            {comment.user?.name?.charAt(0) || '?'}
+                            {comment.user?.name?.charAt(0) || comment.authorName?.charAt(0) || '?'}
                           </AvatarFallback>
                         </Avatar>
                       )}
                       <div className={`max-w-[75%] space-y-1 ${mine ? 'items-end text-right' : ''}`}>
                         <div className={`flex items-center gap-2 text-xs text-muted-foreground ${mine ? 'justify-end' : ''}`}>
-                          <span className="font-medium text-foreground">{mine ? 'You' : comment.user?.name || 'Unknown'}</span>
+                          <span className="font-medium text-foreground">
+                            {mine ? 'You' : comment.user?.name ?? comment.authorName ?? 'External user'}
+                          </span>
                           {comment.isInternal && (
                             <Badge variant="outline" className="text-[10px] bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300 p-1.5">
                               <Lock className="h-2.5 w-2.5" />
@@ -446,7 +502,7 @@ export function HelpdeskTicketDetailPage() {
                       {mine && (
                         <Avatar className="h-7 w-7 mt-1 shrink-0">
                           <AvatarFallback className="text-xs">
-                            {comment.user?.name?.charAt(0) || '?'}
+                            {comment.user?.name?.charAt(0) || comment.authorName?.charAt(0) || '?'}
                           </AvatarFallback>
                         </Avatar>
                       )}
@@ -765,6 +821,68 @@ export function HelpdeskTicketDetailPage() {
               )}
             </CardContent>
           </Card>
+
+          {/* Classification — who can pick the ticket up can also steer it:
+              category and project are settable/resettable here for internal
+              and external tickets alike, via the manage-gated update API. */}
+          {managesQueue && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Classification</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-muted-foreground">Category</Label>
+                  <Select
+                    value={ticket.categoryId ? String(ticket.categoryId) : 'none'}
+                    onValueChange={(v) =>
+                      classificationMutation.mutate({ categoryId: v === 'none' ? null : Number(v) })
+                    }
+                    disabled={classificationMutation.isPending}
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder="Select category" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">No category</SelectItem>
+                      {(categoriesData ?? []).map((cat) => (
+                        <SelectItem key={cat.id} value={String(cat.id)}>
+                          {cat.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-muted-foreground">Project</Label>
+                  <Select
+                    value={ticket.projectId ? String(ticket.projectId) : 'none'}
+                    onValueChange={(v) =>
+                      classificationMutation.mutate({ projectId: v === 'none' ? null : Number(v) })
+                    }
+                    disabled={classificationMutation.isPending}
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder="Select project" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">No project</SelectItem>
+                      {(projectsData ?? []).map((proj) => (
+                        <SelectItem key={proj.id} value={String(proj.id)}>
+                          {proj.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {ticket.projectId && (
+                    <p className="text-[11px] text-muted-foreground">
+                      Setting a project on a portal ticket does not auto-assign it — assignment stays manual.
+                    </p>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          )}
 
           {/* Assignment */}
           <Card>
@@ -1173,7 +1291,7 @@ function AssignDialog({
           placeholder="Unassigned"
           searchPlaceholder="Search people…"
           emptyMessage="Nobody with helpdesk access matches that search."
-          contentClassName="w-[340px]"
+          contentClassName="min-w-[400px]"
           groups={[
             {
               items: [

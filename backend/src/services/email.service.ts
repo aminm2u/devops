@@ -306,3 +306,71 @@ export function otpEmail(userName: string, otp: string): { subject: string; html
     `,
   };
 }
+
+/**
+ * OTP for the external helpdesk portal — wording is about ticket tracking,
+ * deliberately not the registration copy above.
+ */
+export function portalOtpEmail(otp: string): { subject: string; html: string } {
+  return {
+    subject: `Your Support Ticket Access Code`,
+    html: `
+      <!DOCTYPE html>
+      <html>
+      <head><meta charset="utf-8"></head>
+      <body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+        <div style="background: #1e40af; color: white; padding: 20px; border-radius: 8px 8px 0 0;">
+          <h1 style="margin: 0; font-size: 24px;">🎫 Support Ticket Access</h1>
+        </div>
+        <div style="background: #f8fafc; padding: 20px; border: 1px solid #e2e8f0; border-top: none; border-radius: 0 0 8px 8px;">
+          <p>Use the following code to view your support tickets:</p>
+          <div style="text-align: center; margin: 30px 0;">
+            <div style="background: #1e40af; color: white; padding: 20px 40px; border-radius: 8px; font-size: 32px; font-weight: bold; letter-spacing: 8px; display: inline-block;">
+              ${otp}
+            </div>
+          </div>
+          <p style="color: #64748b; font-size: 14px;">This code expires in <strong>10 minutes</strong> and can be used up to 5 times.</p>
+          <p style="color: #64748b; font-size: 12px;">If you did not request this code, you can safely ignore this email — no changes were made to any ticket.</p>
+        </div>
+      </body>
+      </html>
+    `,
+  };
+}
+
+/** Confirmation sent to an external reporter right after their ticket lands. */
+export function portalTicketAckEmail(
+  contactName: string,
+  ticketNumber: string,
+  title: string,
+  portalBaseUrl: string
+): { subject: string; html: string } {
+  const trackUrl = `${portalBaseUrl}/portal/track`;
+  return {
+    subject: `${ticketNumber} — We received your support ticket`,
+    html: `
+      <!DOCTYPE html>
+      <html>
+      <head><meta charset="utf-8"></head>
+      <body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+        <div style="background: #1e40af; color: white; padding: 20px; border-radius: 8px 8px 0 0;">
+          <h1 style="margin: 0; font-size: 24px;">✅ Ticket Received</h1>
+        </div>
+        <div style="background: #f8fafc; padding: 20px; border: 1px solid #e2e8f0; border-top: none; border-radius: 0 0 8px 8px;">
+          <p>Hi <strong>${contactName || "there"}</strong>,</p>
+          <p>We have received your support request:</p>
+          <div style="background: white; border: 1px solid #e2e8f0; border-radius: 6px; padding: 16px; margin: 16px 0;">
+            <p style="margin: 0 0 4px;"><strong>${ticketNumber}</strong></p>
+            <p style="margin: 0; color: #475569;">${title}</p>
+          </div>
+          <p>Our support team will pick it up shortly. Keep this email — the ticket number identifies your request.</p>
+          <div style="text-align: center; margin: 30px 0;">
+            <a href="${trackUrl}" style="background: #1e40af; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold;">Track Your Ticket</a>
+          </div>
+          <p style="color: #64748b; font-size: 12px;">To follow up, open the tracking page, enter the email you submitted the ticket with, and we will send you an access code.</p>
+        </div>
+      </body>
+      </html>
+    `,
+  };
+}
