@@ -75,6 +75,8 @@ export interface AssigneeRow {
 
 export interface TicketRow {
   id: number;
+  /** Stable URL token — detail links prefer this over the enumerable id. */
+  publicId: string | null;
   title: string;
   status: string;
   priority: string;

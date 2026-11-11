@@ -951,10 +951,35 @@ function PolicyFormDialog({
  * as they are; this only decides what a person reads in the table. Anything
  * missing falls back to the code, which is right for the procurement documents
  * whose prefixes already say what they are.
+ *
+ * Each entry carries a one-line explanation so the table says what the number
+ * is *for* without leaving the page — the row label reads as the document, the
+ * grey line underneath reads as where it shows up.
  */
 const REF_TYPE_LABEL: Record<string, string> = {
   employee: 'Employee ID',
+  ticket: 'Helpdesk Ticket',
 };
+
+/**
+ * Where each numbered document actually appears, so an admin editing the
+ * format knows what they are changing before they change it. Missing types
+ * fall back to the sentence below, which stays true generically.
+ */
+const REF_TYPE_EXPLANATION: Record<string, string> = {
+  employee:
+    'Issued to every new staff record on hire. Shown on the employee profile and the people directory; the format is normally left without a year so staff numbers never change shape.',
+  ticket:
+    'Issued when a support ticket is raised in the helpdesk. Shown beside the ticket title on the ticket page, the queue and the reports, and it is the reference people quote when chasing a request.',
+};
+
+const DEFAULT_EXPLANATION =
+  'Issued automatically when one of these documents is created. The prefix, year and counter below decide what the printed reference looks like everywhere in the app.';
+
+/** "status_po" → "Status Po" is already handled; this lifts each word. */
+function titleCase(text: string): string {
+  return text.replace(/\w\S*/g, (word) => word.charAt(0).toUpperCase() + word.slice(1));
+}
 
 export function NumberingTab() {
   const queryClient = useQueryClient();
@@ -1002,7 +1027,17 @@ export function NumberingTab() {
             <TableBody>
               {configs.map((config) => (
                 <TableRow key={config.id} className="hover:bg-muted/40 dark:text-gray-400 text-gray-500">
-                  <TableCell className="font-medium pl-5">{REF_TYPE_LABEL[config.refType] ?? config.refType}</TableCell>
+                  <TableCell className="font-medium pl-5">
+                    {/* Document types read as names — "Helpdesk Ticket", not
+                        the raw "ticket" refType — with a one-line explanation
+                        of what the number is for underneath. */}
+                    <span className="text-foreground dark:text-gray-200">
+                      {titleCase(REF_TYPE_LABEL[config.refType] ?? config.refType)}
+                    </span>
+                    <span className="block text-xs font-normal text-muted-foreground">
+                      {REF_TYPE_EXPLANATION[config.refType] ?? DEFAULT_EXPLANATION}
+                    </span>
+                  </TableCell>
                   <TableCell className="font-mono">{config.prefix}</TableCell>
                   <TableCell className="font-mono">{config.separator}</TableCell>
                   <TableCell>{config.yearFormat === 'NONE' ? '—' : config.yearFormat}</TableCell>
@@ -1089,7 +1124,7 @@ function NumberingDialog({
     <FormDialog
       open
       onOpenChange={onClose}
-      title={`Numbering — ${REF_TYPE_LABEL[config.refType] ?? config.refType}`}
+      title={`Numbering — ${titleCase(REF_TYPE_LABEL[config.refType] ?? config.refType)}`}
       description="Configure how reference numbers are generated for this document type"
       maxWidth="sm"
       onSubmit={() => mutation.mutate()}

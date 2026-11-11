@@ -99,6 +99,12 @@ model ProjectRole {
 
 model User {
   id              Int       @id @default(autoincrement())
+  /// Stable non-sequential identifier for URLs. The numeric id stays the
+  /// foreign key everywhere; this only decorates routes so employee records
+  /// cannot be enumerated by editing the number in the address bar. Nullable
+  /// because Prisma's `@default(uuid())` is client-side only — existing rows
+  /// are filled by a one-time backfill, new creates get it for free.
+  publicId        String?   @unique @default(uuid()) @map("public_id")
   name            String
   email           String    @unique
   emailVerifiedAt DateTime? @map("email_verified_at")
@@ -1483,6 +1489,15 @@ model HelpdeskCategory {
 
 model HelpdeskTicket {
   id              Int       @id @default(autoincrement())
+  /// Stable non-sequential identifier for detail URLs, mirroring
+  /// `User.publicId` — tickets must not be enumerable by editing the id in
+  /// the address bar. Nullable for the same client-side-default reason; see
+  /// the User model comment.
+  publicId        String?   @unique @default(uuid()) @map("public_id")
+  /// Human-facing number from the `ticket` reference-number config (HD-0001).
+  /// Issued at creation from the numbering table, so the format is editable
+  /// under Settings → Numbering. Distinct from the url token above.
+  ticketNumber    String?   @unique @map("ticket_number")
   projectId       Int?      @map("project_id")
   teamId          Int?      @map("team_id")
   title           String
@@ -1541,6 +1556,9 @@ model HelpdeskComment {
 
   ticket HelpdeskTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
   user   User?          @relation(fields: [userId], references: [id], onDelete: SetNull)
+  /// Files posted with this comment — the reverse half of
+  /// `HelpdeskAttachment.commentId`.
+  attachments HelpdeskAttachment[]
 
   @@index([ticketId])
   @@index([userId])
@@ -1562,6 +1580,9 @@ model HelpdeskAttachment {
 
   ticket   HelpdeskTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
   uploader User?          @relation(fields: [uploadedBy], references: [id], onDelete: SetNull)
+  /// The comment the file was posted with, if any. Attachments can also hang
+  /// straight off a ticket without a comment.
+  comment HelpdeskComment? @relation(fields: [commentId], references: [id], onDelete: Cascade)
 
   @@index([ticketId])
   @@map("helpdesk_attachments")

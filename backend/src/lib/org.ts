@@ -48,8 +48,8 @@ export async function assertNoManagerCycle(
  */
 export async function managerChain(
   userId: number
-): Promise<{ id: number; name: string; email: string }[]> {
-  const chain: { id: number; name: string; email: string }[] = [];
+): Promise<{ id: number; publicId: string | null; name: string; email: string }[]> {
+  const chain: { id: number; publicId: string | null; name: string; email: string }[] = [];
   const seen = new Set<number>([userId]);
 
   let cursor = (
@@ -63,10 +63,15 @@ export async function managerChain(
     seen.add(cursor);
     const manager = await prisma.user.findUnique({
       where: { id: cursor },
-      select: { id: true, name: true, email: true, directManagerId: true },
+      select: { id: true, publicId: true, name: true, email: true, directManagerId: true },
     });
     if (!manager) break;
-    chain.push({ id: manager.id, name: manager.name, email: manager.email });
+    chain.push({
+      id: manager.id,
+      publicId: manager.publicId,
+      name: manager.name,
+      email: manager.email,
+    });
     cursor = manager.directManagerId;
   }
 

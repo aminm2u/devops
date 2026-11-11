@@ -236,7 +236,12 @@ export function HelpdeskManagePage() {
   };
 
   const categories: HelpdeskCategory[] = categoriesData || [];
-  const users: { id: number; name: string; email: string }[] = usersData || [];
+  // Array-guard rather than `|| []`: a cache entry written by an older bundle
+  // under the same key can be the raw response object, and `.filter` on that
+  // is the crash this page used to throw.
+  const users: { id: number; name: string; email: string }[] = Array.isArray(usersData)
+    ? usersData
+    : [];
   const tickets: HelpdeskTicket[] = ticketsData?.data || [];
   const meta = ticketsData?.meta || { currentPage: 1, lastPage: 1, total: 0 };
 
@@ -326,7 +331,7 @@ export function HelpdeskManagePage() {
             size="icon"
             className="h-8 w-8"
             title="View"
-            onClick={() => navigate(`/helpdesk/${ticket.id}`)}
+            onClick={() => navigate(`/helpdesk/${ticket.publicId ?? ticket.id}`)}
           >
             <Eye className="h-4 w-4" />
           </Button>

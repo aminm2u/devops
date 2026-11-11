@@ -10,14 +10,14 @@ import { formatStatus, getStatusColor } from '@/lib/utils';
  * intentional (e.g. `approved` is green for POs, amber for payments) —
  * they mirror what the live pages show today.
  */
-const gray = 'bg-gray-100 text-gray-700 dark:bg-gray-900/30 dark:text-gray-400';
-const blue = 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400';
-const green = 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400';
-const emerald = 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400';
-const amber = 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400';
-const orange = 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400';
-const purple = 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400';
-const red = 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400';
+const gray = 'bg-gray-100 text-gray-700 dark:bg-gray-900/30 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-800/50';
+const blue = 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 hover:bg-blue-200 dark:hover:bg-blue-800/50';
+const green = 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 hover:bg-green-200 dark:hover:bg-green-800/50';
+const emerald = 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400 hover:bg-emerald-200 dark:hover:bg-emerald-800/50';
+const amber = 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400 hover:bg-amber-200 dark:hover:bg-amber-800/50';
+const orange = 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400 hover:bg-orange-200 dark:hover:bg-orange-800/50';
+const purple = 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400 hover:bg-purple-200 dark:hover:bg-purple-800/50';
+const red = 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 hover:bg-red-200 dark:hover:bg-red-800/50';
 
 export type StatusDomain =
   | 'po'

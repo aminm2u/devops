@@ -129,7 +129,7 @@ export function HelpdeskReportView({
             </SelectContent>
           </Select>
           <Button variant="outline" asChild>
-            <Link to="/helpdesk/manage">
+            <Link to="/devops/helpdesk">
               <ArrowLeft className="mr-2 h-4 w-4" />
               Queue
             </Link>
@@ -625,7 +625,7 @@ export function HelpdeskReportView({
               </p>
             </CardHeader>
             <CardContent>
-              <div className="max-h-[420px] overflow-auto rounded-md border">
+              <div className="max-h-[420px] overflow-auto rounded-md border dark:border-gray-800 border-gray-400 p-2">
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -635,7 +635,7 @@ export function HelpdeskReportView({
                       <TableHead>Category</TableHead>
                       <TableHead>Assignee</TableHead>
                       <TableHead className="text-right">Resolved in</TableHead>
-                      <TableHead>Created</TableHead>
+                      <TableHead className="text-right">Created</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -643,8 +643,8 @@ export function HelpdeskReportView({
                       <TableRow key={ticket.id}>
                         <TableCell className="max-w-[240px] truncate font-medium">
                           <Link
-                            to={`/helpdesk/${ticket.id}`}
-                            className="hover:text-primary hover:underline"
+                            to={`/helpdesk/${ticket.publicId ?? ticket.id}`}
+                            className="hover:text-primary hover:underline dark:text-gray-400 text-gray-800"
                           >
                             {ticket.title}
                           </Link>
@@ -655,14 +655,14 @@ export function HelpdeskReportView({
                         <TableCell>
                           <Badge variant="outline">{formatStatus(ticket.priority)}</Badge>
                         </TableCell>
-                        <TableCell className="text-sm">{ticket.category ?? '—'}</TableCell>
-                        <TableCell className="text-sm">{ticket.assignee ?? 'Unassigned'}</TableCell>
+                        <TableCell className="text-sm dark:text-gray-400 text-gray-800">{ticket.category ?? '—'}</TableCell>
+                        <TableCell className="text-sm dark:text-gray-400 text-gray-800">{ticket.assignee ?? 'Unassigned'}</TableCell>
                         <TableCell className="text-right text-sm tabular-nums">
                           <span className={ticket.slaBreached ? 'text-destructive' : undefined}>
                             {formatDuration(ticket.resolutionMinutes)}
                           </span>
                         </TableCell>
-                        <TableCell className="text-sm text-muted-foreground">
+                        <TableCell className="text-sm text-right dark:text-gray-400 text-gray-800">
                           {new Date(ticket.createdAt).toLocaleDateString(undefined, {
                             day: 'numeric',
                             month: 'short',

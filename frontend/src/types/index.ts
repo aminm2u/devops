@@ -717,6 +717,10 @@ export interface HelpdeskCategory {
 
 export interface HelpdeskTicket {
   id: number;
+  /** Stable URL token — detail links prefer this over the enumerable id. */
+  publicId: string | null;
+  /** Human-facing number (HD-0001) from the numbering config. */
+  ticketNumber: string | null;
   projectId: number | null;
   title: string;
   slug: string;
@@ -763,6 +767,8 @@ export interface HelpdeskComment {
   createdAt: string;
   updatedAt: string;
   user?: { id: number; name: string; email: string } | null;
+  /** Files posted with the comment, rendered inside its bubble. */
+  attachments?: HelpdeskAttachment[];
 }
 
 export interface HelpdeskAttachment {

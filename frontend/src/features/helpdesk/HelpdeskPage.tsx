@@ -211,7 +211,7 @@ export function HelpdeskPage() {
       queryClient.invalidateQueries({ queryKey: ['helpdesk-stats'] });
       setShowCreateDialog(false);
       toast.success('Ticket created');
-      navigate(`/helpdesk/${data.data.id}`);
+      navigate(`/helpdesk/${data.data.publicId ?? data.data.id}`);
     },
     onError: (err: any) => {
       // A 400 comes back as { error: "Validation failed", errors: { field: [msg] } },
@@ -241,7 +241,7 @@ export function HelpdeskPage() {
       header: 'Ticket',
       width: 'w-16',
       className: 'font-mono text-sm text-muted-foreground',
-      accessor: (ticket) => `HD-${String(ticket.id).padStart(4, '0')}`,
+      accessor: (ticket) => ticket.ticketNumber ?? `HD-${String(ticket.id).padStart(4, '0')}`,
     },
     {
       key: 'subject',
@@ -290,7 +290,6 @@ export function HelpdeskPage() {
         ticket.category ? (
           <Badge
             variant="outline"
-            style={ticket.category.color ? { borderColor: ticket.category.color, color: ticket.category.color } : {}}
           >
             {ticket.category.name}
           </Badge>
@@ -348,7 +347,7 @@ export function HelpdeskPage() {
           size="sm"
           onClick={(e) => {
             e.stopPropagation();
-            navigate(`/helpdesk/${ticket.id}`);
+            navigate(`/helpdesk/${ticket.publicId ?? ticket.id}`);
           }}
         >
           <Eye className="h-4 w-4" />
@@ -377,7 +376,7 @@ export function HelpdeskPage() {
           </Button>
         )}
         {userRole === 'admin' && (
-          <Button size="sm" variant="outline" onClick={() => navigate('/helpdesk/manage')}>
+          <Button size="sm" variant="outline" onClick={() => navigate('/devops/helpdesk')}>
             <Settings className="mr-2 h-4 w-4" />
             Manage Tickets
           </Button>
@@ -488,7 +487,7 @@ export function HelpdeskPage() {
         data={tickets}
         loading={isLoading}
         loadingRows={5}
-        onRowClick={(ticket) => navigate(`/helpdesk/${ticket.id}`)}
+        onRowClick={(ticket) => navigate(`/helpdesk/${ticket.publicId ?? ticket.id}`)}
         search={{
           value: search,
           onChange: changeSearch,

@@ -206,12 +206,6 @@ export const APP_ROUTES: AppRoute[] = [
     meta: { title: 'Ticket' },
   },
   {
-    // Kept for links already written into notifications and the old sidebar.
-    path: 'helpdesk/manage',
-    element: <HelpdeskManagePage />,
-    meta: { title: 'Helpdesk Queue', permission: 'helpdesk.ticket.manage' },
-  },
-  {
     path: 'helpdesk/reports',
     element: <HelpdeskReportPage />,
     meta: { title: 'Helpdesk Reports', permission: 'helpdesk.report.view' },
@@ -521,6 +515,10 @@ export const LEGACY_REDIRECTS: { from: string; to: string }[] = [
   { from: 'payments', to: '/procurement/payments' },
   { from: 'profile', to: '/settings' },
   { from: 'admin/users', to: '/hr/users' },
+  // The helpdesk queue lives at /devops/helpdesk; the old /helpdesk/manage
+  // address (still written into older notifications) lands there too, so the
+  // sidebar highlights Helpdesk Queue rather than Ticket.
+  { from: 'helpdesk/manage', to: '/devops/helpdesk' },
   // Teams are no longer a page: membership and leadership are edited on the
   // employee record, so the old address lands on the directory.
   { from: 'hr/teams', to: '/hr/users' },

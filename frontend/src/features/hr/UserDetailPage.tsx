@@ -7,6 +7,8 @@ import {
   Building2,
   CalendarDays,
   Check,
+  ChevronLeft,
+  ChevronRight,
   GitBranch,
   KeyRound,
   Mail,
@@ -76,6 +78,7 @@ interface ReferenceData {
 
 interface UserDetail {
   id: number;
+  publicId: string | null;
   name: string;
   email: string;
   employeeId: string | null;
@@ -93,12 +96,12 @@ interface UserDetail {
   unit: { id: number; name: string; code: string | null } | null;
   position: { id: number; name: string; gradeLevel: number | null } | null;
   employmentType: { id: number; name: string } | null;
-  directManager: { id: number; name: string; email: string } | null;
-  subordinates: { id: number; name: string; email: string }[];
+  directManager: { id: number; publicId: string | null; name: string; email: string } | null;
+  subordinates: { id: number; publicId: string | null; name: string; email: string }[];
   roles: { id: number; name: string; level: number; color: string | null; isSystem: boolean }[];
   directPermissions: { name: string; group: string; effect: string; scope: string }[];
   teams: { id: number; name: string; type: string; teamRole: string }[];
-  managerChain: { id: number; name: string; email: string }[];
+  managerChain: { id: number; publicId: string | null; name: string; email: string }[];
 }
 
 interface FormState {
@@ -175,7 +178,14 @@ function diff(user: UserDetail, form: FormState): Record<string, unknown> {
 
 export function UserDetailPage() {
   const { id } = useParams<{ id: string }>();
-  const userId = Number(id);
+  /**
+   * The route carries a `publicId` uuid (or a legacy numeric id from old
+   * bookmarks). It identifies the record but is never used for writes — every
+   * mutation below goes through `user.id` from the fetched record, so a uuid
+   * URL can load the page and act on it without the backend ever seeing the
+   * URL token as a number.
+   */
+  const userParam = id ?? '';
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { can } = useAuth();
@@ -192,9 +202,12 @@ export function UserDetailPage() {
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   const { data: user, isLoading, error } = useQuery({
-    queryKey: ['user', userId],
-    queryFn: () => apiClient.get(`/admin/users/${userId}`).then((r) => r.data.data as UserDetail),
-    enabled: Number.isFinite(userId),
+    // Keyed by the URL token (uuid or legacy numeric id). Invalidation below
+    // uses the ['user'] prefix, which matches this key and any numeric-keyed
+    // copy elsewhere — UserTeamsCard invalidates the same way.
+    queryKey: ['user', userParam],
+    queryFn: () => apiClient.get(`/admin/users/${userParam}`).then((r) => r.data.data as UserDetail),
+    enabled: !!userParam,
   });
 
   const { data: references } = useQuery({
@@ -206,9 +219,48 @@ export function UserDetailPage() {
   const { data: people } = useQuery({
     queryKey: ['users', 'list'],
     queryFn: () =>
-      apiClient.get('/admin/users/list').then((r) => r.data.data as { id: number; name: string; email: string }[]),
+      apiClient
+        .get('/admin/users/list')
+        .then(
+          (r) =>
+            r.data.data as { id: number; publicId: string | null; name: string; email: string }[]
+        ),
     staleTime: 60_000,
   });
+
+  /**
+   * Active staff in id order — the universe the prev/next chevrons walk.
+   *
+   * A separate query rather than reusing the name-ordered picker list above:
+   * same endpoint, different cache entry, so the two orderings never overwrite
+   * each other and the picker keeps its alphabetical list.
+   */
+  const { data: peopleById = [] } = useQuery({
+    queryKey: ['users', 'list', 'by-id'],
+    queryFn: () =>
+      apiClient
+        .get('/admin/users/list', { params: { orderBy: 'id' } })
+        .then(
+          (r) =>
+            r.data.data as { id: number; publicId: string | null; name: string; email: string }[]
+        ),
+    staleTime: 60_000,
+    enabled: !!user,
+  });
+
+  /**
+   * Neighbours in the active-staff walk. An inactive current record is not in
+   * the list (`idx === -1`), so both chevrons disable — stepping through the
+   * directory is defined over active employees only.
+   */
+  const prevNext = useMemo(() => {
+    if (!user) return { prev: undefined, next: undefined };
+    const idx = peopleById.findIndex((p) => p.id === user.id);
+    return {
+      prev: idx > 0 ? peopleById[idx - 1] : undefined,
+      next: idx >= 0 && idx < peopleById.length - 1 ? peopleById[idx + 1] : undefined,
+    };
+  }, [user, peopleById]);
 
   const { data: roles = [] } = useQuery({
     queryKey: ['access', 'roles'],
@@ -362,11 +414,14 @@ export function UserDetailPage() {
   const changes = useMemo(() => (user && form ? diff(user, form) : {}), [user, form]);
   const changeCount = Object.keys(changes).length;
 
+  // Every write goes through the numeric id from the fetched record — never
+  // the URL token, which is a uuid. Mutations only fire from the rendered
+  // page, so `user` is always loaded by the time they can run.
   const saveMutation = useMutation({
     mutationFn: (payload: Record<string, unknown>) =>
-      apiClient.put(`/admin/users/${userId}`, payload),
+      apiClient.put(`/admin/users/${user!.id}`, payload),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['user', userId] });
+      queryClient.invalidateQueries({ queryKey: ['user'] });
       queryClient.invalidateQueries({ queryKey: ['users'] });
       queryClient.invalidateQueries({ queryKey: ['org'] });
       toast.success('Employee record updated');
@@ -376,9 +431,9 @@ export function UserDetailPage() {
   });
 
   const issueNumberMutation = useMutation({
-    mutationFn: () => apiClient.post(`/admin/users/${userId}/employee-number`),
+    mutationFn: () => apiClient.post(`/admin/users/${user!.id}/employee-number`),
     onSuccess: (res) => {
-      queryClient.invalidateQueries({ queryKey: ['user', userId] });
+      queryClient.invalidateQueries({ queryKey: ['user'] });
       queryClient.invalidateQueries({ queryKey: ['users'] });
       toast.success(`Employee number ${res.data.data.employeeId} issued`);
     },
@@ -387,10 +442,10 @@ export function UserDetailPage() {
   });
 
   const addRoleMutation = useMutation({
-    mutationFn: (roleName: string) => accessApi.setUserRoles(userId, { add: [roleName] }),
+    mutationFn: (roleName: string) => accessApi.setUserRoles(user!.id, { add: [roleName] }),
     onSuccess: () => {
       setRoleToAdd('');
-      queryClient.invalidateQueries({ queryKey: ['user', userId] });
+      queryClient.invalidateQueries({ queryKey: ['user'] });
       queryClient.invalidateQueries({ queryKey: ['users'] });
       toast.success('Role added');
     },
@@ -399,10 +454,10 @@ export function UserDetailPage() {
   });
 
   const removeRoleMutation = useMutation({
-    mutationFn: (roleName: string) => accessApi.setUserRoles(userId, { remove: [roleName] }),
+    mutationFn: (roleName: string) => accessApi.setUserRoles(user!.id, { remove: [roleName] }),
     onSuccess: () => {
       setRemovingRole(null);
-      queryClient.invalidateQueries({ queryKey: ['user', userId] });
+      queryClient.invalidateQueries({ queryKey: ['user'] });
       queryClient.invalidateQueries({ queryKey: ['users'] });
       toast.success('Role removed');
     },
@@ -413,7 +468,7 @@ export function UserDetailPage() {
   });
 
   const deleteMutation = useMutation({
-    mutationFn: () => apiClient.delete(`/admin/users/${userId}`),
+    mutationFn: () => apiClient.delete(`/admin/users/${user!.id}`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['users'] });
       toast.success('Employee removed');
@@ -471,10 +526,42 @@ export function UserDetailPage() {
   return (
     <div className="animate-fade-in space-y-5">
       <div>
-        <Button variant="ghost" size="sm" className="-ml-2 mb-2" onClick={() => navigate('/hr/users')}>
-          <ArrowLeft className="mr-1.5 h-3.5 w-3.5" />
-          All employees
-        </Button>
+        <div className="mb-2 flex items-center gap-1">
+          <Button variant="ghost" size="sm" className="-ml-2" onClick={() => navigate('/hr/users')}>
+            <ArrowLeft className="mr-1.5 h-3.5 w-3.5" />
+            All employees
+          </Button>
+          {/* Walk the active directory in id order. Both chevrons disable on
+              an inactive record — it is not part of the walk. */}
+          <div className="ml-1 flex items-center gap-0.5">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7"
+              disabled={!prevNext.prev}
+              title={prevNext.prev ? `Previous: ${prevNext.prev.name}` : 'No previous employee'}
+              onClick={() =>
+                prevNext.prev &&
+                navigate(`/hr/users/${prevNext.prev.publicId ?? prevNext.prev.id}`)
+              }
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7"
+              disabled={!prevNext.next}
+              title={prevNext.next ? `Next: ${prevNext.next.name}` : 'No next employee'}
+              onClick={() =>
+                prevNext.next &&
+                navigate(`/hr/users/${prevNext.next.publicId ?? prevNext.next.id}`)
+              }
+            >
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
         <PageHeader
           title={
             <span className="flex items-center gap-3">
@@ -834,19 +921,31 @@ export function UserDetailPage() {
 
               {canManage && assignableRoles.length > 0 && (
                 <div className="flex gap-2">
-                  <Select value={roleToAdd} onValueChange={setRoleToAdd}>
-                    <SelectTrigger className="h-8 text-xs">
-                      <SelectValue placeholder="Add a role…" />
-                    </SelectTrigger>
-                    <SelectContent className="max-h-72">
-                      {assignableRoles.map((role) => (
-                        <SelectItem key={role.id} value={role.name}>
-                          {role.name}
-                          {role.description ? ` — ${role.description}` : ''}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  {/* Same searchable list control as Department and Unit on
+                      this page: role rows carry their level and description so
+                      two similarly-scoped roles can be told apart without
+                      leaving the picker. Grouped by whether the role is one a
+                      person can hold several of. */}
+                  <RichListBox
+                    value={roleToAdd}
+                    onChange={setRoleToAdd}
+                    placeholder="Add a role…"
+                    searchPlaceholder="Search roles…"
+                    emptyMessage="No role matches that search."
+                    className="text-xs"
+                    contentClassName="w-[340px]"
+                    groups={[
+                      {
+                        items: assignableRoles.map((role) => ({
+                          value: role.name,
+                          label: role.name,
+                          description: role.description ?? undefined,
+                          icon: ShieldCheck,
+                          shortcut: `L${role.level}`,
+                        })),
+                      },
+                    ]}
+                  />
                   <Button
                     size="sm"
                     disabled={!roleToAdd || addRoleMutation.isPending}
@@ -909,7 +1008,7 @@ export function UserDetailPage() {
                 </p>
                 {user.directManager ? (
                   <Link
-                    to={`/admin/users/${user.directManager.id}`}
+                    to={`/hr/users/${user.directManager.publicId ?? user.directManager.id}`}
                     className="text-sm hover:text-primary hover:underline"
                   >
                     {user.directManager.name}
@@ -930,7 +1029,10 @@ export function UserDetailPage() {
                     {user.managerChain.map((entry, index) => (
                       <li key={entry.id} className="flex items-center gap-2 text-xs">
                         <span className="w-3 text-right text-muted-foreground">{index + 1}</span>
-                        <Link to={`/admin/users/${entry.id}`} className="hover:text-primary hover:underline">
+                        <Link
+                          to={`/hr/users/${entry.publicId ?? entry.id}`}
+                          className="hover:text-primary hover:underline"
+                        >
                           {entry.name}
                         </Link>
                       </li>
@@ -952,7 +1054,10 @@ export function UserDetailPage() {
                     {user.subordinates.map((report) => (
                       <li key={report.id} className="flex items-center gap-1.5 text-xs">
                         <UserAvatar user={report} size="sm" />
-                        <Link to={`/admin/users/${report.id}`} className="hover:text-primary hover:underline">
+                        <Link
+                          to={`/hr/users/${report.publicId ?? report.id}`}
+                          className="hover:text-primary hover:underline"
+                        >
                           {report.name}
                         </Link>
                       </li>

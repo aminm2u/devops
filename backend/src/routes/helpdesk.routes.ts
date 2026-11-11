@@ -1,8 +1,11 @@
 import { Router, Response, NextFunction } from "express";
 import { z } from "zod";
+import multer from "multer";
+import path from "path";
+import fs from "fs";
 import { authenticate } from "../middleware/auth.js";
 import { authorize } from "../rbac/authorize.js";
-import { can } from "../rbac/effective.js";
+import { can, resolveAccess } from "../rbac/effective.js";
 import { scopeFilter, withScope } from "../rbac/authorize.js";
 import { requirePermission } from "../middleware/rbac.js";
 import { validate } from "../middleware/validate.js";
@@ -11,11 +14,28 @@ import { logActivity } from "../middleware/activity.js";
 import { AppError, NotFoundError } from "../lib/errors.js";
 import { resolveTeamId } from "../lib/teamScope.js";
 import { generateSlug } from "../lib/slug.js";
+import { generateReferenceNumber, TICKET_REF_TYPE } from "../lib/numberGenerator.js";
 import { availablePeriods, monthlyReport } from "../services/helpdeskReport.service.js";
 import prisma from "../config/database.js";
 import { getIO } from "../lib/socket.js";
 
 const router = Router();
+
+/**
+ * Accepts a numeric id (legacy links, socket payloads) or a `publicId` uuid
+ * (detail URLs) for a ticket, and returns the internal row id — null when
+ * nothing matches. Every `/tickets/:id` handler resolves through this so a
+ * uuid URL can load a ticket and act on it. Mirrors `resolveUserParam` in
+ * admin.routes.ts.
+ */
+async function resolveTicketParam(param: string): Promise<number | null> {
+  if (/^\d+$/.test(param)) return parseInt(param, 10);
+  const ticket = await prisma.helpdeskTicket.findFirst({
+    where: { publicId: param },
+    select: { id: true },
+  });
+  return ticket?.id ?? null;
+}
 
 // ==================== Validation Schemas ====================
 
@@ -69,6 +89,63 @@ const createCommentSchema = z.object({
   isInternal: z.boolean().optional(),
 });
 
+// ── Comment attachments ─────────────────────────────────────────────────────
+// Stored on disk under uploads/helpdesk/, filenames uniquified by the
+// timestamp+random suffix multer appends. The DB row keeps the original name
+// for display and the disk path for the download route.
+
+const helpdeskUploadsDir = path.resolve(process.cwd(), "uploads", "helpdesk");
+if (!fs.existsSync(helpdeskUploadsDir)) {
+  fs.mkdirSync(helpdeskUploadsDir, { recursive: true });
+}
+
+const commentAttachmentStorage = multer.diskStorage({
+  destination: (_req, _file, cb) => cb(null, helpdeskUploadsDir),
+  filename: (_req, file, cb) => {
+    const unique = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
+    cb(null, `${unique}${path.extname(file.originalname)}`);
+  },
+});
+
+const commentAttachments = multer({
+  storage: commentAttachmentStorage,
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB per file
+});
+
+/**
+ * GET /api/helpdesk/attachments/:id/download — stream one attachment back.
+ *
+ * Authenticated like every route here; the id alone is the access check
+ * because the ticket's own scope rules were applied when the attachment was
+ * listed, and the row carries nothing but its ticket's files.
+ */
+router.get(
+  "/attachments/:id/download",
+  authenticate,
+  async (req: RequestWithUser, res: Response, next: NextFunction) => {
+    try {
+      const id = parseInt(req.params.id as string, 10);
+      if (!Number.isFinite(id)) throw new AppError(400, "Invalid attachment id");
+
+      const attachment = await prisma.helpdeskAttachment.findFirst({
+        where: { id, isActive: true },
+      });
+      if (!attachment || !fs.existsSync(attachment.path)) {
+        throw new NotFoundError("Attachment not found");
+      }
+
+      res.setHeader("Content-Type", attachment.mimeType);
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="${encodeURIComponent(attachment.originalName)}"`
+      );
+      fs.createReadStream(attachment.path).pipe(res);
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
 const createCategorySchema = z.object({
   name: z.string().min(1, "Name is required"),
   description: z.string().optional().nullable(),
@@ -113,6 +190,26 @@ function ticketScope(req: RequestWithUser): Record<string, unknown> {
   }
 
   return { reportedBy: userId };
+}
+
+/**
+ * Internal notes are for the people working the ticket: its assignee and
+ * helpdesk managers (`helpdesk.ticket.manage`, plus `read.all` holders who
+ * already see every ticket). Everyone else — the reporter included — never
+ * sees them, in the API response or in socket payloads.
+ */
+function canSeeInternal(
+  ticket: { assignedTo: number | null },
+  req: RequestWithUser
+): boolean {
+  const userId = req.user?.id;
+  if (userId != null && ticket.assignedTo === userId) return true;
+  const access = req.access;
+  if (!access) return false;
+  return (
+    can(access, "helpdesk.ticket.manage", "self") ||
+    can(access, "helpdesk.ticket.read.all", "all")
+  );
 }
 
 // ==================== Stats ====================
@@ -477,6 +574,8 @@ router.get(
       const [tickets, total] = await Promise.all([
         prisma.helpdeskTicket.findMany({
           where,
+          // `include` returns every scalar column, so `publicId` rides along
+          // and list rows can link to uuid detail URLs without a select.
           include: {
             category: { select: { id: true, name: true, color: true } },
             assignee: { select: { id: true, name: true, email: true } },
@@ -516,7 +615,8 @@ router.get(
   authenticate,
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
-      const id = parseInt(req.params.id as string, 10);
+      const id = await resolveTicketParam(req.params.id as string);
+      if (id === null) return res.status(404).json({ error: "Ticket not found" });
       const ticket = await prisma.helpdeskTicket.findFirst({
         // Id alone is not an access check — apply the same visibility rule the
         // list uses so a guessed id cannot read someone else's ticket.
@@ -528,7 +628,15 @@ router.get(
           project: { select: { id: true, name: true, slug: true } },
           comments: {
             where: { isActive: true, deletedAt: null },
-            include: { user: { select: { id: true, name: true, email: true } } },
+            include: {
+              user: { select: { id: true, name: true, email: true } },
+              // Files posted with the comment render inside its bubble.
+              attachments: {
+                where: { isActive: true },
+                include: { uploader: { select: { id: true, name: true } } },
+                orderBy: { createdAt: "asc" },
+              },
+            },
             orderBy: { createdAt: "asc" },
           },
           attachments: {
@@ -541,6 +649,13 @@ router.get(
 
       if (!ticket) {
         return res.status(404).json({ error: "Ticket not found" });
+      }
+
+      // Internal notes are for the assignee and helpdesk managers only. The
+      // comments ride nested inside the ticket, so they are stripped here for
+      // everyone else — their attachments go with them.
+      if (!canSeeInternal(ticket, req)) {
+        ticket.comments = ticket.comments.filter((c) => !c.isInternal);
       }
 
       res.json({ data: ticket });
@@ -669,6 +784,10 @@ router.post(
           teamId: await resolveTeamId(req.access!, data.teamId),
           title: data.title,
           slug,
+          // Issued from the numbering table so the HD-0001 shape is admin
+          // config, not a display convention. Atomic increment, so two tickets
+          // created at once cannot draw the same number.
+          ticketNumber: await generateReferenceNumber(TICKET_REF_TYPE),
           description: data.description,
           priority: data.priority || "medium",
           categoryId: data.categoryId || null,
@@ -757,7 +876,8 @@ router.put(
   validate(updateTicketSchema),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
-      const id = parseInt(req.params.id);
+      const id = await resolveTicketParam(req.params.id as string);
+      if (id === null) throw new NotFoundError("Ticket not found");
       const data = req.body as z.infer<typeof updateTicketSchema>;
 
       const existing = await prisma.helpdeskTicket.findFirst({
@@ -810,7 +930,8 @@ router.delete(
   requirePermission("helpdesk.ticket.manage"),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
-      const id = parseInt(req.params.id);
+      const id = await resolveTicketParam(req.params.id as string);
+      if (id === null) throw new NotFoundError("Ticket not found");
 
       const existing = await prisma.helpdeskTicket.findFirst({
         where: { id, isActive: true, deletedAt: null },
@@ -849,7 +970,8 @@ router.put(
   validate(updateStatusSchema),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
-      const id = parseInt(req.params.id);
+      const id = await resolveTicketParam(req.params.id as string);
+      if (id === null) throw new NotFoundError("Ticket not found");
       const data = req.body as z.infer<typeof updateStatusSchema>;
       const userId = req.user?.id;
 
@@ -962,7 +1084,8 @@ router.put(
   validate(assignTicketSchema),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
-      const id = parseInt(req.params.id);
+      const id = await resolveTicketParam(req.params.id as string);
+      if (id === null) throw new NotFoundError("Ticket not found");
       const data = req.body as z.infer<typeof assignTicketSchema>;
 
       const existing = await prisma.helpdeskTicket.findFirst({
@@ -1041,7 +1164,8 @@ router.put(
   validate(satisfactionSchema),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
-      const id = parseInt(req.params.id);
+      const id = await resolveTicketParam(req.params.id as string);
+      if (id === null) throw new NotFoundError("Ticket not found");
       const data = req.body as z.infer<typeof satisfactionSchema>;
 
       const existing = await prisma.helpdeskTicket.findFirst({
@@ -1081,10 +1205,8 @@ router.get(
   authenticate,
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
-      const ticketId = parseInt(req.params.id);
-      const isAdmin = req.user?.roles?.some((r: any) =>
-        ["super-admin", "devops-admin"].includes(r.name)
-      );
+      const ticketId = await resolveTicketParam(req.params.id as string);
+      if (ticketId === null) throw new NotFoundError("Ticket not found");
 
       const where: any = {
         ticketId,
@@ -1092,8 +1214,12 @@ router.get(
         deletedAt: null,
       };
 
-      // Non-admins can't see internal notes
-      if (!isAdmin) {
+      // Non-staff can't see internal notes — same rule as the detail route.
+      const ticket = await prisma.helpdeskTicket.findFirst({
+        where: { id: ticketId, isActive: true, deletedAt: null },
+        select: { assignedTo: true },
+      });
+      if (!ticket || !canSeeInternal(ticket, req)) {
         where.isInternal = false;
       }
 
@@ -1114,11 +1240,20 @@ router.get(
 router.post(
   "/tickets/:id/comments",
   authenticate,
-  validate(createCommentSchema),
+  // Multipart when files ride along, JSON when they do not. The `validate`
+  // middleware is skipped — multer has already parsed `body`, and the fields
+  // it produces are strings, which the zod booleans below normalise.
+  commentAttachments.array("attachments", 5),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
-      const ticketId = parseInt(req.params.id);
-      const data = req.body as z.infer<typeof createCommentSchema>;
+      const ticketId = await resolveTicketParam(req.params.id as string);
+      if (ticketId === null) throw new NotFoundError("Ticket not found");
+      // Multer delivers every field as a string; the client sends "true"/"false".
+      const data = {
+        content: String(req.body.content ?? ""),
+        isInternal: req.body.isInternal === true || req.body.isInternal === "true",
+      };
+      if (!data.content.trim()) throw new AppError(400, "Content is required");
       const user = req.user;
 
       const ticket = await prisma.helpdeskTicket.findFirst({
@@ -1127,6 +1262,13 @@ router.post(
 
       if (!ticket) {
         return res.status(404).json({ error: "Ticket not found" });
+      }
+
+      // Only the assignee and helpdesk managers may write internal notes —
+      // the same people who can read them. Everyone else's `isInternal` is
+      // rejected outright, so a flagged comment never silently downgrades.
+      if (data.isInternal && !canSeeInternal(ticket, req)) {
+        throw new AppError(403, "You do not have permission to post internal notes");
       }
 
       const comment = await prisma.helpdeskComment.create({
@@ -1138,6 +1280,31 @@ router.post(
         },
         include: { user: { select: { id: true, name: true, email: true } } },
       });
+
+      // Files uploaded with the comment land in the attachments table pointing
+      // at it, so they render inside the comment bubble like any chat client.
+      const files = (req.files as Express.Multer.File[]) ?? [];
+      const attachments = files.length
+        ? await prisma.helpdeskAttachment.createMany({
+            data: files.map((file) => ({
+              ticketId,
+              commentId: comment.id,
+              filename: file.filename,
+              originalName: file.originalname,
+              mimeType: file.mimetype,
+              size: file.size,
+              path: file.path,
+              uploadedBy: user?.id ?? null,
+            })),
+          })
+        : null;
+      const savedAttachments = files.length
+        ? await prisma.helpdeskAttachment.findMany({
+            where: { commentId: comment.id, isActive: true },
+            include: { uploader: { select: { id: true, name: true } } },
+          })
+        : [];
+      void attachments;
 
       // If ticket was awaiting_response, move back to in_progress
       if (ticket.status === "awaiting_response" && !data.isInternal) {
@@ -1155,18 +1322,32 @@ router.post(
         description: `Added comment to ticket: ${ticket.title}`,
       });
 
-      // Emit socket event to clients listening in the ticket room
+      // Emit socket event to clients listening in the ticket room. The room
+      // carries anyone who opened the ticket — reporters included — so an
+      // internal note goes out redacted: just the ping, no content. Every
+      // client re-fetches on this event and the fetch filters per viewer.
+      const commentWithFiles = { ...comment, attachments: savedAttachments };
+      const broadcast =
+        comment.isInternal
+          ? {
+              ticketId,
+              comment: {
+                id: comment.id,
+                ticketId,
+                userId: comment.userId,
+                isInternal: true,
+                createdAt: comment.createdAt,
+              },
+            }
+          : { ticketId, comment: commentWithFiles };
       try {
         const io = getIO();
-        io.to(`ticket-${ticketId}`).emit("new-comment", {
-          ticketId,
-          comment
-        });
+        io.to(`ticket-${ticketId}`).emit("new-comment", broadcast);
       } catch (err) {
         console.error("Socket emit failed:", err);
       }
 
-      res.status(201).json({ data: comment, message: "Comment added" });
+      res.status(201).json({ data: commentWithFiles, message: "Comment added" });
     } catch (error) {
       next(error);
     }
@@ -1210,6 +1391,11 @@ router.delete(
 );
 
 // ==================== Users (for assignment dropdown) ====================
+//
+// Only people who can actually work a ticket: resolving access per active user
+// costs one query set each, but an assignee without `helpdesk.ticket.manage`
+// or `helpdesk.ticket.read.all` cannot even open the ticket they were handed,
+// so filtering here beats showing the whole directory.
 
 router.get(
   "/users",
@@ -1222,7 +1408,19 @@ router.get(
         select: { id: true, name: true, email: true },
         orderBy: { name: "asc" },
       });
-      res.json({ data: users });
+
+      const withAccess: { id: number; name: string; email: string }[] = [];
+      for (const user of users) {
+        const access = await resolveAccess(user.id);
+        if (
+          can(access, "helpdesk.ticket.manage", "self") ||
+          can(access, "helpdesk.ticket.read.all", "all")
+        ) {
+          withAccess.push(user);
+        }
+      }
+
+      res.json({ data: withAccess });
     } catch (error) {
       console.error("Error fetching users:", error);
       res.status(500).json({ error: "Internal server error" });

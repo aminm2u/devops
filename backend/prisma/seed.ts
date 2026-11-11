@@ -87,14 +87,10 @@ async function main() {
   });
   await prisma.department.createMany({
     data: [
-      { code: 'DMA', name: 'Data Management & Analytics' },
       { code: 'BD', name: 'Business Development' },
-      { code: 'IT', name: 'Information Technology' },
-      { code: 'HR', name: 'Human Resources' },
-      { code: 'FIN', name: 'Finance' },
+      { code: 'DI', name: 'Digital Innovation' },
       { code: 'ADMIN', name: 'Administration' },
-      { code: 'PDS', name: 'Project Delivery Services' },
-      { code: 'CS', name: 'CorporateServices' },
+      { code: 'DMA', name: 'Data Management & Analytics' },
     ],
     skipDuplicates: true,
   });
@@ -102,41 +98,41 @@ async function main() {
   // Units sit inside a department, so they are created after the departments
   // they belong to. A person's `unit_id` is what the directory shows between
   // department and position; it is optional everywhere, and a department with
-  // no units (Finance, below) is a normal state rather than an omission.
-  const unitITDevOps = await prisma.unit.create({
-    data: { name: 'DevOps', code: 'DEVOPS', departmentId: deptIT.id, sortOrder: 1 },
+  // no units (HR, BD, FIN, ADMIN, DMA and DI, below) is a normal state rather
+  // than an omission.
+  const unitITInfra = await prisma.unit.create({
+    data: { name: 'Infrastructure', code: 'INFRA', departmentId: deptIT.id, sortOrder: 1 },
   });
   const unitITApps = await prisma.unit.create({
-    data: { name: 'Application Development', code: 'DEV', departmentId: deptIT.id, sortOrder: 2 },
+    data: { name: 'Application Development', code: 'APPS', departmentId: deptIT.id, sortOrder: 2 },
   });
-  const unitITSAs = await prisma.unit.create({
-    data: { name: 'System Analyst', code: 'SA', departmentId: deptIT.id, sortOrder: 3 },
+  const unitITSA = await prisma.unit.create({
+    data: { name: 'System Analyst', code: 'SA', departmentId: deptIT.id },
   });
   const unitITUIUX = await prisma.unit.create({
-    data: { name: 'UI/UX Designer', code: 'UIUX', departmentId: deptIT.id, sortOrder: 4 },
+    data: { name: 'UIUX Designer', code: 'UIUX', departmentId: deptIT.id },
   });
-  const unitITDigital = await prisma.unit.create({
-    data: { name: 'Digital Innovation', code: 'DI', departmentId: deptIT.id, sortOrder: 5 },
+  const unitITDevOps = await prisma.unit.create({
+    data: { name: 'DevOps Engineer', code: 'DEVOPS', departmentId: deptIT.id },
   });
-  const unitHRPeople = await prisma.unit.create({
-    data: { name: 'People Operations', code: 'PEOPLE', departmentId: deptHR.id, sortOrder: 1 },
+  const unitITDI = await prisma.unit.create({
+    data: { name: 'Digital Innovation', code: 'DI', departmentId: deptIT.id },
   });
-  const unitHRPayroll = await prisma.unit.create({
-    data: { name: 'Payroll & Benefits', code: 'PAYROLL', departmentId: deptHR.id, sortOrder: 2 },
-  });
-  const unitPMOPm = await prisma.unit.create({
-    data: { name: 'Project Manager', code: 'PM', departmentId: deptPMO.id, sortOrder: 1 },
+  const unitPMODelivery = await prisma.unit.create({
+    data: { name: 'Project Delivery', code: 'DELIVERY', departmentId: deptPMO.id, sortOrder: 1 },
   });
 
-  const posChief = await prisma.position.create({ data: { name: 'Chief', gradeLevel: 20 } });
-  const posDeputyChief = await prisma.position.create({ data: { name: 'Deputy Chief', gradeLevel: 19 } });
-  const posHod = await prisma.position.create({ data: { name: 'Head of Department', gradeLevel: 18 } });
-  const posDeptHead = await prisma.position.create({ data: { name: 'General Manager', gradeLevel: 17 } });
-  const posManager = await prisma.position.create({ data: { name: 'Manager', gradeLevel: 16 } });
-  const posAsstManager = await prisma.position.create({ data: { name: 'Assistant Manager', gradeLevel: 15 } });
-  const posTeamLead = await prisma.position.create({ data: { name: 'Team Lead', gradeLevel: 10 } });
-  const posAsstTeamLead = await prisma.position.create({ data: { name: 'Assistant Team Lead', gradeLevel: 9 } });
-  const posSrExec = await prisma.position.create({ data: { name: 'Senior Executive', gradeLevel: 5 } });
+  // Grade levels follow the live 1–8 ladder: 1–2 are trainees, 3–4 executives,
+  // 5 leads (team lead, project manager), 6 runs a department, 7–8 are the
+  // corporate offices. Assistant Team Lead shares grade 5 with Team Lead — the
+  // distinction is the appointment, not the grade.
+  const posChief = await prisma.position.create({ data: { name: 'Chief', gradeLevel: 8 } });
+  const posDeputyChief = await prisma.position.create({ data: { name: 'Deputy Chief', gradeLevel: 7 } });
+  const posDeptHead = await prisma.position.create({ data: { name: 'Department Manager', gradeLevel: 6 } });
+  const posManager = await prisma.position.create({ data: { name: 'Project Manager', gradeLevel: 5 } });
+  const posTeamLead = await prisma.position.create({ data: { name: 'Team Lead', gradeLevel: 5 } });
+  const posAsstTeamLead = await prisma.position.create({ data: { name: 'Assistant Team Lead', gradeLevel: 5 } });
+  const posSrExec = await prisma.position.create({ data: { name: 'Senior Executive', gradeLevel: 4 } });
   const posJrExec = await prisma.position.create({ data: { name: 'Junior Executive', gradeLevel: 3 } });
   const posProtege = await prisma.position.create({ data: { name: 'Protege', gradeLevel: 2 } });
   const posIntern = await prisma.position.create({ data: { name: 'Intern', gradeLevel: 1 } });
@@ -219,13 +215,60 @@ async function main() {
   const superAdminRole = roleByName.get("super-admin")!;
 
   // ==================== Users ====================
+  //
+  // Fifteen staff, mirroring the live directory. Users are created in
+  // employee-number order; reporting lines that point forward (e.g. the DevOps
+  // lead reports to the IT manager created below) are wired in the second pass
+  // at the end of this block.
   console.log("Creating users...");
 
-  const hashedPassword = await bcrypt.hash("password", 12);
+  // One credential to remember while testing: the super-admin's password comes
+  // from the environment, everyone else shares the demo default. These are
+  // demo accounts, not production identities.
+  const superAdminPassword = process.env.SEED_SUPERADMIN_PASSWORD || "ChangeMe!2026";
+  const demoPassword = await bcrypt.hash("ChangeMe!2026", 12);
+
+  /**
+   * A staff account. Roles and reporting lines are assigned by the caller,
+   * because a manager may be created later in the same block.
+   */
+  const makeUser = async (input: {
+    name: string;
+    email: string;
+    employeeId: string;
+    departmentId: number;
+    /** Optional: a person may sit directly in a department without a unit. */
+    unitId?: number | null;
+    positionId: number;
+    employmentTypeId?: number | null;
+    joinDate?: string;
+  }) => {
+    const user = await prisma.user.create({
+      data: {
+        ...input,
+        // `joinDate` arrives as a bare "YYYY-MM-DD" string from the callers
+        // below; Prisma wants a Date, and spreading the input would otherwise
+        // hand the string straight to a DateTime column. Recent hires may not
+        // have one yet, which is a normal state rather than an omission.
+        joinDate: input.joinDate ? new Date(input.joinDate) : null,
+        password: demoPassword,
+        isActive: true,
+        emailVerifiedAt: new Date(),
+      },
+    });
+    await prisma.notificationPreference.create({
+      data: { userId: user.id, email: true, inApp: true, sound: true },
+    });
+    return user;
+  };
+
+  const assignRole = (userId: number, roleName: string) =>
+    prisma.modelHasRole.create({
+      data: { roleId: roleByName.get(roleName)!.id, modelType: MODEL_USER, modelId: userId },
+    });
 
   // The governing account. Exactly one super-admin may exist; the invariant is
   // asserted at the end of this seed and enforced by the transfer endpoint.
-  const superAdminPassword = process.env.SEED_SUPERADMIN_PASSWORD || "ChangeMe!2026";
   const itAdmin = await prisma.user.create({
     data: {
       name: "IT Administrator",
@@ -236,7 +279,7 @@ async function main() {
       employeeId: "EMP-001",
       departmentId: deptIT.id,
       unitId: null, // IT admin is not in a unit; they are above the units in the org chart
-      positionId: null, // IT admin is not in a position; they are above the positions in the org chart
+      positionId: posDeptHead.id, // Department Manager
       employmentTypeId: empPerm.id,
       joinDate: new Date("2018-01-02"),
     },
@@ -253,244 +296,199 @@ async function main() {
     data: { userId: itAdmin.id, email: true, inApp: true, sound: true },
   });
 
-  const hrManager = await prisma.user.create({
-    data: {
-      name: "Suraya Hanim",
-      email: "hr@map2u.com.my",
-      password: hashedPassword,
-      isActive: true,
-      emailVerifiedAt: new Date(),
-      employeeId: "EMP-002",
-      departmentId: deptHR.id,
-      unitId: null,
-      positionId: posManager.id,
-      employmentTypeId: empPerm.id,
-      joinDate: new Date("2019-04-08"),
-    },
+  // Head of HR.
+  const hrManager = await makeUser({
+    name: "Suraya Hanim",
+    email: "hr@map2u.com.my",
+    employeeId: "EMP-002",
+    departmentId: deptHR.id,
+    positionId: posDeptHead.id,
+    employmentTypeId: empPerm.id,
+    joinDate: "2019-04-08",
   });
-  await prisma.modelHasRole.create({
-    data: { roleId: roleByName.get("hr-manager")!.id, modelType: MODEL_USER, modelId: hrManager.id },
-  });
+  await assignRole(hrManager.id, "hr-manager");
 
-  const devopsLead = await prisma.user.create({
-    data: {
-      name: "Che Mohd Amin Khalili",
-      email: "amin@map2u.com.my",
-      password: hashedPassword,
-      isActive: true,
-      emailVerifiedAt: new Date(),
-      employeeId: "EMP-003",
-      departmentId: deptIT.id,
-      unitId: unitITDevOps.id,
-      positionId: posTeamLead.id,
-      employmentTypeId: empPerm.id,
-      joinDate: new Date("2021-03-10"),
-      directManagerId: itAdmin.id,
-    },
+  // DevOps team lead, inside IT.
+  const devopsLead = await makeUser({
+    name: "Che Mohd Amin Khalili",
+    email: "amin@map2u.com.my",
+    employeeId: "EMP-003",
+    departmentId: deptIT.id,
+    unitId: unitITDevOps.id,
+    positionId: posTeamLead.id,
+    employmentTypeId: empPerm.id,
+    joinDate: "2021-03-10",
   });
-  await prisma.modelHasRole.create({
-    data: {
-      roleId: roleByName.get("devops-team-lead")!.id,
-      modelType: MODEL_USER,
-      modelId: devopsLead.id,
-    },
-  });
+  await assignRole(devopsLead.id, "devops-team-lead");
 
-  const engineer = await prisma.user.create({
-    data: {
-      name: "Fakhrul Irfan",
-      email: "fakhrul.irfan@map2u.com.my",
-      password: hashedPassword,
-      isActive: true,
-      emailVerifiedAt: new Date(),
-      employeeId: "EMP-004",
-      departmentId: deptIT.id,
-      unitId: unitITApps.id,
-      positionId: posAsstTeamLead.id,
-      employmentTypeId: empContract.id,
-      joinDate: new Date("2022-06-01"),
-      directManagerId: devopsLead.id,
-    },
+  // DevOps engineer, reporting to the lead — a chain the timesheet approver
+  // resolver walks.
+  const engineer = await makeUser({
+    name: "Fakhrul Irfan",
+    email: "fakhrul.irfan@map2u.com.my",
+    employeeId: "EMP-004",
+    departmentId: deptIT.id,
+    unitId: unitITDevOps.id,
+    positionId: posAsstTeamLead.id,
+    employmentTypeId: empContract.id,
+    joinDate: "2022-06-01",
   });
-  await prisma.modelHasRole.create({
-    data: {
-      roleId: roleByName.get("devops-engineer")!.id,
-      modelType: MODEL_USER,
-      modelId: engineer.id,
-    },
+  await assignRole(engineer.id, "devops-engineer");
+
+  // Head of the PMO department (nested under IT).
+  const pmo = await makeUser({
+    name: "Zakaria Mat Rani",
+    email: "zakaria@map2u.com.my",
+    employeeId: "EMP-005",
+    departmentId: deptPMO.id,
+    positionId: posDeptHead.id,
+    employmentTypeId: empPerm.id,
+    joinDate: "2020-07-13",
   });
+  await assignRole(pmo.id, "department-head");
+  await assignRole(pmo.id, "project-manager-officer");
 
-  const pmo = await prisma.user.create({
-    data: {
-      name: "Zakaria Mat Rani",
-      email: "zakaria@map2u.com.my",
-      password: hashedPassword,
-      isActive: true,
-      emailVerifiedAt: new Date(),
-      employeeId: "EMP-005",
-      departmentId: deptPMO.id,
-      unitId: unitPMOPm.id,
-      positionId: posDeptHead.id,
-      employmentTypeId: empPerm.id,
-      joinDate: new Date("2020-07-13"),
-      directManagerId: itAdmin.id,
-    },
+  const finance = await makeUser({
+    name: "Izzlee Lujaini",
+    email: "izzlee@map2u.com.my",
+    employeeId: "EMP-006",
+    departmentId: deptPMO.id,
+    positionId: posManager.id,
+    employmentTypeId: empPerm.id,
+    joinDate: "2020-02-17",
   });
-  await prisma.modelHasRole.create({
-    data: {
-      roleId: roleByName.get("project-manager-officer")!.id,
-      modelType: MODEL_USER,
-      modelId: pmo.id,
-    },
+  await assignRole(finance.id, "finance");
+
+  const employee = await makeUser({
+    name: "Aiman Mu'izz",
+    email: "aiman@map2u.com.my",
+    employeeId: "EMP-007",
+    departmentId: deptIT.id,
+    unitId: unitITDevOps.id,
+    positionId: posSrExec.id,
+    employmentTypeId: empContract.id,
+    joinDate: "2023-08-14",
   });
+  await assignRole(employee.id, "employee");
 
-  const finance = await prisma.user.create({
-    data: {
-      name: "Izzlee Lujaini",
-      email: "izzlee@map2u.com.my",
-      password: hashedPassword,
-      isActive: true,
-      emailVerifiedAt: new Date(),
-      employeeId: "EMP-006",
-      departmentId: deptPMO.id,
-      positionId: posSrExec.id,
-      employmentTypeId: empPerm.id,
-      joinDate: new Date("2020-02-17"),
-      directManagerId: itAdmin.id,
-    },
-  });
-  await prisma.modelHasRole.create({
-    data: { roleId: roleByName.get("finance")!.id, modelType: MODEL_USER, modelId: finance.id },
-  });
-
-  const employee = await prisma.user.create({
-    data: {
-      name: "Aiman Mu'izz",
-      email: "aiman@map2u.com.my",
-      password: hashedPassword,
-      isActive: true,
-      emailVerifiedAt: new Date(),
-      employeeId: "EMP-007",
-      departmentId: deptIT.id,
-      unitId: unitITDevOps.id,
-      positionId: posSrExec.id,
-      employmentTypeId: empContract.id,
-      joinDate: new Date("2023-08-14"),
-      directManagerId: hrManager.id,
-    },
-  });
-  await prisma.modelHasRole.create({
-    data: { roleId: roleByName.get("employee")!.id, modelType: MODEL_USER, modelId: employee.id },
-  });
-
-  await prisma.notificationPreference.createMany({
-    data: [hrManager.id, devopsLead.id, engineer.id, pmo.id, finance.id, employee.id].map(
-      (userId) => ({ userId, email: true, inApp: true, sound: true })
-    ),
-  });
-
-  // ==================== Named test accounts ====================
-  //
-  // One account per tier, so the role-adaptive dashboard and the permission
-  // matrix can be exercised by logging in rather than by editing the database.
-  // They share the super-admin password so there is one credential to remember
-  // while testing — these are demo accounts, not production identities.
-  console.log("Creating named test accounts...");
-
-  const testPassword = await bcrypt.hash("ChangeMe!2026", 12);
-
-  /**
-   * A test account. Roles are passed by preset name; the caller decides the
-   * reporting line afterwards because the manager may be created later in the
-   * same block.
-   */
-  const makeTestUser = async (input: {
-    name: string;
-    email: string;
-    employeeId: string;
-    departmentId: number;
-    /** Optional: a person may sit directly in a department without a unit. */
-    unitId?: number;
-    positionId: number;
-    employmentTypeId: number;
-    joinDate: string;
-  }) => {
-    const user = await prisma.user.create({
-      data: {
-        ...input,
-        // `joinDate` arrives as a bare "YYYY-MM-DD" string from the callers
-        // below; Prisma wants a Date, and spreading the input would otherwise
-        // hand the string straight to a DateTime column.
-        joinDate: new Date(input.joinDate),
-        password: testPassword,
-        isActive: true,
-        emailVerifiedAt: new Date(),
-      },
-    });
-    await prisma.notificationPreference.create({
-      data: { userId: user.id, email: true, inApp: true, sound: true },
-    });
-    return user;
-  };
-
-  const assignRole = (userId: number, roleName: string) =>
-    prisma.modelHasRole.create({
-      data: { roleId: roleByName.get(roleName)!.id, modelType: MODEL_USER, modelId: userId },
-    });
-
-  // IT manager — heads the IT department, so the IT head is their manager's
-  // manager. Reports to the super admin to keep one root in the org chart.
-  const azfar = await makeTestUser({
-    name: "Azfar",
+  // IT department manager — heads IT, so most of the IT staff below report to
+  // him. Uses the shared demo password like the rest.
+  const azfar = await makeUser({
+    name: "Muhammad Afif Azfar",
     email: "azfar@map2u.com.my",
     employeeId: "EMP-101",
     departmentId: deptIT.id,
-    unitId: unitITApps.id,
+    unitId: unitITDevOps.id,
     positionId: posDeptHead.id,
     employmentTypeId: empPerm.id,
     joinDate: "2019-02-04",
   });
   await assignRole(azfar.id, "department-head");
 
-  // The four people below already exist from the block above — they were
-  // created there because the demo projects, teams and incidents reference them
-  // by id. Creating them a second time under the same email violates the unique
-  // constraint on users.email, so this block only adds what the earlier records
-  // do not already carry (extra roles, reporting lines, project membership).
-
-  // PMO manager — heads the PMO department (nested under IT), so reports to
-  // Azfar, which is also what makes IT a two-tier org chart to look at.
-  const zakaria = pmo;
-  await assignRole(zakaria.id, "department-head");
-  await prisma.user.update({ where: { id: zakaria.id }, data: { directManagerId: azfar.id } });
-
-  // DevOps team lead and his engineer, both inside IT. The lead reports to the
-  // IT manager, the engineer to the lead — a chain the timesheet approver
-  // resolver walks.
-  const amin = devopsLead;
-  await prisma.user.update({ where: { id: amin.id }, data: { directManagerId: azfar.id } });
-
-  const aiman = engineer;
-
-  // Project manager inside the PMO, reporting to the PMO manager.
-  const wafiy = await makeTestUser({
+  // Project manager inside the PMO.
+  const wafiy = await makeUser({
     name: "Wafiy",
     email: "wafiy@map2u.com.my",
     employeeId: "EMP-105",
     departmentId: deptPMO.id,
-    unitId: unitPMOPm.id,
-    positionId: posManager.id,
+    positionId: posSrExec.id,
     employmentTypeId: empPerm.id,
     joinDate: "2022-03-21",
   });
   await assignRole(wafiy.id, "project-manager-officer");
-  await prisma.user.update({ where: { id: wafiy.id }, data: { directManagerId: zakaria.id } });
+
+  // Application Development unit — a lead with two reports under him.
+  const naqwal = await makeUser({
+    name: "Ameer Naqwal",
+    email: "naqwal@map2u.com.my",
+    employeeId: "EMP-008",
+    departmentId: deptIT.id,
+    unitId: unitITApps.id,
+    positionId: posTeamLead.id,
+    employmentTypeId: empPerm.id,
+  });
+  await assignRole(naqwal.id, "employee");
+
+  const idlan = await makeUser({
+    name: "Idlan Zikry",
+    email: "idlan@map2u.com.my",
+    employeeId: "EMP-009",
+    departmentId: deptIT.id,
+    unitId: unitITApps.id,
+    positionId: posAsstTeamLead.id,
+  });
+  await assignRole(idlan.id, "employee");
+
+  const harith = await makeUser({
+    name: "Harith Zulkifly",
+    email: "harith@map2u.com.my",
+    employeeId: "EMP-010",
+    departmentId: deptIT.id,
+    unitId: unitITApps.id,
+    positionId: posJrExec.id,
+  });
+  await assignRole(harith.id, "employee");
+
+  // System Analyst unit — a lead with two reports under her.
+  const anis = await makeUser({
+    name: "Nur Anis Azwa",
+    email: "anissazwa@map2u.com.my",
+    employeeId: "EMP-011",
+    departmentId: deptIT.id,
+    unitId: unitITSA.id,
+    positionId: posTeamLead.id,
+    employmentTypeId: empPerm.id,
+  });
+  await assignRole(anis.id, "employee");
+
+  const aza = await makeUser({
+    name: "Nurazalina Abd Samad",
+    email: "aza@map2u.com.my",
+    employeeId: "EMP-012",
+    departmentId: deptIT.id,
+    unitId: unitITSA.id,
+    positionId: posAsstTeamLead.id,
+  });
+  await assignRole(aza.id, "employee");
+
+  const faiqah = await makeUser({
+    name: "Faiqah Ayuni Abd Aziz",
+    email: "faiqah@map2u.com.my",
+    employeeId: "EMP-013",
+    departmentId: deptIT.id,
+    unitId: unitITSA.id,
+    positionId: posJrExec.id,
+  });
+  await assignRole(faiqah.id, "employee");
+
+  // Reporting lines, second pass: a manager may be created after the person
+  // who reports to them. The timesheet approver resolver and the org chart
+  // both walk these links.
+  await prisma.user.update({ where: { id: devopsLead.id }, data: { directManagerId: azfar.id } });
+  await prisma.user.update({ where: { id: engineer.id }, data: { directManagerId: devopsLead.id } });
+  await prisma.user.update({ where: { id: finance.id }, data: { directManagerId: pmo.id } });
+  await prisma.user.update({ where: { id: employee.id }, data: { directManagerId: devopsLead.id } });
+  await prisma.user.update({ where: { id: wafiy.id }, data: { directManagerId: pmo.id } });
+  await prisma.user.update({ where: { id: naqwal.id }, data: { directManagerId: azfar.id } });
+  await prisma.user.update({ where: { id: idlan.id }, data: { directManagerId: naqwal.id } });
+  await prisma.user.update({ where: { id: harith.id }, data: { directManagerId: naqwal.id } });
+  await prisma.user.update({ where: { id: anis.id }, data: { directManagerId: azfar.id } });
+  await prisma.user.update({ where: { id: aza.id }, data: { directManagerId: anis.id } });
+  await prisma.user.update({ where: { id: faiqah.id }, data: { directManagerId: anis.id } });
 
   // Departments are headed by the matching manager.
   await prisma.department.update({ where: { id: deptIT.id }, data: { managerId: azfar.id } });
   await prisma.department.update({ where: { id: deptHR.id }, data: { managerId: hrManager.id } });
   await prisma.department.update({ where: { id: deptFIN.id }, data: { managerId: finance.id } });
-  await prisma.department.update({ where: { id: deptPMO.id }, data: { managerId: zakaria.id } });
+  await prisma.department.update({ where: { id: deptPMO.id }, data: { managerId: pmo.id } });
+
+  // ==================== Teams ====================
+  //
+  // Short aliases for the demo data below, which has always referred to these
+  // people by their first names.
+  const admin = itAdmin;
+  const devopsAdmin = devopsLead;
+  const viewer = employee;
 
   const opsTeam = await prisma.team.create({
     data: {
@@ -527,21 +525,16 @@ async function main() {
   await prisma.teamMember.createMany({
     data: [
       // Che Mohd Amin Khalili leads the DevOps team and his engineer reports to
-      // him. Both are the same records the project and incident data above
+      // him. Both are the same records the project and incident data below
       // already point at, so each person appears here exactly once.
-      { teamId: opsTeam.id, userId: amin.id, teamRole: "lead" },
-      { teamId: opsTeam.id, userId: aiman.id, teamRole: "member" },
+      { teamId: opsTeam.id, userId: devopsLead.id, teamRole: "lead" },
+      { teamId: opsTeam.id, userId: engineer.id, teamRole: "member" },
       { teamId: opsTeam.id, userId: itAdmin.id, teamRole: "member" },
       { teamId: supportTeam.id, userId: employee.id, teamRole: "lead" },
       { teamId: pmoTeam.id, userId: wafiy.id, teamRole: "lead" },
-      { teamId: pmoTeam.id, userId: zakaria.id, teamRole: "member" },
+      { teamId: pmoTeam.id, userId: pmo.id, teamRole: "member" },
     ],
   });
-
-  // Retained names for the demo data below.
-  const admin = itAdmin;
-  const devopsAdmin = devopsLead;
-  const viewer = employee;
 
 
   // ==================== Create Projects ====================
@@ -708,16 +701,16 @@ async function main() {
   // Give the named test accounts a project to land on. A project manager with
   // no project opens an empty list, and a DevOps engineer with no team
   // membership cannot be assigned a task — both make the pages untestable.
-  // `team_assignments` is unique on (project, user), and Amin and Aiman were
-  // already placed above, so they are not repeated here.
+  // `team_assignments` is unique on (project, user), and the DevOps lead and
+  // engineer were already placed above, so they are not repeated here.
   await prisma.teamAssignment.createMany({
     data: [
       { projectId: project1.id, userId: wafiy.id, projectRoleId: prManager.id },
       { projectId: project2.id, userId: wafiy.id, projectRoleId: prManager.id },
       { projectId: project3.id, userId: wafiy.id, projectRoleId: prManager.id },
-      { projectId: project3.id, userId: amin.id, projectRoleId: prLead.id },
+      { projectId: project3.id, userId: devopsLead.id, projectRoleId: prLead.id },
       { projectId: project1.id, userId: azfar.id, projectRoleId: prLead.id },
-      { projectId: project2.id, userId: zakaria.id, projectRoleId: prLead.id },
+      { projectId: project2.id, userId: pmo.id, projectRoleId: prLead.id },
     ],
   });
 
@@ -762,14 +755,14 @@ async function main() {
         columnId: colTodo.id,
         title: "Containerise the reporting worker",
         description: "Move the nightly report job into the shared cluster",
-        assignees: [aiman.id],
+        assignees: [engineer.id],
         priority: "high",
       },
       {
         projectId: project1.id,
         columnId: colInProgress.id,
         title: "Rotate the staging TLS certificates",
-        assignees: [aiman.id, amin.id],
+        assignees: [engineer.id, devopsLead.id],
         priority: "medium",
       },
       {
@@ -1091,14 +1084,13 @@ async function main() {
     ],
     division: [
       { value: "IT", label: "Information Technology", sortOrder: 1 },
-      { value: "DMA", label: "Digital Marketing & Analytics", sortOrder: 2 },
-      { value: "HR", label: "Human Resources", sortOrder: 3 },
-      { value: "BD", label: "Business Development", sortOrder: 4 },
-      { value: "DI", label: "Digital Innovation", sortOrder: 5 },
-      { value: "ADMIN", label: "Administration", sortOrder: 6 },
-      { value: "FIN", label: "Finance", sortOrder: 7 },
-      { value: "OPS", label: "Operations", sortOrder: 8 },
-      { value: "PMO", label: "Project Management Office", sortOrder: 9 },
+      { value: "DMA", label: "Data Management & Analytics", sortOrder: 2 },
+      { value: "BD", label: "Business Development", sortOrder: 3 },
+      { value: "DI", label: "Digital Innovation", sortOrder: 4 },
+      { value: "ADMIN", label: "Administration", sortOrder: 5 },
+      { value: "FIN", label: "Finance", sortOrder: 6 },
+      { value: "PMO", label: "Project Management Office", sortOrder: 7 },
+      { value: "HR", label: "Human Resources", sortOrder: 8 },
     ],
     uom: [
       { value: "Unit", label: "Unit", sortOrder: 1 },
@@ -1429,17 +1421,17 @@ async function main() {
 
   const numberConfigs = [
     // Employment is not dated: a staff number is for life, and the seeded
-    // directory already uses this shape (EMP-001 … EMP-007). The counter starts
-    // past those seven because the next hire is issued by the generator, and a
-    // counter sitting at 1 would spend its first attempts colliding with the
-    // numbers this seed just wrote.
+    // directory already uses this shape (EMP-001 … EMP-013 plus EMP-101 and
+    // EMP-105). The counter starts past those because the next hire is issued
+    // by the generator, and a counter sitting at 1 would spend its first
+    // attempts colliding with the numbers this seed just wrote.
     {
       refType: "employee",
       prefix: "EMP",
       separator: "-",
       yearFormat: "NONE",
       digitPadding: 3,
-      startFrom: 8,
+      startFrom: 14,
     },
     { refType: "req", prefix: "REQ", separator: "-", yearFormat: "YYYY", digitPadding: 4 },
     { refType: "rfq", prefix: "RFQ", separator: "-", yearFormat: "YYYY", digitPadding: 4 },

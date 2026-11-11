@@ -3,6 +3,9 @@ import prisma from "../config/database.js";
 /** The reference type that issues employee numbers. */
 export const EMPLOYEE_REF_TYPE = "employee";
 
+/** The reference type that issues helpdesk ticket numbers (HD-0001). */
+export const TICKET_REF_TYPE = "ticket";
+
 /**
  * Defaults for types the app cannot run without but that a database may predate.
  * Only these are created on demand — a missing procurement config stays a hard
@@ -17,6 +20,9 @@ const SELF_SEEDING_CONFIGS: Record<
   // EMP-007): no year segment, three digits. A new hire should not appear in a
   // visibly different series from the staff hired before them.
   employee: { prefix: "EMP", separator: "-", yearFormat: "NONE", digitPadding: 3 },
+  // Helpdesk tickets read as "HD-0001" today; this config makes that series a
+  // real, editable number rather than a display convention bolted onto the id.
+  ticket: { prefix: "HD", separator: "-", yearFormat: "NONE", digitPadding: 4 },
 };
 
 /**

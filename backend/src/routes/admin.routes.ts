@@ -15,6 +15,22 @@ import { EMPLOYEE_REF_TYPE, generateReferenceNumber } from "../lib/numberGenerat
 
 const router = Router();
 
+/**
+ * Accepts a numeric id (legacy links, pickers) or a `publicId` uuid (detail
+ * URLs) and returns the internal row id, or null when nothing matches. Every
+ * `/users/:id` handler resolves through this so a uuid URL can load the page
+ * *and* act on it — resolving only in GET would leave a bookmarked page that
+ * renders but 400s on every save.
+ */
+async function resolveUserParam(param: string): Promise<number | null> {
+  if (/^\d+$/.test(param)) return parseInt(param, 10);
+  const user = await prisma.user.findUnique({
+    where: { publicId: param },
+    select: { id: true },
+  });
+  return user?.id ?? null;
+}
+
 // ---------------------------------------------------------------------------
 // Directory API — the "digital employee" record.
 //
@@ -25,16 +41,20 @@ const router = Router();
 
 // GET /api/admin/users/list — lightweight picker used by owner/assignee selects.
 // Open to any authenticated user: it returns names only, and half the app's
-// forms need to populate a person dropdown.
+// forms need to populate a person dropdown. `?orderBy=id` serves the employee
+// detail page's prev/next navigation, which walks active staff in id order;
+// every other consumer omits the param and keeps name order.
 router.get(
   "/users/list",
   authenticate,
-  async (_req: RequestWithUser, res: Response, next: NextFunction) => {
+  async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
+      const orderBy =
+        req.query.orderBy === "id" ? { id: "asc" as const } : { name: "asc" as const };
       const users = await prisma.user.findMany({
         where: { isActive: true },
-        select: { id: true, name: true, email: true },
-        orderBy: { name: "asc" },
+        select: { id: true, publicId: true, name: true, email: true },
+        orderBy,
       });
       res.status(200).json({ success: true, data: users });
     } catch (error) {
@@ -188,6 +208,7 @@ router.get(
           where,
           select: {
             id: true,
+            publicId: true,
             name: true,
             email: true,
             employeeId: true,
@@ -267,13 +288,14 @@ router.get(
   authorize({ permission: "hr.user.view" }),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
-      const userId = parseInt(req.params.id as string, 10);
-      if (!Number.isFinite(userId)) throw new AppError(400, "Invalid user id");
+      const userId = await resolveUserParam(req.params.id as string);
+      if (userId === null) throw new NotFoundError("User not found");
 
       const user = await prisma.user.findUnique({
         where: { id: userId },
         select: {
           id: true,
+          publicId: true,
           name: true,
           email: true,
           employeeId: true,
@@ -291,8 +313,8 @@ router.get(
           unit: { select: { id: true, name: true, code: true } },
           position: { select: { id: true, name: true, gradeLevel: true } },
           employmentType: { select: { id: true, name: true } },
-          directManager: { select: { id: true, name: true, email: true } },
-          subordinates: { select: { id: true, name: true, email: true } },
+          directManager: { select: { id: true, publicId: true, name: true, email: true } },
+          subordinates: { select: { id: true, publicId: true, name: true, email: true } },
         },
       });
       if (!user) throw new NotFoundError("User not found");
@@ -467,7 +489,8 @@ router.put(
   validate(updateUserSchema),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
-      const userId = parseInt(req.params.id as string, 10);
+      const userId = await resolveUserParam(req.params.id as string);
+      if (userId === null) throw new NotFoundError("User not found");
       const body = req.body as z.infer<typeof updateUserSchema>;
 
       const user = await prisma.user.findUnique({ where: { id: userId } });
@@ -556,8 +579,8 @@ router.post(
   authorize({ permission: "hr.user.manage" }),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
-      const userId = parseInt(req.params.id as string, 10);
-      if (!Number.isFinite(userId)) throw new AppError(400, "Invalid user id");
+      const userId = await resolveUserParam(req.params.id as string);
+      if (userId === null) throw new NotFoundError("User not found");
 
       const user = await prisma.user.findUnique({ where: { id: userId } });
       if (!user) throw new NotFoundError("User not found");
@@ -601,7 +624,8 @@ router.delete(
   authorize({ permission: "hr.user.delete" }),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
-      const userId = parseInt(req.params.id as string, 10);
+      const userId = await resolveUserParam(req.params.id as string);
+      if (userId === null) throw new NotFoundError("User not found");
 
       if (userId === req.user!.id) {
         throw new AppError(400, "You cannot delete your own account");
@@ -661,7 +685,8 @@ router.post(
   authorize({ permission: "admin.role.manage" }),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
-      const userId = parseInt(req.params.id as string, 10);
+      const userId = await resolveUserParam(req.params.id as string);
+      if (userId === null) throw new NotFoundError("User not found");
       const { role } = req.body as { role?: string };
       if (!role) throw new AppError(400, "Role is required");
       if (role === "super-admin") {
@@ -716,7 +741,8 @@ router.delete(
   authorize({ permission: "admin.role.manage" }),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
-      const userId = parseInt(req.params.id as string, 10);
+      const userId = await resolveUserParam(req.params.id as string);
+      if (userId === null) throw new NotFoundError("User not found");
       const roleName = req.params.roleName as string;
 
       if (roleName === "super-admin") {

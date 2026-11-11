@@ -29,6 +29,7 @@ import toast from '@/lib/toast';
 
 interface User {
   id: number;
+  publicId: string | null;
   name: string;
   email: string;
   emailVerifiedAt: string | null;
@@ -300,7 +301,9 @@ export function UsersPage() {
           {/* Editing a profile has more fields than a dialog can hold, so it
               opens the employee's own page. */}
           <Button variant="ghost" size="sm" asChild>
-            <Link to={`/admin/users/${user.id}`}>
+            {/* uuid URL when the record has one — numeric ids in links let a
+                directory be enumerated by editing the address bar. */}
+            <Link to={`/hr/users/${user.publicId ?? user.id}`}>
               <Pencil className="h-3.5 w-3.5" />
             </Link>
           </Button>
