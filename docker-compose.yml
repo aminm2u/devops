@@ -81,11 +81,9 @@ services:
     container_name: devops-nginx
     restart: unless-stopped
     ports:
-      - "80:80"
-      - "443:443"
+      - "80:80" # TLS terminates at the WAF; origin serves HTTP only
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./nginx/certs:/etc/nginx/certs:ro
     depends_on:
       - backend
       - frontend
