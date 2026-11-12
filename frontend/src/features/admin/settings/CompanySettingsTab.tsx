@@ -283,7 +283,7 @@ export function CompanySettingsTab() {
           <p className="text-xs text-muted-foreground">Appears on document letterheads and footers.</p>
         </div>
 
-        <div className="flex justify-end border-t pt-4">
+        <div className="flex justify-end border-t dark:border-gray-600 pt-4">
           <Button onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending}>
             {saveMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
             Save company details

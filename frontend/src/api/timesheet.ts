@@ -88,10 +88,23 @@ export const timesheetApi = {
   listRules: () =>
     apiClient.get('/timesheet/approval-rules').then((r) => r.data.data as TimesheetApprovalRule[]),
 
-  createRule: (input: Partial<TimesheetApprovalRule> & { name: string; approverType: string; userIds?: number[] }) =>
+  createRule: (
+    input: Partial<TimesheetApprovalRule> & {
+      name: string;
+      approverType: string;
+      appliesToUserIds?: number[];
+      userIds?: number[];
+    }
+  ) =>
     apiClient.post('/timesheet/approval-rules', input).then((r) => r.data.data as TimesheetApprovalRule),
 
-  updateRule: (id: number, input: Partial<TimesheetApprovalRule> & { userIds?: number[] }) =>
+  updateRule: (
+    id: number,
+    input: Partial<TimesheetApprovalRule> & {
+      appliesToUserIds?: number[];
+      userIds?: number[];
+    }
+  ) =>
     apiClient.put(`/timesheet/approval-rules/${id}`, input).then((r) => r.data.data as TimesheetApprovalRule),
 
   deleteRule: (id: number) => apiClient.delete(`/timesheet/approval-rules/${id}`),

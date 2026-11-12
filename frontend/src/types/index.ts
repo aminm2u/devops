@@ -829,6 +829,8 @@ export interface TimeEntry {
   decidedAt: string | null;
   approverId: number | null;
   approvalRuleId: number | null;
+  approvalStep?: number | null;
+  approvalChain?: TimesheetChainStep[] | null;
   rejectReason: string | null;
   createdAt: string;
   updatedAt: string;
@@ -865,8 +867,20 @@ export interface TimesheetApprovalRule {
   approverType: TimesheetApproverType;
   projectRoleId: number | null;
   appRole: string | null;
-  users?: { userId: number; user?: { id: number; name: string; email: string } }[];
+  /** Submitters this rule applies to (empty = everyone). */
+  appliesTo?: { userId: number; user?: { id: number; name: string; email: string } }[];
+  /** Ordered approver chain for the `users` type — index 0 = step 1. */
+  approvers?: { step: number; userId: number; user?: { id: number; name: string; email: string } }[];
   projectRole?: { id: number; name: string } | null;
+}
+
+/** One entry in an entry's approval-chain snapshot. */
+export interface TimesheetChainStep {
+  step: number;
+  userId: number;
+  name: string;
+  decidedAt?: string;
+  decidedBy?: number;
 }
 
 export interface CalendarTaskEvent {

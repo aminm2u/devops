@@ -1,4 +1,5 @@
 import { Router, Response, NextFunction } from "express";
+import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { authenticate } from "../middleware/auth.js";
 import { requirePermission } from "../middleware/rbac.js";
@@ -8,7 +9,11 @@ import { NotFoundError, ValidationError, ForbiddenError } from "../lib/errors.js
 import prisma from "../config/database.js";
 import { getIO } from "../lib/socket.js";
 import { logTaskActivity } from "../lib/task-activity.js";
-import { resolveTimesheetApprover } from "../services/timesheetApproval.js";
+import {
+  resolveTimesheetApprover,
+  advanceChain,
+  type ChainSnapshotEntry,
+} from "../services/timesheetApproval.js";
 import { openRequest, settleSubject } from "../services/approvalRequest.service.js";
 import { createNotification } from "../services/notification.service.js";
 import { can } from "../rbac/effective.js";
@@ -92,6 +97,15 @@ const entryInclude = {
   project: { select: { id: true, name: true } },
 } as const;
 
+const ruleInclude = {
+  appliesTo: { include: { user: { select: { id: true, name: true, email: true } } } },
+  approvers: {
+    orderBy: { step: "asc" as const },
+    include: { user: { select: { id: true, name: true, email: true } } },
+  },
+  projectRole: true,
+};
+
 async function assertCategoryExists(value: string): Promise<void> {
   const cat = await prisma.referenceData.findFirst({
     where: { group: "timesheet_category", value, isActive: true },
@@ -149,10 +163,55 @@ const createRuleSchema = z.object({
   approverType: z.enum(["project_role", "users", "direct_manager", "app_role"]),
   projectRoleId: z.number().int().positive().optional().nullable(),
   appRole: z.string().max(50).optional().nullable(),
+  // Submitters the rule applies to (empty = everyone).
+  appliesToUserIds: z.array(z.number().int().positive()).optional(),
+  // Ordered approver chain for the `users` type: index+1 is the approval step.
   userIds: z.array(z.number().int().positive()).optional(),
 });
 
 const updateRuleSchema = createRuleSchema.partial();
+
+/**
+ * A user may be governed by at most one active rule's appliesTo list. A rule
+ * with an empty appliesTo is a wildcard and claims *every* user, so it is only
+ * legal while no other active rule scopes anyone. Checked app-side — Prisma
+ * cannot express "unique within active rules" as a constraint.
+ */
+async function assertNoAppliesToConflict(
+  appliesToUserIds: number[],
+  excludeRuleId?: number
+): Promise<void> {
+  const otherActiveRules = await prisma.timesheetApprovalRule.findMany({
+    where: {
+      isActive: true,
+      ...(excludeRuleId ? { id: { not: excludeRuleId } } : {}),
+    },
+    include: { appliesTo: { select: { userId: true } } },
+  });
+
+  for (const other of otherActiveRules) {
+    // Two wildcard rules would make the second unreachable.
+    if (other.appliesTo.length === 0 && appliesToUserIds.length === 0) {
+      throw new ValidationError({
+        appliesToUserIds: [`Rule "${other.name}" already applies to everyone`],
+      });
+    }
+    if (other.appliesTo.length === 0) {
+      throw new ValidationError({
+        appliesToUserIds: [
+          `Rule "${other.name}" applies to everyone — it would shadow this rule`,
+        ],
+      });
+    }
+    const overlap = other.appliesTo.filter((a) => appliesToUserIds.includes(a.userId));
+    if (overlap.length > 0) {
+      const conflicting = overlap[0].userId;
+      throw new ValidationError({
+        appliesToUserIds: [`User #${conflicting} is already covered by rule "${other.name}"`],
+      });
+    }
+  }
+}
 
 // ---------- entries ----------
 
@@ -325,11 +384,12 @@ router.post(
 );
 
 async function submitEntry(entry: any, actorId: number) {
-  const { approverId, approvalRuleId } = await resolveTimesheetApprover({
-    userId: entry.userId,
-    categoryValue: entry.categoryValue,
-    projectId: entry.projectId ?? null,
-  });
+  const { approverId, approvalRuleId, approvalStep, approvalChain } =
+    await resolveTimesheetApprover({
+      userId: entry.userId,
+      categoryValue: entry.categoryValue,
+      projectId: entry.projectId ?? null,
+    });
 
   const updated = await prisma.timeEntry.update({
     where: { id: entry.id },
@@ -340,6 +400,10 @@ async function submitEntry(entry: any, actorId: number) {
       rejectReason: null,
       approverId,
       approvalRuleId,
+      approvalStep,
+      // DbNull (not `undefined`) so a resubmission that now resolves to a
+      // single approver clears the previous submission's chain snapshot.
+      approvalChain: approvalChain ? (approvalChain as any) : Prisma.DbNull,
     },
     include: entryInclude,
   });
@@ -411,7 +475,14 @@ router.post(
 
       const updated = await prisma.timeEntry.update({
         where: { id },
-        data: { status: "draft", submittedAt: null, approverId: null, approvalRuleId: null },
+        data: {
+          status: "draft",
+          submittedAt: null,
+          approverId: null,
+          approvalRuleId: null,
+          approvalStep: null,
+          approvalChain: Prisma.DbNull,
+        },
         include: entryInclude,
       });
 
@@ -445,27 +516,83 @@ router.post(
         throw new ForbiddenError("You are not the approver for this entry");
       }
 
-      const updated = await prisma.timeEntry.update({
-        where: { id },
-        data: { status: "approved", decidedAt: new Date() },
-        include: entryInclude,
-      });
+      // Multi-level flow: the entry's chain snapshot decides whether this
+      // approval finishes the entry or hands it to the next approver.
+      const chain = Array.isArray(entry.approvalChain)
+        ? (entry.approvalChain as unknown as ChainSnapshotEntry[])
+        : null;
+      const hasChain = !!chain && chain.length > 0;
 
-      // Close the inbox row too, or the entry sits in /approvals forever and
-      // can be "approved" a second time from there.
-      await settleSubject({
-        subjectType: "TimeEntry",
-        subjectId: id,
-        status: "approved",
-      });
+      let updated;
+      if (hasChain) {
+        const advanced = advanceChain(chain!, entry.approvalStep ?? 1, req.user!.id);
+        const finished = advanced.approverId === null;
 
-      await createNotification(
-        entry.userId,
-        "timesheet",
-        "Timesheet approved",
-        `Your ${Number(entry.hours)}h entry on ${fmtDate(entry.workDate)} was approved.`,
-        "/my-work/timesheet"
-      );
+        updated = await prisma.timeEntry.update({
+          where: { id },
+          data: {
+            approverId: advanced.approverId,
+            approvalStep: advanced.approvalStep,
+            approvalChain: advanced.approvalChain as any,
+            // Stay `submitted` until the last step signs off.
+            ...(finished && { status: "approved", decidedAt: new Date() }),
+          },
+          include: entryInclude,
+        });
+
+        if (finished) {
+          await settleSubject({ subjectType: "TimeEntry", subjectId: id, status: "approved" });
+          await createNotification(
+            entry.userId,
+            "timesheet",
+            "Timesheet approved",
+            `Your ${Number(entry.hours)}h entry on ${fmtDate(entry.workDate)} was approved.`,
+            "/my-work/timesheet"
+          );
+        } else {
+          // Hand the baton to the next approver in the chain.
+          const nextApprover = updated.approver!;
+          await openRequest({
+            module: "timesheet",
+            subjectType: "TimeEntry",
+            subjectId: updated.id,
+            title: `${updated.user.name} — ${Number(updated.hours)}h on ${fmtDate(updated.workDate)}`,
+            requesterId: updated.userId,
+            approverId: nextApprover.id,
+            link: "/my-work/approvals",
+            metadata: {
+              workDate: updated.workDate,
+              hours: Number(updated.hours),
+              step: advanced.approvalStep,
+            },
+          });
+          await createNotification(
+            nextApprover.id,
+            "timesheet",
+            "Timesheet awaiting approval",
+            `${updated.user.name} logged ${Number(updated.hours)}h on ${fmtDate(updated.workDate)} (step ${advanced.approvalStep}).`,
+            "/my-work/approvals"
+          );
+        }
+      } else {
+        updated = await prisma.timeEntry.update({
+          where: { id },
+          data: { status: "approved", decidedAt: new Date() },
+          include: entryInclude,
+        });
+
+        // Close the inbox row too, or the entry sits in /approvals forever and
+        // can be "approved" a second time from there.
+        await settleSubject({ subjectType: "TimeEntry", subjectId: id, status: "approved" });
+
+        await createNotification(
+          entry.userId,
+          "timesheet",
+          "Timesheet approved",
+          `Your ${Number(entry.hours)}h entry on ${fmtDate(entry.workDate)} was approved.`,
+          "/my-work/timesheet"
+        );
+      }
 
       try { getIO().emit("timesheet-entry-updated", { entry: serializeEntry(updated) }); } catch (e) {}
       res.status(200).json({ success: true, data: serializeEntry(updated) });
@@ -1048,7 +1175,11 @@ router.get(
       const rules = await prisma.timesheetApprovalRule.findMany({
         orderBy: { sortOrder: "asc" },
         include: {
-          users: { include: { user: { select: { id: true, name: true, email: true } } } },
+          appliesTo: { include: { user: { select: { id: true, name: true, email: true } } } },
+          approvers: {
+            orderBy: { step: "asc" },
+            include: { user: { select: { id: true, name: true, email: true } } },
+          },
           projectRole: true,
         },
       });
@@ -1068,6 +1199,13 @@ router.post(
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const body = req.body;
+      const userIds = body.approverType === "users" ? body.userIds ?? [] : [];
+      if (body.approverType === "users" && userIds.length === 0) {
+        throw new ValidationError({ userIds: ["Select at least one approver"] });
+      }
+      const appliesToUserIds = body.appliesToUserIds ?? [];
+      await assertNoAppliesToConflict(appliesToUserIds);
+
       const rule = await prisma.timesheetApprovalRule.create({
         data: {
           name: body.name,
@@ -1078,14 +1216,15 @@ router.post(
           approverType: body.approverType,
           projectRoleId: body.approverType === "project_role" ? body.projectRoleId || null : null,
           appRole: body.approverType === "app_role" ? body.appRole || null : null,
-          users: body.approverType === "users" && body.userIds?.length
-            ? { create: body.userIds.map((userId: number) => ({ userId })) }
+          appliesTo: appliesToUserIds.length
+            ? { create: appliesToUserIds.map((userId: number) => ({ userId })) }
             : undefined,
+          approvers:
+            body.approverType === "users"
+              ? { create: userIds.map((userId: number, i: number) => ({ userId, step: i + 1 })) }
+              : undefined,
         },
-        include: {
-          users: { include: { user: { select: { id: true, name: true, email: true } } } },
-          projectRole: true,
-        },
+        include: ruleInclude,
       });
       res.status(201).json({ success: true, data: rule });
     } catch (error) {
@@ -1107,8 +1246,41 @@ router.put(
       if (!existing) throw new NotFoundError("Approval rule not found");
 
       const body = req.body;
-      if (body.userIds && body.approverType === "users") {
-        await prisma.timesheetApprovalRuleUser.deleteMany({ where: { ruleId: id } });
+      const nextApproverType = body.approverType ?? existing.approverType;
+      const userIds = nextApproverType === "users" ? body.userIds ?? [] : [];
+      const approversTouched =
+        (body.approverType !== undefined && body.approverType !== "users") ||
+        body.userIds !== undefined;
+      if (nextApproverType === "users" && approversTouched && userIds.length === 0) {
+        throw new ValidationError({ userIds: ["Select at least one approver"] });
+      }
+
+      // One active rule per appliesTo user — checked against every other
+      // active rule, using the rule's *existing* list when the request does
+      // not touch it.
+      if (body.appliesToUserIds !== undefined || body.isActive !== undefined) {
+        const nextAppliesTo =
+          body.appliesToUserIds !== undefined
+            ? body.appliesToUserIds
+            : (
+                await prisma.timesheetRuleAppliesTo.findMany({
+                  where: { ruleId: id },
+                  select: { userId: true },
+                })
+              ).map((a) => a.userId);
+        const willBeActive = body.isActive ?? existing.isActive;
+        if (willBeActive) {
+          await assertNoAppliesToConflict(nextAppliesTo, id);
+        }
+        if (body.appliesToUserIds !== undefined) {
+          await prisma.timesheetRuleAppliesTo.deleteMany({ where: { ruleId: id } });
+        }
+      }
+
+      const replaceApprovers =
+        nextApproverType === "users" && (body.userIds !== undefined || body.approverType !== undefined);
+      if (replaceApprovers) {
+        await prisma.timesheetRuleApprover.deleteMany({ where: { ruleId: id } });
       }
 
       const rule = await prisma.timesheetApprovalRule.update({
@@ -1122,14 +1294,18 @@ router.put(
           ...(body.approverType !== undefined && { approverType: body.approverType }),
           ...(body.projectRoleId !== undefined && { projectRoleId: body.projectRoleId || null }),
           ...(body.appRole !== undefined && { appRole: body.appRole || null }),
-          ...(body.userIds && body.approverType === "users"
-            ? { users: { create: body.userIds.map((userId: number) => ({ userId })) } }
+          ...(body.appliesToUserIds !== undefined
+            ? {
+                appliesTo: {
+                  create: body.appliesToUserIds.map((userId: number) => ({ userId })),
+                },
+              }
+            : {}),
+          ...(replaceApprovers
+            ? { approvers: { create: userIds.map((userId: number, i: number) => ({ userId, step: i + 1 })) } }
             : {}),
         },
-        include: {
-          users: { include: { user: { select: { id: true, name: true, email: true } } } },
-          projectRole: true,
-        },
+        include: ruleInclude,
       });
       res.status(200).json({ success: true, data: rule });
     } catch (error) {

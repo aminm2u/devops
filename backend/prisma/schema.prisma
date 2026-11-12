@@ -160,7 +160,8 @@ model User {
   microsoftAccount           MicrosoftAccount?
   timesheetToApprove         TimeEntry[]                   @relation("TimesheetApprover")
   subtasksAssigned           TaskSubtask[]                 @relation("SubtaskAssignee")
-  timesheetRuleUsers         TimesheetApprovalRuleUser[]
+  timesheetRuleUsers         TimesheetRuleAppliesTo[]      @relation("TimesheetRuleAppliesToUser")
+  timesheetRuleApprovals     TimesheetRuleApprover[]       @relation("TimesheetRuleApproverUser")
   // Team membership & approvals
   teamMemberships            TeamMember[]
   approvalRequestsRaised     ApprovalRequest[]             @relation("ApprovalRequestedBy")
@@ -733,8 +734,12 @@ model TimeEntry {
   status         String    @default("draft") // draft | submitted | approved | rejected
   submittedAt    DateTime? @map("submitted_at")
   decidedAt      DateTime? @map("decided_at")
-  approverId     Int?      @map("approver_id") // resolved at submit; snapshot
+  approverId     Int?      @map("approver_id") // resolved at submit; snapshot of the CURRENT step's approver
   approvalRuleId Int?      @map("approval_rule_id")
+  // Multi-level approval: 1-based step this entry is waiting on. null = single
+  // approver (or already past the chain — the row is the audit pointer).
+  approvalStep   Int?      @default(1) @map("approval_step")
+  approvalChain  Json?     @map("approval_chain") // snapshot: [{ step, userId, name, decidedAt?, decidedBy? }]
   rejectReason   String?   @map("reject_reason") @db.Text
 
   // Actual work period (optional; e.g. meeting start/end imported from MS Teams)
@@ -765,7 +770,6 @@ model TimeEntry {
   @@index([msEventId])
   @@map("time_entries")
 }
-
 // ==================== Microsoft Teams / Entra ID Integration ====================
 
 // Per-user Microsoft account link (OAuth tokens + sync preferences)
@@ -843,23 +847,43 @@ model TimesheetApprovalRule {
   createdAt     DateTime  @default(now()) @map("created_at")
   updatedAt     DateTime  @updatedAt @map("updated_at")
 
-  projectRole   ProjectRole? @relation(fields: [projectRoleId], references: [id], onDelete: SetNull)
-  users         TimesheetApprovalRuleUser[]
+  projectRole   ProjectRole?          @relation(fields: [projectRoleId], references: [id], onDelete: SetNull)
+  appliesTo     TimesheetRuleAppliesTo[]
+  approvers     TimesheetRuleApprover[]
   timeEntries   TimeEntry[]
 
   @@index([isActive, sortOrder])
   @@map("timesheet_approval_rules")
 }
 
-model TimesheetApprovalRuleUser {
+/// Submitters the rule applies to. A user may sit in at most one active
+/// rule's appliesTo — enforced in the routes (app-level), because "one active
+/// rule per user" cannot be expressed as a plain unique constraint.
+model TimesheetRuleAppliesTo {
   ruleId Int
   userId Int
 
   rule TimesheetApprovalRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
-  user User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user User                  @relation("TimesheetRuleAppliesToUser", fields: [userId], references: [id], onDelete: Cascade)
 
   @@id([ruleId, userId])
-  @@map("timesheet_approval_rule_users")
+  @@map("timesheet_rule_applies_to")
+}
+
+/// Ordered approver chain for `approverType === "users"`. `step` is 1-based;
+/// one row per approval level. Other approver types resolve a single approver
+/// at submit time and never read this table.
+model TimesheetRuleApprover {
+  id     Int     @id @default(autoincrement())
+  ruleId Int
+  userId Int
+  step   Int     @default(1)
+
+  rule TimesheetApprovalRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+  user User                  @relation("TimesheetRuleApproverUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([ruleId, step])
+  @@map("timesheet_rule_approvers")
 }
 
 model InfrastructureNode {

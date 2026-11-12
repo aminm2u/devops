@@ -7,6 +7,12 @@ import { createNotification } from "./notification.service.js";
 // back, which is safe because both sides only call each other inside function
 // bodies and `export async function` declarations are hoisted.
 import { processApprovalStep } from "./approvalEngine.js";
+import { advanceChain, type ChainSnapshotEntry } from "./timesheetApproval.js";
+
+/** 'YYYY-MM-DD' from a Date, no TZ math. */
+function fmtDay(d: Date): string {
+  return d.toISOString().substring(0, 10);
+}
 
 /**
  * The unified approval ledger.
@@ -255,6 +261,90 @@ async function applyDecision(params: {
       // their own work, even via the inbox.
       if (entry.userId === approverId) {
         throw new AppError(403, "You cannot approve your own time entry");
+      }
+
+      // Multi-level flow: approving advances the chain snapshot; only the last
+      // step moves the entry to `approved`. A rejection ends it outright.
+      const chain = Array.isArray(entry.approvalChain)
+        ? (entry.approvalChain as unknown as ChainSnapshotEntry[])
+        : null;
+
+      if (approved && chain && chain.length > 0) {
+        const advanced = advanceChain(chain, entry.approvalStep ?? 1, approverId);
+        const finished = advanced.approverId === null;
+
+        const updated = await prisma.timeEntry.update({
+          where: { id: subjectId },
+          data: {
+            approverId: advanced.approverId,
+            approvalStep: advanced.approvalStep,
+            approvalChain: advanced.approvalChain as any,
+            ...(finished && { status: "approved", decidedAt: new Date() }),
+          },
+          include: {
+            user: { select: { id: true, name: true, email: true } },
+            approver: { select: { id: true, name: true, email: true } },
+            task: { select: { id: true, title: true, projectId: true } },
+            subtask: { select: { id: true, title: true, status: true } },
+            project: { select: { id: true, name: true } },
+          },
+        });
+
+        if (finished) {
+          await settleSubject({ subjectType: "TimeEntry", subjectId, status: "approved" });
+          await createNotification(
+            entry.userId,
+            "timesheet",
+            "Timesheet approved",
+            `Your ${Number(entry.hours)}h entry on ${fmtDay(updated.workDate)} was approved.`,
+            "/my-work/timesheet"
+          );
+          try {
+            getIO().emit("timesheet-entry-updated", {
+              entry: {
+                ...updated,
+                hours: updated.hours != null ? Number(updated.hours) : 0,
+                workDate: updated.workDate.toISOString().substring(0, 10),
+              },
+            });
+          } catch {
+            /* socket not initialised — the record is already saved */
+          }
+          return { subjectStatus: "approved" };
+        }
+
+        // Still `submitted` — open the ledger row for the next approver and
+        // tell them. Reporting `submitted` back makes the caller word the
+        // requester's notification as "approved — next approver".
+        await openRequest({
+          module: "timesheet",
+          subjectType: "TimeEntry",
+          subjectId,
+          title: `${updated.user.name} — ${Number(updated.hours)}h on ${fmtDay(updated.workDate)}`,
+          requesterId: updated.userId,
+          approverId: advanced.approverId,
+          link: "/my-work/approvals",
+          metadata: { workDate: updated.workDate, hours: Number(updated.hours), step: advanced.approvalStep },
+        });
+        await createNotification(
+          advanced.approverId!,
+          "timesheet",
+          "Timesheet awaiting approval",
+          `${updated.user.name} logged ${Number(updated.hours)}h on ${fmtDay(updated.workDate)} (step ${advanced.approvalStep}).`,
+          "/my-work/approvals"
+        );
+        try {
+          getIO().emit("timesheet-entry-updated", {
+            entry: {
+              ...updated,
+              hours: updated.hours != null ? Number(updated.hours) : 0,
+              workDate: updated.workDate.toISOString().substring(0, 10),
+            },
+          });
+        } catch {
+          /* socket not initialised — the record is already saved */
+        }
+        return { subjectStatus: "submitted" };
       }
 
       const updated = await prisma.timeEntry.update({

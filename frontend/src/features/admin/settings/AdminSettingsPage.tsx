@@ -165,7 +165,7 @@ export function AdminSettingsPage() {
           )}
           {showTimesheet && (
             <TabsTrigger value="timesheet-rules" className="gap-2">
-              <ClipboardCheck className="h-3.5 w-3.5" /> Approval Rules
+              <ClipboardCheck className="h-3.5 w-3.5" /> Timesheet Approval Rules
             </TabsTrigger>
           )}
           {showPortal && (
