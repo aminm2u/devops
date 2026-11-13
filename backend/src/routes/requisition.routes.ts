@@ -8,6 +8,7 @@ import { NotFoundError } from "../lib/errors.js";
 import { logActivity } from "../middleware/activity.js";
 import prisma from "../config/database.js";
 import { createApprovalChain, processApprovalStep } from "../services/approvalEngine.js";
+import { recomputeScopeCosts } from "./scope.routes.js";
 
 const router = Router();
 
@@ -27,6 +28,8 @@ const createRequisitionSchema = z.object({
   processOwner: z.string().optional().nullable(),
   budgetItemId: z.number().int().positive().optional().nullable(),
   projectId: z.number().int().positive().optional().nullable(),
+  // The scope item this procurement raises for — feeds its actual cost
+  scopeItemId: z.number().int().positive().optional().nullable(),
   totalEstimatedCost: z.number().min(0).optional(),
   requiredDate: z.string().datetime().optional().nullable(),
   purpose: z.string().optional().nullable(),
@@ -151,6 +154,7 @@ router.post(
           processOwner: formData.processOwner || null,
           budgetItemId: formData.budgetItemId || null,
           projectId: formData.projectId || null,
+          scopeItemId: formData.scopeItemId || null,
           totalEstimatedCost: formData.totalEstimatedCost || 0,
           requiredDate: formData.requiredDate ? new Date(formData.requiredDate) : null,
           purpose: formData.purpose || null,
@@ -190,6 +194,8 @@ router.post(
         causerId: req.user!.id,
         properties: { attributes: form },
       });
+
+      if (form.projectId) await recomputeScopeCosts(prisma, form.projectId);
 
       res.status(201).json({ success: true, data: form, message: "Requisition form created" });
     } catch (error) {
@@ -432,6 +438,9 @@ router.put(
         },
       });
 
+      // Auto-approval (or any status flip) changes scope actuals — refresh.
+      if (existing.projectId) await recomputeScopeCosts(prisma, existing.projectId);
+
       res.json(updated);
     } catch (error) {
       console.error("Error submitting requisition:", error);
@@ -488,6 +497,8 @@ router.put(
           body.reason
         );
 
+        if (existing.projectId) await recomputeScopeCosts(prisma, existing.projectId);
+
         return res.json({
           success: true,
           status: result.requisitionStatus,
@@ -531,6 +542,8 @@ router.put(
         });
       }
 
+      if (existing.projectId) await recomputeScopeCosts(prisma, existing.projectId);
+
       res.json(updated);
     } catch (error) {
       if (error instanceof z.ZodError) {
@@ -559,6 +572,12 @@ router.put(
       const user = (req as any).user;
 
       const result = await processApprovalStep(id, user.id, body.action, body.comments);
+
+      const linked = await prisma.requisitionForm.findUnique({
+        where: { id },
+        select: { projectId: true },
+      });
+      if (linked?.projectId) await recomputeScopeCosts(prisma, linked.projectId);
 
       res.json({
         success: true,

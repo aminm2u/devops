@@ -8,6 +8,7 @@ import { NotFoundError } from "../lib/errors.js";
 import prisma from "../config/database.js";
 import { getIO } from "../lib/socket.js";
 import { logTaskActivity } from "../lib/task-activity.js";
+import { recomputeScopeProgress } from "./scope.routes.js";
 
 const router = Router();
 
@@ -20,6 +21,8 @@ const createTaskSchema = z.object({
   assignees: z.array(z.number().int().positive()).optional().nullable(),
   priority: z.enum(["low", "medium", "high", "urgent"]).optional(),
   dueDate: z.string().datetime().optional().nullable(),
+  // The scope item this task delivers — drives the scope progress rollup
+  scopeItemId: z.number().int().positive().nullable().optional(),
 });
 
 const updateTaskSchema = createTaskSchema.partial().extend({
@@ -136,6 +139,11 @@ router.post(
 
       try { getIO().emit('task-created', { task }); } catch (e) {}
 
+      // New task on a scope item shifts that item's progress rollup.
+      if (data.scopeItemId) {
+        await recomputeScopeProgress(prisma, data.projectId);
+      }
+
       res.status(201).json({ success: true, data: task });
     } catch (error) {
       next(error);
@@ -178,6 +186,20 @@ router.put(
           data: { columnId: t.columnId, position: t.position }
         }))
       );
+
+      // A column move can flip a task's done state — refresh rollups for the
+      // projects whose tasks moved.
+      const touchedProjects = new Set<number>();
+      for (const t of tasks) {
+        const existing = await prisma.projectTask.findUnique({
+          where: { id: t.id },
+          select: { projectId: true },
+        });
+        if (existing) touchedProjects.add(existing.projectId);
+      }
+      for (const touchedProjectId of touchedProjects) {
+        await recomputeScopeProgress(prisma, touchedProjectId);
+      }
 
       try { getIO().emit('tasks-reordered', { tasks }); } catch (e) {}
 
@@ -256,6 +278,14 @@ router.put(
       }
 
       try { getIO().emit('task-updated', { task }); } catch (e) {}
+
+      // Link or column changes shift the scope progress rollup.
+      if (
+        (data.scopeItemId !== undefined && existing.scopeItemId !== data.scopeItemId) ||
+        (data.columnId !== undefined && existing.columnId !== data.columnId)
+      ) {
+        await recomputeScopeProgress(prisma, task.projectId);
+      }
 
       res.status(200).json({ success: true, data: task });
     } catch (error) {
@@ -514,7 +544,15 @@ router.delete(
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const { id } = req.params;
+      const existing = await prisma.projectTask.findUnique({
+        where: { id: parseInt(id) },
+        select: { projectId: true, scopeItemId: true },
+      });
       await prisma.projectTask.delete({ where: { id: parseInt(id) } });
+
+      if (existing?.scopeItemId) {
+        await recomputeScopeProgress(prisma, existing.projectId);
+      }
 
       try { getIO().emit('task-deleted', { id: parseInt(id) }); } catch (e) {}
 

@@ -252,6 +252,24 @@ router.get(
               projectRole: true,
             },
           },
+          // Slim scope rows for the Timeline tab and overview derivations —
+          // never inline cost items here or every refetch pays for the sheet.
+          scopeItems: {
+            where: { deletedAt: null },
+            orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }],
+            select: {
+              id: true,
+              parentId: true,
+              wbsNumber: true,
+              sortOrder: true,
+              title: true,
+              status: true,
+              startDate: true,
+              endDate: true,
+              roleCodes: true,
+              progress: true,
+            },
+          },
           budgetItems: {
             include: {
               expenditures: true,

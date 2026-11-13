@@ -6,6 +6,7 @@ import { KanbanTab } from './tabs/KanbanTab';
 import { TeamTab } from './tabs/TeamTab';
 import { FinanceTab } from './tabs/FinanceTab';
 import { OverviewTab } from './tabs/OverviewTab';
+import { TimelineTab } from './tabs/TimelineTab';
 import { EnvironmentsTab } from './tabs/EnvironmentsTab';
 import { InfrastructureTab } from './tabs/InfrastructureTab';
 import { CredentialsTab } from './tabs/CredentialsTab';
@@ -13,6 +14,8 @@ import { ServicesTab } from './tabs/ServicesTab';
 import { DeploymentsTab } from './tabs/DeploymentsTab';
 import { IncidentsTab } from './tabs/IncidentsTab';
 import { DocumentsTab } from './tabs/DocumentsTab';
+import { ScopeTab } from './tabs/ScopeTab';
+import { CostingSheetTab } from './tabs/CostingSheetTab';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -43,38 +46,58 @@ import { PageHeader } from '@/components/layout/PageHeader';
 import toast from '@/lib/toast';
 
 /**
- * One project, eleven views.
+ * One project, seven top-level views.
  *
  * This file owns the project payload, the tab bar and every dialog; each tab is
  * a component that renders one slice of that payload. The split is by
  * ownership, not by line count: the page fetches and mutates, the tabs display
  * and raise events.
  *
- * Every tab is gated on its own permission rather than one blanket admin flag —
+ * Every view is gated on its own permission rather than one blanket admin flag —
  * a PMO owns the project record but not the servers it runs on, and
  * `project.document.manage` has nothing to do with `devops.deployment.create`.
  * The API enforces the same boundaries, so this only decides what is worth
  * showing, never what is allowed.
  *
- * The active tab lives in the URL, so a link can point at a project's
- * deployments and a reload keeps you there.
+ * The active tab — and, inside the Infrastructure tab, the active section —
+ * live in the URL, so a link can point at a project's deployments and a reload
+ * keeps you there. Old deep links of the form `?tab=deployments` still resolve,
+ * into the matching Infrastructure section.
  */
 
 const TAB_KEYS = [
   'overview',
+  'timeline',
+  'scope',
+  'costing-sheet',
   'kanban',
   'team',
   'finances',
-  'environments',
   'infrastructure',
-  'credentials',
-  'services',
-  'deployments',
   'incidents',
   'documents',
 ] as const;
 
 type TabKey = (typeof TAB_KEYS)[number];
+
+/** Sections shown in the sidebar once the Infrastructure tab is open. */
+const INFRA_SECTIONS = [
+  'environments',
+  'infrastructure',
+  'credentials',
+  'services',
+  'deployments',
+] as const;
+
+type InfraSection = (typeof INFRA_SECTIONS)[number];
+
+const INFRA_SECTION_LABELS: Record<InfraSection, string> = {
+  environments: 'Environments',
+  infrastructure: 'Infrastructure',
+  credentials: 'Credentials',
+  services: 'Services',
+  deployments: 'Deployments',
+};
 
 const CREDENTIAL_EMPTY = {
   name: '',
@@ -105,8 +128,34 @@ export function ProjectDetailPage() {
   const tab: TabKey = requestedTab && TAB_KEYS.includes(requestedTab) ? requestedTab : 'overview';
   const setTab = (next: string) => {
     const params = new URLSearchParams(searchParams);
+    params.delete('section');
     if (next === 'overview') params.delete('tab');
     else params.set('tab', next);
+    setSearchParams(params, { replace: true });
+  };
+
+  // Which slice of the Infrastructure tab the sidebar has open. Old deep links
+  // like ?tab=deployments map onto the matching section so bookmarks survive.
+  // "infrastructure" is excluded from that mapping — it is both a top-level tab
+  // and a section, so treating plain ?tab=infrastructure as legacy would pin
+  // the sidebar to its own Infrastructure entry on every render.
+  const isLegacyInfraUrl =
+    requestedTab !== null &&
+    requestedTab !== 'infrastructure' &&
+    INFRA_SECTIONS.includes(requestedTab as InfraSection);
+  const activeTab: TabKey = isLegacyInfraUrl ? 'infrastructure' : tab;
+  const requestedSection = searchParams.get('section') ?? (isLegacyInfraUrl ? requestedTab : null);
+  const section: InfraSection =
+    requestedSection && INFRA_SECTIONS.includes(requestedSection as InfraSection)
+      ? (requestedSection as InfraSection)
+      : 'environments';
+  const setSection = (next: string) => {
+    const params = new URLSearchParams(searchParams);
+    // Normalize a legacy ?tab=<section> link while we are here, so the stale
+    // tab param does not linger once the sidebar has been used.
+    if (isLegacyInfraUrl) params.set('tab', 'infrastructure');
+    if (next === 'environments') params.delete('section');
+    else params.set('section', next);
     setSearchParams(params, { replace: true });
   };
 
@@ -438,23 +487,33 @@ export function ProjectDetailPage() {
         )}
       </PageHeader>
 
-      <Tabs value={tab} onValueChange={setTab} className="space-y-4">
+      <Tabs value={activeTab} onValueChange={setTab} className="space-y-4">
         <TabsList className="flex h-auto w-full flex-nowrap justify-start overflow-x-auto p-1">
           <TabsTrigger value="overview">Overview</TabsTrigger>
+          <TabsTrigger value="timeline">Timeline</TabsTrigger>
+          <TabsTrigger value="scope">Scope</TabsTrigger>
+          <TabsTrigger value="costing-sheet">Costing Sheet</TabsTrigger>
           <TabsTrigger value="kanban">Kanban</TabsTrigger>
           <TabsTrigger value="team">Team</TabsTrigger>
           <TabsTrigger value="finances">Finances &amp; Requisitions</TabsTrigger>
-          <TabsTrigger value="environments">Environments</TabsTrigger>
           <TabsTrigger value="infrastructure">Infrastructure</TabsTrigger>
-          <TabsTrigger value="credentials">Credentials</TabsTrigger>
-          <TabsTrigger value="services">Services</TabsTrigger>
-          <TabsTrigger value="deployments">Deployments</TabsTrigger>
           <TabsTrigger value="incidents">Incidents</TabsTrigger>
           <TabsTrigger value="documents">Documents</TabsTrigger>
         </TabsList>
 
         <TabsContent value="overview">
           <OverviewTab project={projectData} />
+        </TabsContent>
+
+        <TabsContent value="timeline">
+          <TimelineTab project={projectData} />
+        </TabsContent>
+
+        <TabsContent value="scope">
+          <ScopeTab project={projectData} />
+        </TabsContent>
+        <TabsContent value="costing-sheet">
+          <CostingSheetTab project={projectData} />
         </TabsContent>
 
         <TabsContent value="kanban">
@@ -469,94 +528,116 @@ export function ProjectDetailPage() {
           <FinanceTab project={projectData} refetch={refresh} />
         </TabsContent>
 
-        <TabsContent value="environments">
-          <EnvironmentsTab
-            project={projectData}
-            canEdit={canManageEnvironments}
-            onAdd={() => setShowAddEnvDialog(true)}
-            onRemove={(envId, name) => setDeletingEnv({ id: envId, name })}
-          />
-        </TabsContent>
-
         <TabsContent value="infrastructure">
-          <InfrastructureTab
-            project={projectData}
-            canEdit={canManageInfrastructure}
-            visiblePasswords={visiblePasswords}
-            onTogglePassword={togglePasswordVisibility}
-            onAdd={() => {
-              setEditingNode(null);
-              setShowNodeDialog(true);
-            }}
-            onEdit={(node) => {
-              setEditingNode(node);
-              setShowNodeDialog(true);
-            }}
-            onDelete={(node) => setDeletingNode(node)}
-          />
-        </TabsContent>
-
-        <TabsContent value="credentials">
-          <CredentialsTab
-            project={projectData}
-            canEdit={canManageCredentials}
-            visiblePasswords={visiblePasswords}
-            decryptedPasswords={decryptedPasswords}
-            onTogglePassword={toggleCredentialPassword}
-            onCopy={copyToClipboard}
-            onAdd={() => {
-              setCredentialForm(CREDENTIAL_EMPTY);
-              setShowAddCredentialDialog(true);
-            }}
-            onEdit={(cred) => {
-              setEditingCredential(cred);
-              setCredentialForm({
-                name: cred.name,
-                type: cred.type,
-                host: cred.host,
-                port: cred.port?.toString() || '',
-                username: cred.username || '',
-                password: '',
-                description: cred.description || '',
-              });
-              setShowEditCredentialDialog(true);
-            }}
-            onDelete={(cred) => setDeletingCredential(cred)}
-          />
-        </TabsContent>
-
-        <TabsContent value="services">
-          <ServicesTab
-            project={projectData}
-            canEdit={canManageServices}
-            onAdd={() => {
-              setEditingService(null);
-              setShowServiceDialog(true);
-            }}
-            onEdit={(service) => {
-              setEditingService(service);
-              setShowServiceDialog(true);
-            }}
-            onDelete={(service) => setDeletingService(service)}
-          />
-        </TabsContent>
-
-        <TabsContent value="deployments">
-          <DeploymentsTab
-            project={projectData}
-            canCreate={canCreateDeployment}
-            canEdit={canUpdateDeployment}
-            canDelete={canDeleteDeployment}
-            onAdd={() => {
-              setEditingDeployment(null);
-              setShowDeploymentDialog(true);
-            }}
-            onEdit={(deployment) => {
-              setEditingDeployment(deployment);
-              setShowDeploymentDialog(true);
-            }}
-            onDelete={(deployment) => setDeletingDeployment(deployment)}
-          />
+          <div className="flex flex-col gap-4 lg:flex-row">
+            <nav
+              aria-label="Infrastructure sections"
+              className="flex shrink-0 flex-row gap-1 overflow-x-auto lg:w-48 lg:flex-col"
+            >
+              {INFRA_SECTIONS.map((key) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => setSection(key)}
+                  aria-current={section === key ? 'true' : undefined}
+                  className={`whitespace-nowrap rounded-md px-3 py-2 text-left text-sm font-medium transition-colors ${
+                    section === key
+                      ? 'bg-primary text-primary-foreground'
+                      : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                  }`}
+                >
+                  {INFRA_SECTION_LABELS[key]}
+                </button>
+              ))}
+            </nav>
+            <div className="min-w-0 flex-1">
+              {section === 'environments' && (
+                <EnvironmentsTab
+                  project={projectData}
+                  canEdit={canManageEnvironments}
+                  onAdd={() => setShowAddEnvDialog(true)}
+                  onRemove={(envId, name) => setDeletingEnv({ id: envId, name })}
+                />
+              )}
+              {section === 'infrastructure' && (
+                <InfrastructureTab
+                  project={projectData}
+                  canEdit={canManageInfrastructure}
+                  visiblePasswords={visiblePasswords}
+                  onTogglePassword={togglePasswordVisibility}
+                  onAdd={() => {
+                    setEditingNode(null);
+                    setShowNodeDialog(true);
+                  }}
+                  onEdit={(node) => {
+                    setEditingNode(node);
+                    setShowNodeDialog(true);
+                  }}
+                  onDelete={(node) => setDeletingNode(node)}
+                />
+              )}
+              {section === 'credentials' && (
+                <CredentialsTab
+                  project={projectData}
+                  canEdit={canManageCredentials}
+                  visiblePasswords={visiblePasswords}
+                  decryptedPasswords={decryptedPasswords}
+                  onTogglePassword={toggleCredentialPassword}
+                  onCopy={copyToClipboard}
+                  onAdd={() => {
+                    setCredentialForm(CREDENTIAL_EMPTY);
+                    setShowAddCredentialDialog(true);
+                  }}
+                  onEdit={(cred) => {
+                    setEditingCredential(cred);
+                    setCredentialForm({
+                      name: cred.name,
+                      type: cred.type,
+                      host: cred.host,
+                      port: cred.port?.toString() || '',
+                      username: cred.username || '',
+                      password: '',
+                      description: cred.description || '',
+                    });
+                    setShowEditCredentialDialog(true);
+                  }}
+                  onDelete={(cred) => setDeletingCredential(cred)}
+                />
+              )}
+              {section === 'services' && (
+                <ServicesTab
+                  project={projectData}
+                  canEdit={canManageServices}
+                  onAdd={() => {
+                    setEditingService(null);
+                    setShowServiceDialog(true);
+                  }}
+                  onEdit={(service) => {
+                    setEditingService(service);
+                    setShowServiceDialog(true);
+                  }}
+                  onDelete={(service) => setDeletingService(service)}
+                />
+              )}
+              {section === 'deployments' && (
+                <DeploymentsTab
+                  project={projectData}
+                  canCreate={canCreateDeployment}
+                  canEdit={canUpdateDeployment}
+                  canDelete={canDeleteDeployment}
+                  onAdd={() => {
+                    setEditingDeployment(null);
+                    setShowDeploymentDialog(true);
+                  }}
+                  onEdit={(deployment) => {
+                    setEditingDeployment(deployment);
+                    setShowDeploymentDialog(true);
+                  }}
+                  onDelete={(deployment) => setDeletingDeployment(deployment)}
+                />
+              )}
+            </div>
+          </div>
         </TabsContent>
 
         <TabsContent value="incidents">

@@ -179,6 +179,9 @@ model User {
   paymentsPaid               Payment[]             @relation("PaymentPaidBy")
   assetsAssigned             Asset[]               @relation("AssetAssignedTo")
   internalProjectsAssigned   InternalProject[]     @relation("InternalProjectAssignedTo")
+  // Scope & costing sheet
+  scopeItemsOwned            ScopeItem[]           @relation("ScopeItemAssignee")
+  costingApprovalsSigned     CostingApproval[]
 
   @@map("users")
 }
@@ -567,6 +570,12 @@ model Project {
   assets                Asset[]
   internalProjects      InternalProject[]
   teams                 Team[]
+  // Scope of work & costing sheet
+  scopeItems            ScopeItem[]
+  costCategories        CostCategory[]
+  costItems             CostItem[]
+  resourceAssignments   ResourceAssignment[]
+  costingSheet          CostingSheet?
 
   @@index([status])
   @@index([isActive])
@@ -613,9 +622,10 @@ model TeamAssignment {
   updatedAt     DateTime  @updatedAt @map("updated_at")
 
   // Relations
-  project     Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
-  projectRole ProjectRole @relation(fields: [projectRoleId], references: [id], onDelete: Restrict)
+  project     Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user        User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  projectRole ProjectRole         @relation(fields: [projectRoleId], references: [id], onDelete: Restrict)
+  resourceAssignments ResourceAssignment[]
 
   @@unique([projectId, userId])
   @@index([projectRoleId])
@@ -658,7 +668,11 @@ model ProjectTask {
   activities TaskActivity[]
   subtasks   TaskSubtask[]
   timeEntries TimeEntry[]
+  // The scope item this task delivers (scope is the spine; UI wiring comes later)
+  scopeItemId Int?          @map("scope_item_id")
+  scopeItem   ScopeItem?    @relation(fields: [scopeItemId], references: [id], onDelete: SetNull)
 
+  @@index([scopeItemId])
   @@map("project_tasks")
 }
 
@@ -1374,6 +1388,7 @@ model BudgetItem {
   purchaseOrders   PurchaseOrder[]
   directPurchases  DirectPurchase[]
   internalProjects InternalProject[]
+  costItems        CostItem[]
 
   @@index([budgetType])
   @@index([category])
@@ -1401,6 +1416,175 @@ model BudgetExpenditure {
 
   @@index([budgetItemId])
   @@map("budget_expenditures")
+}
+
+// ==================== Scope of Work & Costing Sheet ====================
+//
+// The scope tree is the spine of a project: costing lines attach to scope
+// items, the timeline renders from their dates, and (later) kanban tasks
+// reference them. Mirrors the per-project "Resources Cost Sheet" workbook.
+
+model ScopeItem {
+  id             Int       @id @default(autoincrement())
+  projectId      Int       @map("project_id")
+  parentId       Int?      @map("parent_id")
+  // "1", "1.2", "1.2.3" — assigned by the server on create/reorder, never the client
+  wbsNumber      String    @map("wbs_number")
+  sortOrder      Int       @default(0) @map("sort_order")
+  title          String
+  description    String?   @db.Text
+  status         String    @default("planned") // planned | in_progress | completed
+  startDate      DateTime? @map("start_date")
+  endDate        DateTime? @map("end_date")
+  // Free-text role codes like ["PM", "APM", "GIS-L"], as annotated on the workbook Gantt
+  roleCodes      Json?     @map("role_codes")
+  assigneeUserId Int?      @map("assignee_user_id")
+  progress       Int? // 0-100
+  // Both derived server-side on every costing/requisition change. planCost is
+  // the larger of the manually-entered budget (manualPlanCost) and the linked
+  // cost items + child rollup — so tabular edits and the costing sheet never
+  // fight; actualCost sums approved requisitions raised for this item.
+  planCost        Decimal   @default(0) @map("plan_cost") @db.Decimal(14, 2)
+  manualPlanCost  Decimal   @default(0) @map("manual_plan_cost") @db.Decimal(14, 2)
+  actualCost      Decimal   @default(0) @map("actual_cost") @db.Decimal(14, 2)
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+  deletedAt      DateTime? @map("deleted_at")
+
+  project      Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  parent       ScopeItem?         @relation("ScopeTree", fields: [parentId], references: [id], onDelete: Cascade)
+  children     ScopeItem[]        @relation("ScopeTree")
+  assignee     User?              @relation("ScopeItemAssignee", fields: [assigneeUserId], references: [id], onDelete: SetNull)
+  costItems    CostItem[]
+  resources    ResourceAssignment[]
+  tasks        ProjectTask[]
+  requisitions RequisitionForm[]
+
+  @@unique([projectId, wbsNumber])
+  @@index([projectId])
+  @@index([parentId])
+  @@map("scope_items")
+}
+
+model CostCategory {
+  id        Int       @id @default(autoincrement())
+  projectId Int       @map("project_id")
+  name      String
+  sortOrder Int       @default(0) @map("sort_order")
+  isActive  Boolean   @default(true) @map("is_active")
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  project Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  items   CostItem[]
+
+  @@unique([projectId, name])
+  @@index([projectId])
+  @@map("cost_categories")
+}
+
+model CostItem {
+  id          Int       @id @default(autoincrement())
+  projectId   Int       @map("project_id")
+  categoryId  Int       @map("category_id")
+  // The spine link: cost assigned to a scope item rolls up into its plan/actual cost
+  scopeItemId Int?      @map("scope_item_id")
+  // Optional procurement link: this line will later be purchased under a budget
+  budgetItemId Int?     @map("budget_item_id")
+  description String
+  qty         Decimal   @default(1) @db.Decimal(12, 2)
+  uom         String? // unit | day | lot | month | ...
+  unitCost    Decimal   @default(0) @map("unit_cost") @db.Decimal(14, 2)
+  // qty * unitCost, server-computed
+  planCost    Decimal   @default(0) @map("plan_cost") @db.Decimal(14, 2)
+  // Recorded spend against this line, entered manually
+  actualCost  Decimal   @default(0) @map("actual_cost") @db.Decimal(14, 2)
+  remarks     String?
+  isActive    Boolean   @default(true) @map("is_active")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+  deletedAt   DateTime? @map("deleted_at")
+
+  project    Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  category   CostCategory      @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  scopeItem  ScopeItem?        @relation(fields: [scopeItemId], references: [id], onDelete: SetNull)
+  budgetItem BudgetItem?       @relation(fields: [budgetItemId], references: [id], onDelete: SetNull)
+
+  @@index([projectId])
+  @@index([categoryId])
+  @@index([scopeItemId])
+  @@index([budgetItemId])
+  @@map("cost_items")
+}
+
+model ResourceAssignment {
+  id               Int       @id @default(autoincrement())
+  projectId        Int       @map("project_id")
+  scopeItemId      Int?      @map("scope_item_id")
+  teamAssignmentId Int?      @map("team_assignment_id")
+  // Free text when not linked to a project team member (vendor, consultant)
+  name             String
+  positionCode     String    @map("position_code")
+  costPerDay       Decimal   @map("cost_per_day") @db.Decimal(12, 2)
+  weeksRequired    Decimal   @map("weeks_required") @db.Decimal(5, 2)
+  daysPerWeek      Int       @default(5) @map("days_per_week")
+  // costPerDay * weeksRequired * daysPerWeek, server-computed
+  budget           Decimal   @db.Decimal(14, 2)
+  remarks          String?
+  isActive         Boolean   @default(true) @map("is_active")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+  deletedAt        DateTime? @map("deleted_at")
+
+  project        Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  scopeItem      ScopeItem?      @relation(fields: [scopeItemId], references: [id], onDelete: SetNull)
+  teamAssignment TeamAssignment? @relation(fields: [teamAssignmentId], references: [id], onDelete: SetNull)
+
+  @@index([projectId])
+  @@index([scopeItemId])
+  @@index([teamAssignmentId])
+  @@map("resource_assignments")
+}
+
+model CostingSheet {
+  id              Int      @id @default(autoincrement())
+  projectId       Int      @unique @map("project_id")
+  // draft | submitted | hod_verified | finance_verified | approved | rejected
+  status          String   @default("draft")
+  currency        String   @default("MYR")
+  // Denormalized totals, recomputed server-side on every costing mutation
+  totalPlanCost   Decimal  @default(0) @map("total_plan_cost") @db.Decimal(14, 2)
+  totalActualCost Decimal  @default(0) @map("total_actual_cost") @db.Decimal(14, 2)
+  resourcesBudget Decimal  @default(0) @map("resources_budget") @db.Decimal(14, 2)
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  project    Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  approvals  CostingApproval[]
+
+  @@map("costing_sheets")
+}
+
+model CostingApproval {
+  id          Int       @id @default(autoincrement())
+  sheetId     Int       @map("sheet_id")
+  step        Int // 1..4: prepared, hod_verified, finance_verified, ceo_approved
+  stepKey     String    @map("step_key")
+  status      String    @default("pending") // pending | approved | rejected
+  actorUserId Int?      @map("actor_user_id")
+  actorName   String?   @map("actor_name")
+  actedAt     DateTime? @map("acted_at")
+  comments    String?
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  sheet  CostingSheet @relation(fields: [sheetId], references: [id], onDelete: Cascade)
+  actor  User?        @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@unique([sheetId, step])
+  @@index([sheetId])
+  @@map("costing_approvals")
 }
 
 model Credential {
@@ -1440,6 +1624,8 @@ model RequisitionForm {
   procurementType    String    @default("material") @map("procurement_type") // material | service
   urgencyLevel       String    @default("normal") @map("urgency_level") // low | normal | high | urgent
   purchaseType       String    @default("non_project") @map("purchase_type") // project | non_project
+  // The scope item this procurement raises for — feeds the scope's actual cost
+  scopeItemId        Int?      @map("scope_item_id")
   requestedByName    String?   @map("requested_by_name")
   requestedByDate    DateTime? @map("requested_by_date")
   approvedByName     String?   @map("approved_by_name")
@@ -1459,6 +1645,7 @@ model RequisitionForm {
   PurchaseOrder       PurchaseOrder[]
   DirectPurchase      DirectPurchase[]
   InternalProject     InternalProject[]
+  scopeItem           ScopeItem?            @relation(fields: [scopeItemId], references: [id], onDelete: SetNull)
 
   @@index([status])
   @@index([projectId])
@@ -1467,6 +1654,7 @@ model RequisitionForm {
   @@index([createdByUserId])
   @@index([procurementType])
   @@index([purchaseType])
+  @@index([scopeItemId])
   @@index([isActive])
   @@map("requisition_forms")
 }

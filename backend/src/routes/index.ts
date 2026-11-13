@@ -39,6 +39,8 @@ import microsoftRoutes from "./microsoft.routes.js";
 import accessRoutes from "./access.routes.js";
 import teamRoutes from "./team.routes.js";
 import approvalsRoutes from "./approvals.routes.js";
+import scopeRoutes from "./scope.routes.js";
+import costingRoutes from "./costing.routes.js";
 
 const router = Router();
 
@@ -59,6 +61,8 @@ router.use("/admin", adminRoutes);
 router.use("/grafana", grafanaRoutes);
 router.use("/settings", settingsRoutes);
 router.use("/projects", credentialRoutes);
+router.use("/projects", scopeRoutes);
+router.use("/projects", costingRoutes);
 router.use("/ssl", sslRoutes);
 router.use("/npm", npmRoutes);
 router.use("/domains", domainRoutes);
