@@ -55,7 +55,11 @@ export function MultiSelect({
   );
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    // `modal` matters when the MultiSelect sits inside a Dialog: the dialog's
+    // scroll-lock swallows wheel events aimed at portaled popover content, so
+    // the list can't be wheel-scrolled. A modal popover installs its own lock
+    // that permits scrolling within the list itself.
+    <Popover open={open} onOpenChange={setOpen} modal>
       <PopoverTrigger asChild>
         <Button
           variant="outline"
@@ -96,7 +100,9 @@ export function MultiSelect({
           <ChevronsUpDown className="h-4 w-4 shrink-0 opacity-50" />
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="w-[300px] p-0 z-50">
+      {/* Match the trigger's width (Radix sets this var on the content),
+          with a floor so the list stays readable if the trigger is narrow. */}
+      <PopoverContent className="w-[var(--radix-popover-trigger-width)] min-w-[220px] p-0 z-50">
         <Command>
           <CommandInput placeholder="Search..." className="h-9" />
           <CommandEmpty>No option found.</CommandEmpty>

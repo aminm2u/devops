@@ -18,7 +18,6 @@ import apiClient from '@/api/client';
 import { accessApi } from '@/api/access';
 import { timesheetApi } from '@/api/timesheet';
 import { useTimesheetRules } from '@/hooks/useTimeEntries';
-import { useReferenceData } from '@/hooks/useReferenceData';
 import type { TimesheetApprovalRule, TimesheetApproverType } from '@/types';
 
 // ─── Approval rules ─────────────────────────────────────────────────────────
@@ -104,9 +103,17 @@ export function TimesheetRulesTab() {
                   <TableCell className="font-medium">{rule.name}</TableCell>
                   <TableCell>
                     <div className="flex flex-wrap gap-1">
-                      <Badge variant="outline" className="text-[10px] capitalize dark:text-gray-400 text-gray-500">
-                        {rule.categoryValue ?? 'Any category'}
-                      </Badge>
+                      {(rule.categoryValue ?? '').split(',').map((c) => c.trim()).filter(Boolean).length ? (
+                        (rule.categoryValue ?? '').split(',').map((c) => c.trim()).filter(Boolean).map((cat) => (
+                          <Badge key={cat} variant="outline" className="text-[10px] capitalize dark:text-gray-400 text-gray-500">
+                            {cat}
+                          </Badge>
+                        ))
+                      ) : (
+                        <Badge variant="outline" className="text-[10px] capitalize dark:text-gray-400 text-gray-500">
+                          Any category
+                        </Badge>
+                      )}
                       {rule.projectId != null && (
                         <Badge variant="outline" className="text-[10px] dark:text-gray-400 text-gray-500">
                           Project #{rule.projectId}
@@ -206,7 +213,9 @@ function RuleDialog({
   const [name, setName] = useState(rule?.name || '');
   const [sortOrder, setSortOrder] = useState(rule?.sortOrder ?? nextSortOrder);
   const [isActive, setIsActive] = useState(rule?.isActive ?? true);
-  const [categoryValue, setCategoryValue] = useState(rule?.categoryValue ?? '');
+  const [categoryValues, setCategoryValues] = useState<string[]>(
+    (rule?.categoryValue ?? '').split(',').map((s) => s.trim()).filter(Boolean)
+  );
   const [projectId, setProjectId] = useState(rule?.projectId ? String(rule.projectId) : '');
   const [approverType, setApproverType] = useState<TimesheetApproverType>(
     rule?.approverType ?? 'direct_manager'
@@ -228,7 +237,6 @@ function RuleDialog({
     (rule?.approvers || []).map((a) => String(a.userId))
   );
 
-  const { data: categories } = useReferenceData('timesheet_category');
   const { data: usersData } = useQuery({
     queryKey: ['admin-users'],
     queryFn: () => apiClient.get('/admin/users', { params: { limit: 500 } }).then((r) => r.data.data),
@@ -267,7 +275,7 @@ function RuleDialog({
         name,
         isActive,
         sortOrder: Number(sortOrder),
-        categoryValue: categoryValue || null,
+        categoryValues,
         projectId: projectId ? Number(projectId) : null,
         approverType,
         projectRoleId: approverType === 'project_role' && projectRoleId ? Number(projectRoleId) : null,
@@ -285,6 +293,7 @@ function RuleDialog({
     },
     onError: (err: any) => {
       const msg =
+        err?.response?.data?.errors?.categoryValues?.[0] ??
         err?.response?.data?.errors?.appliesToUserIds?.[0] ??
         err?.response?.data?.errors?.userIds?.[0] ??
         err?.response?.data?.message;
@@ -333,38 +342,56 @@ function RuleDialog({
         <div className="grid grid-cols-2 gap-4">
           <div className="space-y-2">
             <Label className='dark:text-gray-400 text-gray-500'>Category</Label>
-            <Select value={categoryValue || 'any'} onValueChange={(v) => setCategoryValue(v === 'any' ? '' : v)}>
-              <SelectTrigger><SelectValue placeholder="Any category" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="any">Any category</SelectItem>
-                {(categories || []).map((c: any) => (
-                  <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <MultiSelect
+              options={[
+                { value: 'project', label: 'Project' },
+                { value: 'management', label: 'Management' },
+                { value: 'programme', label: 'Programme' },
+                { value: 'others', label: 'Others' },
+              ]}
+              selected={categoryValues}
+              onChange={(vals) => {
+                setCategoryValues(vals);
+                // Project scoping only makes sense for project hours; drop it
+                // when no selected category is "project".
+                if (!vals.includes('project')) setProjectId('');
+              }}
+              placeholder="Any category (select to restrict)"
+            />
           </div>
-          <div className="space-y-2">
-            <Label className='dark:text-gray-400 text-gray-500'>Project</Label>
-            <Select value={projectId || 'any'} onValueChange={(v) => setProjectId(v === 'any' ? '' : v)}>
-              <SelectTrigger><SelectValue placeholder="Any project" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="any">Any project</SelectItem>
-                {projects.map((p) => (
-                  <SelectItem key={p.id} value={String(p.id)}>{p.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+          {/* Project scoping only applies when "project" is among the chosen
+              categories — other categories aren't tied to a project. */}
+          {categoryValues.includes('project') && (
+            <div className="space-y-2">
+              <Label className='dark:text-gray-400 text-gray-500'>Project</Label>
+              <Select value={projectId || 'any'} onValueChange={(v) => setProjectId(v === 'any' ? '' : v)}>
+                <SelectTrigger><SelectValue placeholder="Any project" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="any">Any project</SelectItem>
+                  {projects.map((p) => (
+                    <SelectItem key={p.id} value={String(p.id)}>{p.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
         </div>
 
         {/* ── Who this rule applies to ─────────────────────────────── */}
         <div className="space-y-2">
           <Label className='dark:text-gray-400 text-gray-500'>Applies to</Label>
-          <MultiSelect
-            options={userOptions}
-            selected={appliesToUserIds}
-            onChange={setAppliesToUserIds}
+          <RichListBox
+            multiple
+            items={users.map((u) => ({
+              value: String(u.id),
+              label: u.name,
+              description: u.department?.name ?? u.email,
+            }))}
+            values={appliesToUserIds}
+            onValuesChange={setAppliesToUserIds}
             placeholder="All users (select to restrict)"
+            searchPlaceholder="Search users..."
+            emptyMessage="No users found."
           />
           <p className="text-xs text-muted-foreground">
             {appliesToUserIds.length === 0

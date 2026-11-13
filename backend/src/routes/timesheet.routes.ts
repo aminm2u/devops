@@ -138,6 +138,18 @@ async function assertEnrolled(userId: number, projectId: number, elevated: boole
 
 const dateStr = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Expected YYYY-MM-DD");
 
+/**
+ * The two categories that point at real project work. A task link implies one
+ * of them (the task knows its project); a bare `projectId` is accepted only
+ * alongside one of them. Whatever an admin renames these to, the values here
+ * are the seeded reference rows the drawer cascades on.
+ */
+const PROJECT_CATEGORIES = ["project", "programme"];
+
+/** Category for a task-linked entry — honours an explicit programme choice. */
+const taskCategory = (v?: string | null) =>
+  v && PROJECT_CATEGORIES.includes(v) ? v : "project";
+
 const createTimeEntrySchema = z.object({
   workDate: dateStr,
   hours: z.number().min(0.25).max(24),
@@ -145,6 +157,8 @@ const createTimeEntrySchema = z.object({
   taskId: z.number().int().positive().optional().nullable(),
   subtaskId: z.number().int().positive().optional().nullable(),
   categoryValue: z.string().min(1).max(50).optional(),
+  // Bare project link for ad-hoc project/programme entries (no task).
+  projectId: z.number().int().positive().optional().nullable(),
   userId: z.number().int().positive().optional(), // admin-only: log on behalf
 });
 
@@ -158,7 +172,10 @@ const createRuleSchema = z.object({
   name: z.string().min(1).max(255),
   isActive: z.boolean().optional(),
   sortOrder: z.number().int().min(0).optional(),
-  categoryValue: z.string().max(50).optional().nullable(),
+  // Comma-joined categories, e.g. "project,management" (null = any).
+  categoryValue: z.string().max(200).optional().nullable(),
+  // Preferred: list of category values; stored comma-joined in categoryValue.
+  categoryValues: z.array(z.string().min(1).max(50)).max(20).optional(),
   projectId: z.number().int().positive().optional().nullable(),
   approverType: z.enum(["project_role", "users", "direct_manager", "app_role"]),
   projectRoleId: z.number().int().positive().optional().nullable(),
@@ -177,9 +194,29 @@ const updateRuleSchema = createRuleSchema.partial();
  * legal while no other active rule scopes anyone. Checked app-side — Prisma
  * cannot express "unique within active rules" as a constraint.
  */
+/**
+ * Two rules only conflict when they could match the *same* entry: their
+ * category sets must overlap (either side wildcard = overlap) and their
+ * project scope must overlap (null = any project). A "project"-only rule and
+ * a "management+others" rule are disjoint — users may sit in both.
+ */
+function categorySetsOverlap(a: string | null, b: string | null): boolean {
+  const parse = (s: string | null) =>
+    (s ?? "").split(",").map((x) => x.trim()).filter(Boolean);
+  const setA = parse(a);
+  const setB = parse(b);
+  if (setA.length === 0 || setB.length === 0) return true; // either side = any
+  return setA.some((c) => setB.includes(c));
+}
+
+function projectScopeOverlaps(a: number | null, b: number | null): boolean {
+  return a == null || b == null || a === b;
+}
+
 async function assertNoAppliesToConflict(
   appliesToUserIds: number[],
-  excludeRuleId?: number
+  excludeRuleId?: number,
+  scope?: { categoryValue: string | null; projectId: number | null }
 ): Promise<void> {
   const otherActiveRules = await prisma.timesheetApprovalRule.findMany({
     where: {
@@ -190,6 +227,14 @@ async function assertNoAppliesToConflict(
   });
 
   for (const other of otherActiveRules) {
+    // Disjoint match scopes can never shadow each other.
+    if (
+      scope &&
+      (!categorySetsOverlap(scope.categoryValue, other.categoryValue) ||
+        !projectScopeOverlaps(scope.projectId ?? null, other.projectId))
+    ) {
+      continue;
+    }
     // Two wildcard rules would make the second unreachable.
     if (other.appliesTo.length === 0 && appliesToUserIds.length === 0) {
       throw new ValidationError({
@@ -290,22 +335,49 @@ router.post(
         if (subtask.assigneeId !== null && subtask.assigneeId !== targetUserId) {
           throw new ForbiddenError("That subtask is assigned to someone else");
         }
+        if (body.projectId && body.projectId !== subtask.task.projectId) {
+          throw new ValidationError({ projectId: ["Project does not match the subtask's project"] });
+        }
         taskId = subtask.taskId;
         subtaskId = subtask.id;
         projectId = subtask.task.projectId;
-        categoryValue = "project"; // metadata derived from the task
+        categoryValue = taskCategory(body.categoryValue); // project or programme
       } else if (body.taskId) {
         const task = await prisma.projectTask.findUnique({
           where: { id: body.taskId },
           select: { id: true, projectId: true },
         });
         if (!task) throw new NotFoundError("Task not found");
+        if (body.projectId && body.projectId !== task.projectId) {
+          throw new ValidationError({ projectId: ["Project does not match the task's project"] });
+        }
         taskId = task.id;
         projectId = task.projectId;
-        categoryValue = "project"; // metadata derived from the task
+        categoryValue = taskCategory(body.categoryValue); // project or programme
+      } else if (body.projectId) {
+        // Project/programme work without a specific task: the drawer's second
+        // dropdown hands us the project directly.
+        const project = await prisma.project.findUnique({
+          where: { id: body.projectId },
+          select: { id: true, deletedAt: true },
+        });
+        if (!project || project.deletedAt) throw new NotFoundError("Project not found");
+        projectId = project.id;
+        if (!body.categoryValue || !PROJECT_CATEGORIES.includes(body.categoryValue)) {
+          throw new ValidationError({
+            categoryValue: ["Category must be project or programme for a project-linked entry"],
+          });
+        }
+        await assertCategoryExists(body.categoryValue);
+        categoryValue = body.categoryValue;
       } else {
         if (!body.categoryValue) {
           throw new ValidationError({ categoryValue: ["Category is required for ad-hoc entries"] });
+        }
+        if (PROJECT_CATEGORIES.includes(body.categoryValue)) {
+          throw new ValidationError({
+            categoryValue: ["Choose which project or programme this entry is for"],
+          });
         }
         await assertCategoryExists(body.categoryValue);
         categoryValue = body.categoryValue;
@@ -685,7 +757,11 @@ router.put(
       if (body.workDate !== undefined) data.workDate = parseWorkDate(body.workDate);
 
       // Task/subtask/category derivation mirrors create
-      if (body.subtaskId !== undefined || body.taskId !== undefined) {
+      if (
+        body.subtaskId !== undefined ||
+        body.taskId !== undefined ||
+        body.projectId !== undefined
+      ) {
         if (body.subtaskId) {
           const subtask = await prisma.taskSubtask.findUnique({
             where: { id: body.subtaskId },
@@ -698,7 +774,7 @@ router.put(
           data.taskId = subtask.taskId;
           data.subtaskId = subtask.id;
           data.projectId = subtask.task.projectId;
-          data.categoryValue = "project";
+          data.categoryValue = taskCategory(body.categoryValue ?? entry.categoryValue);
         } else if (body.taskId) {
           const task = await prisma.projectTask.findUnique({
             where: { id: body.taskId },
@@ -708,13 +784,36 @@ router.put(
           data.taskId = task.id;
           data.subtaskId = null;
           data.projectId = task.projectId;
-          data.categoryValue = "project";
+          data.categoryValue = taskCategory(body.categoryValue ?? entry.categoryValue);
+        } else if (body.projectId) {
+          // Project/programme work without a specific task.
+          const project = await prisma.project.findUnique({
+            where: { id: body.projectId },
+            select: { id: true, deletedAt: true },
+          });
+          if (!project || project.deletedAt) throw new NotFoundError("Project not found");
+          data.taskId = null;
+          data.subtaskId = null;
+          data.projectId = project.id;
+          const category = body.categoryValue ?? entry.categoryValue;
+          if (!category || !PROJECT_CATEGORIES.includes(category)) {
+            throw new ValidationError({
+              categoryValue: ["Category must be project or programme for a project-linked entry"],
+            });
+          }
+          await assertCategoryExists(category);
+          data.categoryValue = category;
         } else {
           data.taskId = null;
           data.subtaskId = null;
           data.projectId = null;
           if (!body.categoryValue) {
             throw new ValidationError({ categoryValue: ["Category is required for ad-hoc entries"] });
+          }
+          if (PROJECT_CATEGORIES.includes(body.categoryValue)) {
+            throw new ValidationError({
+              categoryValue: ["Choose which project or programme this entry is for"],
+            });
           }
           await assertCategoryExists(body.categoryValue);
           data.categoryValue = body.categoryValue;
@@ -1204,14 +1303,32 @@ router.post(
         throw new ValidationError({ userIds: ["Select at least one approver"] });
       }
       const appliesToUserIds = body.appliesToUserIds ?? [];
-      await assertNoAppliesToConflict(appliesToUserIds);
+
+      // Categories: prefer the list form; validate every value against
+      // timesheet_category, then store comma-joined.
+      let ruleCategories: string | null = null;
+      if (body.categoryValues !== undefined) {
+        for (const c of body.categoryValues) await assertCategoryExists(c);
+        ruleCategories = body.categoryValues.length ? body.categoryValues.join(",") : null;
+      } else if (body.categoryValue !== undefined) {
+        const legacy = (body.categoryValue || "").trim();
+        if (legacy) {
+          for (const c of legacy.split(",")) await assertCategoryExists(c.trim());
+          ruleCategories = legacy;
+        }
+      }
+
+      await assertNoAppliesToConflict(appliesToUserIds, undefined, {
+        categoryValue: ruleCategories,
+        projectId: body.projectId || null,
+      });
 
       const rule = await prisma.timesheetApprovalRule.create({
         data: {
           name: body.name,
           isActive: body.isActive ?? true,
           sortOrder: body.sortOrder ?? 0,
-          categoryValue: body.categoryValue || null,
+          categoryValue: ruleCategories,
           projectId: body.projectId || null,
           approverType: body.approverType,
           projectRoleId: body.approverType === "project_role" ? body.projectRoleId || null : null,
@@ -1255,32 +1372,44 @@ router.put(
         throw new ValidationError({ userIds: ["Select at least one approver"] });
       }
 
-      // One active rule per appliesTo user — checked against every other
-      // active rule, using the rule's *existing* list when the request does
-      // not touch it.
-      if (body.appliesToUserIds !== undefined || body.isActive !== undefined) {
-        const nextAppliesTo =
-          body.appliesToUserIds !== undefined
-            ? body.appliesToUserIds
-            : (
-                await prisma.timesheetRuleAppliesTo.findMany({
-                  where: { ruleId: id },
-                  select: { userId: true },
-                })
-              ).map((a) => a.userId);
-        const willBeActive = body.isActive ?? existing.isActive;
-        if (willBeActive) {
-          await assertNoAppliesToConflict(nextAppliesTo, id);
-        }
-        if (body.appliesToUserIds !== undefined) {
-          await prisma.timesheetRuleAppliesTo.deleteMany({ where: { ruleId: id } });
-        }
-      }
-
       const replaceApprovers =
         nextApproverType === "users" && (body.userIds !== undefined || body.approverType !== undefined);
       if (replaceApprovers) {
         await prisma.timesheetRuleApprover.deleteMany({ where: { ruleId: id } });
+      }
+
+      // Categories (same normalize/validate as create).
+      let nextCategories: string | null | undefined;
+      if (body.categoryValues !== undefined) {
+        for (const c of body.categoryValues) await assertCategoryExists(c);
+        nextCategories = body.categoryValues.length ? body.categoryValues.join(",") : null;
+      } else if (body.categoryValue !== undefined) {
+        const legacy = (body.categoryValue || "").trim();
+        if (legacy) {
+          for (const c of legacy.split(",")) await assertCategoryExists(c.trim());
+        }
+        nextCategories = legacy || null;
+      }
+
+      const nextAppliesTo =
+        body.appliesToUserIds !== undefined
+          ? body.appliesToUserIds
+          : (
+              await prisma.timesheetRuleAppliesTo.findMany({
+                where: { ruleId: id },
+                select: { userId: true },
+              })
+            ).map((a) => a.userId);
+      const willBeActive = body.isActive ?? existing.isActive;
+      if (willBeActive) {
+        await assertNoAppliesToConflict(nextAppliesTo, id, {
+          categoryValue:
+            nextCategories !== undefined ? nextCategories : existing.categoryValue,
+          projectId: body.projectId !== undefined ? body.projectId || null : existing.projectId,
+        });
+      }
+      if (body.appliesToUserIds !== undefined) {
+        await prisma.timesheetRuleAppliesTo.deleteMany({ where: { ruleId: id } });
       }
 
       const rule = await prisma.timesheetApprovalRule.update({
@@ -1289,7 +1418,7 @@ router.put(
           ...(body.name !== undefined && { name: body.name }),
           ...(body.isActive !== undefined && { isActive: body.isActive }),
           ...(body.sortOrder !== undefined && { sortOrder: body.sortOrder }),
-          ...(body.categoryValue !== undefined && { categoryValue: body.categoryValue || null }),
+          ...(nextCategories !== undefined && { categoryValue: nextCategories }),
           ...(body.projectId !== undefined && { projectId: body.projectId || null }),
           ...(body.approverType !== undefined && { approverType: body.approverType }),
           ...(body.projectRoleId !== undefined && { projectRoleId: body.projectRoleId || null }),

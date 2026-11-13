@@ -13,6 +13,8 @@ export interface CreateTimeEntryInput {
   description: string;
   taskId?: number | null;
   subtaskId?: number | null;
+  /** Bare project link for ad-hoc project/programme entries (no task). */
+  projectId?: number | null;
   categoryValue?: string;
   userId?: number; // admin: log on behalf
 }
@@ -92,6 +94,7 @@ export const timesheetApi = {
     input: Partial<TimesheetApprovalRule> & {
       name: string;
       approverType: string;
+      categoryValues?: string[];
       appliesToUserIds?: number[];
       userIds?: number[];
     }
@@ -101,6 +104,7 @@ export const timesheetApi = {
   updateRule: (
     id: number,
     input: Partial<TimesheetApprovalRule> & {
+      categoryValues?: string[];
       appliesToUserIds?: number[];
       userIds?: number[];
     }

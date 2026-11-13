@@ -862,6 +862,7 @@ export interface TimesheetApprovalRule {
   name: string;
   isActive: boolean;
   sortOrder: number;
+  /** Comma-joined timesheet_category values (null = any category). */
   categoryValue: string | null;
   projectId: number | null;
   approverType: TimesheetApproverType;

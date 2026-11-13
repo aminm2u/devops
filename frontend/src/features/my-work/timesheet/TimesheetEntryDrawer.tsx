@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
-  CheckCircle2,
   RotateCcw,
   Save,
   Send,
@@ -45,10 +44,11 @@ import type { TimeEntry } from '@/types';
  * The timesheet entry drawer.
  *
  * Same job as `TimeEntryFormDialog`, presented as a right-hand sheet so the
- * week stays visible behind it. The form fields are identical on purpose —
- * this is a change of container, not of behaviour — but the pickers now come
- * from `/timesheet/enrollable`, so the task list is the work this person is
- * actually enrolled on rather than every task they were ever assigned.
+ * week stays visible behind it. The fields cascade: picking the Project or
+ * Programme category reveals a project picker (from `/timesheet/enrollable`),
+ * the task list then narrows to that project's tasks, and the subtask list to
+ * the chosen task. Any other category is plain ad-hoc work with no project
+ * behind it.
  *
  * `entry === null` means "new entry on `defaultDate`".
  */
@@ -61,6 +61,9 @@ interface TimesheetEntryDrawerProps {
   /** Viewing somebody else's week (admin) — show the details, offer no edits. */
   readOnly?: boolean;
 }
+
+/** Categories that point at real project work and unlock the project picker. */
+const PROJECT_CATEGORIES = ['project', 'programme'];
 
 const STATUS_STYLE: Record<string, string> = {
   draft: 'border-border text-muted-foreground',
@@ -89,6 +92,7 @@ export function TimesheetEntryDrawer({
   const [taskId, setTaskId] = useState('');
   const [subtaskId, setSubtaskId] = useState('');
   const [categoryValue, setCategoryValue] = useState('');
+  const [projectId, setProjectId] = useState('');
   const [deleteOpen, setDeleteOpen] = useState(false);
 
   const { data: enrollable } = useEnrollable();
@@ -108,6 +112,7 @@ export function TimesheetEntryDrawer({
       setTaskId(entry.taskId ? String(entry.taskId) : '');
       setSubtaskId(entry.subtaskId ? String(entry.subtaskId) : '');
       setCategoryValue(entry.categoryValue);
+      setProjectId(entry.projectId ? String(entry.projectId) : '');
     } else {
       setWorkDate(defaultDate || todayLocal());
       setHours('');
@@ -115,6 +120,7 @@ export function TimesheetEntryDrawer({
       setTaskId('');
       setSubtaskId('');
       setCategoryValue('');
+      setProjectId('');
     }
   }, [open, entry, defaultDate]);
 
@@ -123,6 +129,7 @@ export function TimesheetEntryDrawer({
   // so it must also be in the options, or the trigger renders blank and a save
   // would look like it had dropped the link.
   const enrolledTasks = enrollable?.tasks ?? [];
+  const enrolledProjects = enrollable?.projects ?? [];
   const tasks = useMemo(() => {
     if (entry?.task && !enrolledTasks.some((task) => task.id === entry.task!.id)) {
       return [
@@ -140,20 +147,65 @@ export function TimesheetEntryDrawer({
   }, [enrollable, entry]);
   const categories = enrollable?.categories ?? [];
   const selectedTask = tasks.find((task) => String(task.id) === taskId);
+  const isProjectCategory = PROJECT_CATEGORIES.includes(categoryValue);
+
+  // The projects offered in the picker: the enrolled list, plus the entry's own
+  // project when the person has since been removed from it (same reasoning as
+  // the task above).
+  const projects = useMemo(() => {
+    if (entry?.projectId && !enrolledProjects.some((project) => project.id === entry.projectId)) {
+      return [
+        {
+          id: entry.projectId,
+          name: entry.project?.name ?? 'Project',
+          slug: '',
+          role: '',
+        },
+        ...enrolledProjects,
+      ];
+    }
+    return enrolledProjects;
+  }, [enrollable, entry]);
+
+  // Project-level entries carry the entry's own project; task-linked entries
+  // know theirs from the task. An old ad-hoc entry has neither.
+  const selectedProjectId =
+    projectId || String(entry?.projectId ?? '') || (selectedTask?.projectId ? String(selectedTask.projectId) : '');
   const isTaskLinked = !!taskId;
+  // Tasks offered: every enrolled task on the chosen project (or all of them
+  // until a project is picked).
+  const tasksForProject = useMemo(() => {
+    const scoped = selectedProjectId
+      ? tasks.filter((task) => String(task.projectId) === selectedProjectId)
+      : tasks;
+    return scoped;
+  }, [tasks, selectedProjectId]);
 
   const parsedHours = Math.round(parseFloat(hours || '0') * 4) / 4;
   const canSave =
-    !locked && !!description.trim() && !!workDate && parsedHours > 0 && (isTaskLinked || !!categoryValue);
+    !locked &&
+    !!description.trim() &&
+    !!workDate &&
+    parsedHours > 0 &&
+    (isTaskLinked ||
+      (isProjectCategory ? !!projectId : !!categoryValue));
 
-  const buildPayload = () => ({
-    workDate,
-    hours: parsedHours,
-    description: description.trim(),
-    taskId: isTaskLinked ? Number(taskId) : null,
-    subtaskId: isTaskLinked && subtaskId ? Number(subtaskId) : null,
-    categoryValue: isTaskLinked ? undefined : categoryValue,
-  });
+  const buildPayload = () => {
+    const effectiveProjectId = isTaskLinked
+      ? undefined // server derives it from the task
+      : isProjectCategory && projectId
+        ? Number(projectId)
+        : null;
+    return {
+      workDate,
+      hours: parsedHours,
+      description: description.trim(),
+      taskId: isTaskLinked ? Number(taskId) : null,
+      subtaskId: isTaskLinked && subtaskId ? Number(subtaskId) : null,
+      projectId: effectiveProjectId,
+      categoryValue: isTaskLinked ? categoryValue || undefined : categoryValue,
+    };
+  };
 
   const save = async (): Promise<TimeEntry | null> => {
     if (!canSave) return null;
@@ -209,7 +261,7 @@ export function TimesheetEntryDrawer({
                 <DatePicker value={workDate} onChange={setWorkDate} disabled={locked} />
               </div>
               <div className="space-y-2">
-                <Label className="dark:text-gray-400 text-gray-800">Hours</Label>
+                <Label className="dark:text-gray-400 text-gray-800">Hours <small className="text-muted-foreground">(in 15-minute increments)</small></Label>
                 <Input
                   type="number"
                   min="0.25"
@@ -220,32 +272,72 @@ export function TimesheetEntryDrawer({
                   placeholder="0.0"
                   disabled={locked}
                 />
-                <p className="text-[11px] text-muted-foreground">Rounds to the nearest 15 minutes</p>
               </div>
             </div>
 
             <div className="space-y-2">
               <Label className="dark:text-gray-400 text-gray-800">Category</Label>
-              {isTaskLinked ? (
-                <div className="flex items-center gap-2">
-                  <Badge variant="outline" className="gap-1 border-primary/30 text-primary">
-                    <CheckCircle2 className="h-3 w-3" />
-                    Project (from task)
-                  </Badge>
+              <Select
+                value={categoryValue}
+                onValueChange={(value) => {
+                  setCategoryValue(value);
+                  // Switching away from project work drops the project link —
+                  // the pickers below disappear with the category.
+                  if (!PROJECT_CATEGORIES.includes(value)) {
+                    setProjectId('');
+                    setTaskId('');
+                    setSubtaskId('');
+                  }
+                }}
+                disabled={locked}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select a category..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {categories.map((category) => (
+                    <SelectItem key={category.value} value={category.value}>
+                      {category.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              {isProjectCategory && (
+                <div className="mt-2 space-y-2">
+                  <Label className="dark:text-gray-400 text-gray-800 mt-4">
+                    {categoryValue === 'programme' ? 'Programme' : 'Project'}
+                  </Label>
+                  <Select
+                    value={selectedProjectId || undefined}
+                    onValueChange={(value) => {
+                      setProjectId(value);
+                      // The task belongs to the project — switching projects
+                      // invalidates both downstream picks.
+                      setTaskId('');
+                      setSubtaskId('');
+                    }}
+                    disabled={locked || projects.length === 0}
+                  >
+                    <SelectTrigger>
+                      <SelectValue
+                        placeholder={projects.length === 0 ? 'No enrolled projects' : 'Select a project...'}
+                      />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {projects.map((project) => (
+                        <SelectItem key={project.id} value={String(project.id)}>
+                          {project.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {projects.length === 0 && (
+                    <p className="text-[11px] text-muted-foreground">
+                      You are not enrolled on any project. Ask PMO to add you, or pick another category.
+                    </p>
+                  )}
                 </div>
-              ) : (
-                <Select value={categoryValue} onValueChange={setCategoryValue} disabled={locked}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select a category..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {categories.map((category) => (
-                      <SelectItem key={category.value} value={category.value}>
-                        {category.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
               )}
             </div>
 
@@ -260,63 +352,72 @@ export function TimesheetEntryDrawer({
               />
             </div>
 
-            {/* Linking to a task is what feeds project contribution numbers, so
-                the picker stays — but it is optional, and picking one is the
-                only thing the old "Source" toggle did. Category below carries
-                the same information for ad-hoc work, which is why the toggle
-                was redundant. */}
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-2">
-                <Label className="dark:text-gray-400 text-gray-800">Project task (optional)</Label>
-                <Select
-                  value={taskId || 'none'}
-                  onValueChange={(value) => {
-                    setTaskId(value === 'none' ? '' : value);
-                    setSubtaskId('');
-                  }}
-                  disabled={locked || tasks.length === 0}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="No task" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">No task — log an activity</SelectItem>
-                    {tasks.map((task) => (
-                      <SelectItem key={task.id} value={String(task.id)}>
-                        {task.title}
-                        <span className="ml-1 text-muted-foreground">({task.projectName})</span>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label className="dark:text-gray-400 text-gray-800">Subtask</Label>
-                <Select
-                  value={subtaskId || 'none'}
-                  onValueChange={(value) => setSubtaskId(value === 'none' ? '' : value)}
-                  disabled={locked || !selectedTask}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="None" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">None</SelectItem>
-                    {(selectedTask?.subtasks ?? [])
-                      .filter((subtask) => subtask.claimable)
-                      .map((subtask) => (
-                        <SelectItem key={subtask.id} value={String(subtask.id)}>
-                          {subtask.title}
+            {/* Linking to a task feeds project contribution numbers, but it is
+                optional: a project or programme can be chosen on its own. The
+                task list is scoped to the project picked above, and the
+                subtask list to the task. */}
+            {isProjectCategory && (
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <Label className="dark:text-gray-400 text-gray-800">Task (optional)</Label>
+                  <Select
+                    value={taskId || 'none'}
+                    onValueChange={(value) => {
+                      setTaskId(value === 'none' ? '' : value);
+                      setSubtaskId('');
+                    }}
+                    disabled={locked || tasksForProject.length === 0}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="No task" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">No task — {categoryValue} work only</SelectItem>
+                      {tasksForProject.map((task) => (
+                        <SelectItem key={task.id} value={String(task.id)}>
+                          {task.title}
                         </SelectItem>
                       ))}
-                  </SelectContent>
-                </Select>
+                    </SelectContent>
+                  </Select>
+                  {selectedProjectId && tasksForProject.length === 0 && (
+                    <p className="text-[11px] text-muted-foreground">
+                      No open tasks on this project for you.
+                    </p>
+                  )}
+                </div>
+                <div className="space-y-2">
+                  <Label className="dark:text-gray-400 text-gray-800">Subtask</Label>
+                  <Select
+                    value={subtaskId || 'none'}
+                    onValueChange={(value) => setSubtaskId(value === 'none' ? '' : value)}
+                    disabled={locked || !selectedTask}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="None" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">None</SelectItem>
+                      {(selectedTask?.subtasks ?? [])
+                        .filter((subtask) => subtask.claimable)
+                        .map((subtask) => (
+                          <SelectItem key={subtask.id} value={String(subtask.id)}>
+                            {subtask.title}
+                          </SelectItem>
+                        ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
-            </div>
+            )}
             <p className="text-xs text-muted-foreground">
-              {tasks.length === 0
-                ? 'You have no open task to link, so this is logged as an activity under the category you pick.'
-                : 'Linking a task records the hours against its project. Leave it empty to log a standalone activity.'}
+              {isProjectCategory
+                ? selectedProjectId
+                  ? 'Optionally link a task on this project to record the hours against it; the project alone is enough.'
+                  : 'Choose which project or programme this work is for, then optionally a task.'
+                : isTaskLinked
+                  ? ''
+                  : 'Logged as a standalone activity under the category you pick.'}
             </p>
 
             {entry?.status === 'rejected' && entry.rejectReason && (
@@ -332,7 +433,7 @@ export function TimesheetEntryDrawer({
             )}
 
             {entry && (
-              <dl className="grid grid-cols-2 gap-3 rounded-lg border bg-muted/30 p-3 text-xs">
+              <dl className="grid grid-cols-2 gap-3 rounded-lg border dark:border-gray-800 bg-muted/30 p-3 text-xs">
                 <div>
                   <dt className="text-muted-foreground">Created</dt>
                   <dd className="mt-0.5">{formatDate(entry.createdAt)}</dd>

@@ -56,7 +56,11 @@ export async function resolveTimesheetApprover(params: {
   });
 
   for (const rule of rules) {
-    if (rule.categoryValue && rule.categoryValue !== categoryValue) continue;
+    // categoryValue holds a comma-joined list (null/empty = any category).
+    if (rule.categoryValue) {
+      const cats = rule.categoryValue.split(",").map((s) => s.trim()).filter(Boolean);
+      if (cats.length > 0 && !cats.includes(categoryValue)) continue;
+    }
     if (rule.projectId && rule.projectId !== projectId) continue;
     // `appliesTo` scoping: empty list = wildcard (everyone).
     if (rule.appliesTo.length > 0 && !rule.appliesTo.some((a) => a.userId === userId)) {
