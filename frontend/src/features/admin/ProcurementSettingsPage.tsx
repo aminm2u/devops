@@ -48,6 +48,7 @@ import {
   HelpdeskCategoriesPanel,
   type HelpdeskCategoryRow,
 } from '@/features/admin/HelpdeskCategoriesPanel';
+import { ProjectRolesPanel, type ProjectRoleRecord } from '@/features/admin/ProjectRolesPanel';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Skeleton } from '@/components/ui/skeleton';
 import apiClient from '@/api/client';
@@ -1204,6 +1205,7 @@ const RECORD_GROUP = {
   units: 'units',
   timesheet_categories: 'timesheet_category',
   helpdesk_categories: 'helpdesk_categories',
+  project_roles: 'project_roles',
 } as const;
 
 type RecordGroup = (typeof RECORD_GROUP)[keyof typeof RECORD_GROUP];
@@ -1213,7 +1215,8 @@ function isRecordGroup(group: string): group is RecordGroup {
     group === RECORD_GROUP.positions ||
     group === RECORD_GROUP.units ||
     group === RECORD_GROUP.timesheet_categories ||
-    group === RECORD_GROUP.helpdesk_categories
+    group === RECORD_GROUP.helpdesk_categories ||
+    group === RECORD_GROUP.project_roles
   );
 }
 
@@ -1234,6 +1237,8 @@ const RECORD_GROUP_PERMISSION: Record<RecordGroup, string> = {
   [RECORD_GROUP.units]: 'hr.org.manage',
   [RECORD_GROUP.timesheet_categories]: 'timesheet.settings.manage',
   [RECORD_GROUP.helpdesk_categories]: 'helpdesk.ticket.manage',
+  // The grant that manages team membership — the pickers these roles feed.
+  [RECORD_GROUP.project_roles]: 'project.team.manage',
 };
 
 export function ReferenceDataTab() {
@@ -1250,6 +1255,7 @@ export function ReferenceDataTab() {
     RECORD_GROUP_PERMISSION[RECORD_GROUP.timesheet_categories]
   );
   const canManageCategories = can(RECORD_GROUP_PERMISSION[RECORD_GROUP.helpdesk_categories]);
+  const canManageProjectRoles = can(RECORD_GROUP_PERMISSION[RECORD_GROUP.project_roles]);
 
   const { data, isLoading } = useQuery({
     queryKey: ['reference-data'],
@@ -1280,6 +1286,17 @@ export function ReferenceDataTab() {
   const positions = canManagePositions ? references?.positions : undefined;
   const units = canManageUnits ? references?.units : undefined;
 
+  // Project roles come from their own admin endpoint (assignment counts
+  // included); fetched only for holders of the team-manage grant.
+  const { data: projectRoles } = useQuery({
+    queryKey: ['project-roles', 'admin'],
+    queryFn: async () => {
+      const res = await apiClient.get('/references/project-roles');
+      return res.data.data as ProjectRoleRecord[];
+    },
+    enabled: canManageProjectRoles,
+  });
+
   const { data: categories } = useQuery({
     queryKey: ['helpdesk-categories', 'admin'],
     queryFn: async () => {
@@ -1304,7 +1321,9 @@ export function ReferenceDataTab() {
         ? RECORD_GROUP.timesheet_categories
         : canManageCategories
           ? RECORD_GROUP.helpdesk_categories
-          : null;
+          : canManageProjectRoles
+            ? RECORD_GROUP.project_roles
+            : null;
 
   const activeGroup = group && (isRecordGroup(group) || groups.includes(group))
     ? group
@@ -1368,8 +1387,15 @@ export function ReferenceDataTab() {
         description: `Categories offered when a ticket is raised. ${categories?.filter((c) => c.isActive).length ?? 0} active.`,
       });
     }
+    if (canManageProjectRoles) {
+      records.push({
+        value: RECORD_GROUP.project_roles,
+        label: 'Project roles',
+        description: `Roles a person holds on a project team. ${projectRoles?.length ?? 0} defined.`,
+      });
+    }
     return [...keyValue, ...records];
-  }, [groups, data, positions, units, categories, canManageReferenceData, canManagePositions, canManageUnits, canManageTimesheetCategories, canManageCategories]);
+  }, [groups, data, positions, units, categories, projectRoles, canManageReferenceData, canManagePositions, canManageUnits, canManageTimesheetCategories, canManageCategories, canManageProjectRoles]);
 
   const deleteMutation = useMutation({
     mutationFn: async (item: RefDataItem) =>
@@ -1421,6 +1447,8 @@ export function ReferenceDataTab() {
           <TimesheetCategoriesPanel />
         ) : recordGroup === RECORD_GROUP.helpdesk_categories ? (
           <HelpdeskCategoriesPanel />
+        ) : recordGroup === RECORD_GROUP.project_roles ? (
+          <ProjectRolesPanel />
         ) : isLoading ? (
           <div className="p-6 space-y-3">
             {[1, 2, 3, 4, 5].map((i) => <Skeleton key={i} className="h-10 w-full" />)}

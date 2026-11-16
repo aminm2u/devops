@@ -52,6 +52,44 @@ export function daysBetween(from: Date, to: Date): number {
   return Math.round((startOfDay(to).getTime() - startOfDay(from).getTime()) / 86_400_000);
 }
 
+/** A baseline snapshot row, shaped for the overlay bars. */
+export interface BaselineBar {
+  wbsNumber: string;
+  title: string;
+  start: Date;
+  end: Date;
+  /** In the baseline but not in the current tree — removed since the freeze. */
+  removed: boolean;
+}
+
+/**
+ * Matches baseline snapshot rows to the current timeline's rows by wbsNumber
+ * and returns drawable ghost bars in the *current* axis window. Baseline rows
+ * whose wbs no longer exists are flagged `removed` so they can render as
+ * ghosts of deleted work.
+ */
+export function buildBaselineBars(
+  baselineItems: { wbsNumber: string; title: string; startDate: string | null; endDate: string | null }[],
+  timeline: ScopeTimeline
+): BaselineBar[] {
+  const currentByWbs = new Set(timeline.rows.map((row) => row.wbsNumber));
+  const bars: BaselineBar[] = [];
+  for (const item of baselineItems) {
+    if (!item.startDate || !item.endDate) continue;
+    const start = startOfDay(new Date(item.startDate));
+    const end = startOfDay(new Date(item.endDate));
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end < start) continue;
+    bars.push({
+      wbsNumber: item.wbsNumber,
+      title: item.title,
+      start,
+      end,
+      removed: !currentByWbs.has(item.wbsNumber),
+    });
+  }
+  return bars;
+}
+
 /** Builds Gantt rows from the flat scope list; parents roll up children. */
 export function buildScopeTimeline(
   items: TimelineScopeItem[],

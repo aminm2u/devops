@@ -36,7 +36,7 @@ export function FormField({
 }: FormFieldProps) {
   return (
     <div className={cn('space-y-2', className)} {...props}>
-      <Label htmlFor={htmlFor}>
+      <Label htmlFor={htmlFor} className="dark:text-gray-400 text-gray-800">
         {label}
         {required && <span className="text-destructive"> *</span>}
       </Label>

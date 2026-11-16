@@ -1,5 +1,6 @@
 import { Router, Response, NextFunction } from "express";
 import { z } from "zod";
+import { Prisma } from "@prisma/client";
 import { authenticate } from "../middleware/auth.js";
 import { requirePermission } from "../middleware/rbac.js";
 import { validate } from "../middleware/validate.js";
@@ -23,13 +24,24 @@ const requisitionItemSchema = z.object({
   remark: z.string().optional().nullable(),
 });
 
+const attachmentSchema = z.object({
+  url: z.string().min(1),
+  name: z.string().min(1),
+  size: z.number().optional(),
+  mimeType: z.string().optional(),
+});
+
 const createRequisitionSchema = z.object({
-  division: z.string().min(1, "Division is required"),
+  // Division is only required for non-project requisitions — project spend
+  // raised through a costing sheet belongs to the project, not a division.
+  division: z.string().min(1).optional(),
   processOwner: z.string().optional().nullable(),
   budgetItemId: z.number().int().positive().optional().nullable(),
   projectId: z.number().int().positive().optional().nullable(),
   // The scope item this procurement raises for — feeds its actual cost
   scopeItemId: z.number().int().positive().optional().nullable(),
+  // Quotations and supporting documents, already uploaded via /api/upload
+  attachments: z.array(attachmentSchema).max(20).optional(),
   totalEstimatedCost: z.number().min(0).optional(),
   requiredDate: z.string().datetime().optional().nullable(),
   purpose: z.string().optional().nullable(),
@@ -147,10 +159,13 @@ router.post(
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const { items, ...formData } = req.body;
+      const isProjectRaised = formData.projectId != null;
 
       const form = await prisma.requisitionForm.create({
         data: {
-          division: formData.division,
+          // Project-raised spend belongs to the project; division only applies
+          // to departmental requisitions.
+          division: formData.division || (isProjectRaised ? 'PROJECT' : 'IT'),
           processOwner: formData.processOwner || null,
           budgetItemId: formData.budgetItemId || null,
           projectId: formData.projectId || null,
@@ -168,6 +183,10 @@ router.post(
           requestedByDate: formData.requestedByDate ? new Date(formData.requestedByDate) : null,
           approvedByName: formData.approvedByName || null,
           approvedByDate: formData.approvedByDate ? new Date(formData.approvedByDate) : null,
+          // Quotations and supporting documents live in metadata
+          metadata: formData.attachments?.length
+            ? { attachments: formData.attachments }
+            : undefined,
           items: {
             create: items.map((item: any) => ({
               description: item.description,
@@ -226,6 +245,14 @@ router.put(
 
       const { items, ...formData } = req.body;
 
+      // Project-mode edits: the scope link moves, and attachments merge into
+      // metadata (replacing the previous list — the dialog sends the full set).
+      const nextMetadata: any = { ...(existing.metadata as any) };
+      if (formData.attachments !== undefined) {
+        if (formData.attachments?.length) nextMetadata.attachments = formData.attachments;
+        else delete nextMetadata.attachments;
+      }
+
       const form = await prisma.$transaction(async (tx) => {
         const updatedForm = await tx.requisitionForm.update({
           where: { id: existing.id },
@@ -236,6 +263,10 @@ router.put(
               budgetItem: formData.budgetItemId ? { connect: { id: formData.budgetItemId } } : { disconnect: true },
             }),
             ...(formData.projectId !== undefined && { projectId: formData.projectId }),
+            ...(formData.scopeItemId !== undefined && { scopeItemId: formData.scopeItemId }),
+            ...(formData.attachments !== undefined && {
+              metadata: Object.keys(nextMetadata).length > 0 ? nextMetadata : Prisma.JsonNull,
+            }),
             ...(formData.totalEstimatedCost !== undefined && { totalEstimatedCost: formData.totalEstimatedCost }),
             ...(formData.requiredDate !== undefined && {
               requiredDate: formData.requiredDate ? new Date(formData.requiredDate) : null,

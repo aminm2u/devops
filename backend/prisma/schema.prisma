@@ -181,7 +181,9 @@ model User {
   internalProjectsAssigned   InternalProject[]     @relation("InternalProjectAssignedTo")
   // Scope & costing sheet
   scopeItemsOwned            ScopeItem[]           @relation("ScopeItemAssignee")
-  costingApprovalsSigned     CostingApproval[]
+  scopeBaselinesCreated      ScopeBaseline[]       @relation("ScopeBaselineCreator")
+  costingApprovalsSigned     CostingApproval[]     @relation("CostingApprovalActor")
+  costingApprovalsAssigned   CostingApproval[]     @relation("CostingApprovalAssignee")
 
   @@map("users")
 }
@@ -532,6 +534,13 @@ model Project {
   healthStatus    String    @default("On Track") @map("health_status")
   delayReason     String?   @map("delay_reason") @db.Text
   recommendation  String?   @db.Text
+  // Commercial value, workbook-style: valueWithoutTax + tax → valueWithTax
+  valueWithoutTax Decimal?  @map("value_without_tax") @db.Decimal(14, 2)
+  taxAmount       Decimal?  @map("tax_amount") @db.Decimal(14, 2)
+  valueWithTax    Decimal?  @map("value_with_tax") @db.Decimal(14, 2)
+  hasWarranty     Boolean   @default(false) @map("has_warranty")
+  // Warranty length in months; only meaningful when hasWarranty is true
+  warrantyMonths  Int?      @map("warranty_months")
 
   isActive  Boolean   @default(true) @map("is_active")
   /// Allows any employee to join the project team without HR/PMO action.
@@ -572,6 +581,7 @@ model Project {
   teams                 Team[]
   // Scope of work & costing sheet
   scopeItems            ScopeItem[]
+  scopeBaselines        ScopeBaseline[]
   costCategories        CostCategory[]
   costItems             CostItem[]
   resourceAssignments   ResourceAssignment[]
@@ -1466,6 +1476,39 @@ model ScopeItem {
   @@map("scope_items")
 }
 
+/// Immutable scope baseline: a frozen snapshot of the whole scope tree at a
+/// point in time (Rev 0, Rev 1...), taken when execution shifts — extension of
+/// time, variation order, change request. Timeline and costing derive from the
+/// live tree; baselines are what later changes are diffed against. Append-only:
+/// no update or delete, so the history stands as evidence.
+model ScopeBaseline {
+  id            Int      @id @default(autoincrement())
+  projectId     Int      @map("project_id")
+  revision      Int // per-project sequence: 0, 1, 2...
+  name          String // "EOT #1", "VO-2024-03 — Additional survey"
+  reason        String?  @db.Text
+  // active until the next baseline supersedes it
+  status        String   @default("active")
+  // Root-level plan-cost sum at freeze time (same convention as the costing
+  // summary — children are inside their parents, never added twice).
+  totalPlanCost Decimal  @map("total_plan_cost") @db.Decimal(14, 2)
+  // Snapshot rows keyed by wbsNumber (ids churn with reorders):
+  // [{ wbsNumber, title, description, status, startDate, endDate,
+  //    roleCodes, progress, planCost, manualPlanCost }]
+  items         Json
+  createdById   Int?     @map("created_by_id")
+  createdByName String?  @map("created_name")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  creator User?   @relation("ScopeBaselineCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@unique([projectId, revision])
+  @@index([projectId])
+  @@map("scope_baselines")
+}
+
 model CostCategory {
   id        Int       @id @default(autoincrement())
   projectId Int       @map("project_id")
@@ -1567,20 +1610,25 @@ model CostingSheet {
 }
 
 model CostingApproval {
-  id          Int       @id @default(autoincrement())
-  sheetId     Int       @map("sheet_id")
-  step        Int // 1..4: prepared, hod_verified, finance_verified, ceo_approved
-  stepKey     String    @map("step_key")
-  status      String    @default("pending") // pending | approved | rejected
-  actorUserId Int?      @map("actor_user_id")
-  actorName   String?   @map("actor_name")
-  actedAt     DateTime? @map("acted_at")
-  comments    String?
-  createdAt   DateTime  @default(now()) @map("created_at")
-  updatedAt   DateTime  @updatedAt @map("updated_at")
+  id             Int       @id @default(autoincrement())
+  sheetId        Int       @map("sheet_id")
+  step           Int // 1..4: prepared, verified_1, verified_2, approved
+  stepKey        String    @map("step_key")
+  status         String    @default("pending") // pending | approved | rejected
+  // Who is assigned to act on this step (chosen by the PM at submit time);
+  // distinct from the actor fields, which fill in when they actually act.
+  assignedUserId Int?      @map("assigned_user_id")
+  assignedName   String?   @map("assigned_name")
+  actorUserId    Int?      @map("actor_user_id")
+  actorName      String?   @map("actor_name")
+  actedAt        DateTime? @map("acted_at")
+  comments       String?
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
 
-  sheet  CostingSheet @relation(fields: [sheetId], references: [id], onDelete: Cascade)
-  actor  User?        @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+  sheet   CostingSheet @relation(fields: [sheetId], references: [id], onDelete: Cascade)
+  actor   User?        @relation("CostingApprovalActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+  assignee User?       @relation("CostingApprovalAssignee", fields: [assignedUserId], references: [id], onDelete: SetNull)
 
   @@unique([sheetId, step])
   @@index([sheetId])

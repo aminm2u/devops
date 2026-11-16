@@ -451,4 +451,148 @@ router.delete(
   }
 );
 
+// ---------------------------------------------------------------------------
+// Project roles.
+//
+// The role a person holds on a project's team (`team_assignments`). Same
+// reasoning as positions: a real row, not free text, so renaming "Project
+// Manager" re-labels every assignment at once. Guarded by `project.team.manage`
+// — the grant that manages team membership, whose pickers these roles feed.
+// ---------------------------------------------------------------------------
+
+const projectRoleSchema = z.object({
+  name: z.string().min(1).max(120),
+});
+
+/** GET /api/references/project-roles — list with assignment counts */
+router.get(
+  "/project-roles",
+  authorize({ permission: "project.team.manage" }),
+  async (req: RequestWithUser, res: Response, next: NextFunction) => {
+    try {
+      const roles = await prisma.projectRole.findMany({
+        orderBy: { name: "asc" },
+        include: { _count: { select: { assignments: true } } },
+      });
+      res.status(200).json({ success: true, data: roles });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+/** POST /api/references/project-roles */
+router.post(
+  "/project-roles",
+  authorize({ permission: "project.team.manage" }),
+  validate(projectRoleSchema),
+  async (req: RequestWithUser, res: Response, next: NextFunction) => {
+    try {
+      const name = req.body.name.trim();
+      const clash = await prisma.projectRole.findFirst({
+        where: { name: { equals: name, mode: "insensitive" } },
+      });
+      if (clash) throw new AppError(409, `"${clash.name}" already exists`);
+
+      const role = await prisma.projectRole.create({ data: { name } });
+
+      await logActivity({
+        description: `Project role "${role.name}" created`,
+        subjectType: "ProjectRole",
+        subjectId: role.id,
+        event: "created",
+        causerId: req.user!.id,
+      });
+
+      res.status(201).json({ success: true, data: role });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+/**
+ * PUT /api/references/project-roles/:id — renaming cascades to every
+ * assignment and costing line that labels itself with this role.
+ */
+router.put(
+  "/project-roles/:id",
+  authorize({ permission: "project.team.manage" }),
+  validate(projectRoleSchema),
+  async (req: RequestWithUser, res: Response, next: NextFunction) => {
+    try {
+      const roleId = Number(req.params.id);
+      if (!Number.isFinite(roleId)) throw new AppError(400, "Invalid role id");
+
+      const existing = await prisma.projectRole.findUnique({ where: { id: roleId } });
+      if (!existing) throw new NotFoundError("Project role not found");
+
+      const name = req.body.name.trim();
+      if (name.toLowerCase() !== existing.name.toLowerCase()) {
+        const clash = await prisma.projectRole.findFirst({
+          where: { name: { equals: name, mode: "insensitive" }, id: { not: roleId } },
+        });
+        if (clash) throw new AppError(409, `"${clash.name}" already exists`);
+      }
+
+      const role = await prisma.projectRole.update({ where: { id: roleId }, data: { name } });
+
+      await logActivity({
+        description: `Project role "${existing.name}" renamed to "${role.name}"`,
+        subjectType: "ProjectRole",
+        subjectId: roleId,
+        event: "updated",
+        causerId: req.user!.id,
+      });
+
+      res.status(200).json({ success: true, data: role });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+/**
+ * DELETE /api/references/project-roles/:id — refused while team assignments
+ * reference it. The FK restricts anyway, but counting first turns a hard
+ * database error into a decision the admin takes explicitly.
+ */
+router.delete(
+  "/project-roles/:id",
+  authorize({ permission: "project.team.manage" }),
+  async (req: RequestWithUser, res: Response, next: NextFunction) => {
+    try {
+      const roleId = Number(req.params.id);
+      if (!Number.isFinite(roleId)) throw new AppError(400, "Invalid role id");
+
+      const role = await prisma.projectRole.findUnique({
+        where: { id: roleId },
+        include: { _count: { select: { assignments: true } } },
+      });
+      if (!role) throw new NotFoundError("Project role not found");
+
+      if (role._count.assignments > 0) {
+        throw new AppError(
+          409,
+          `${role._count.assignments} team assignment(s) still use this role — reassign them first`
+        );
+      }
+
+      await prisma.projectRole.delete({ where: { id: roleId } });
+
+      await logActivity({
+        description: `Project role "${role.name}" deleted`,
+        subjectType: "ProjectRole",
+        subjectId: roleId,
+        event: "deleted",
+        causerId: req.user!.id,
+      });
+
+      res.status(200).json({ success: true, message: "Project role deleted" });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
 export default router;

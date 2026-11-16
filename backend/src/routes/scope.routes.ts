@@ -650,4 +650,150 @@ router.delete(
   }
 );
 
+// ── Scope baselines ─────────────────────────────────────────────────────────
+//
+// Immutable snapshots of the tree for EOT / VO / change-request history.
+// Append-only: create and read exist, update and delete do not.
+
+const createBaselineSchema = z.object({
+  name: z.string().min(1).max(255),
+  reason: z.string().max(2000).nullable().optional(),
+});
+
+/** Fields captured per item in a baseline snapshot (keyed by wbsNumber). */
+const SNAPSHOT_FIELDS = {
+  wbsNumber: true,
+  title: true,
+  description: true,
+  status: true,
+  startDate: true,
+  endDate: true,
+  roleCodes: true,
+  progress: true,
+  planCost: true,
+  manualPlanCost: true,
+} as const;
+
+// GET /api/projects/:projectId/scope/baselines — history, newest first
+router.get(
+  "/:projectId/scope/baselines",
+  authenticate,
+  requirePermission("project.scope.view"),
+  async (req: RequestWithUser, res: Response, next: NextFunction) => {
+    try {
+      const projectId = parseInt(req.params.projectId, 10);
+      await resolveProject(projectId);
+
+      const baselines = await prisma.scopeBaseline.findMany({
+        where: { projectId },
+        orderBy: { revision: "desc" },
+        select: {
+          id: true,
+          revision: true,
+          name: true,
+          reason: true,
+          status: true,
+          totalPlanCost: true,
+          createdById: true,
+          createdByName: true,
+          createdAt: true,
+          // `items` excluded — it is the heavy column; detail fetch pulls it.
+        },
+      });
+
+      res.status(200).json({ success: true, data: baselines, message: "Baselines retrieved" });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+// GET /api/projects/:projectId/scope/baselines/:baselineId — full snapshot
+router.get(
+  "/:projectId/scope/baselines/:baselineId",
+  authenticate,
+  requirePermission("project.scope.view"),
+  async (req: RequestWithUser, res: Response, next: NextFunction) => {
+    try {
+      const projectId = parseInt(req.params.projectId, 10);
+      const baselineId = parseInt(req.params.baselineId, 10);
+      await resolveProject(projectId);
+
+      const baseline = await prisma.scopeBaseline.findFirst({
+        where: { id: baselineId, projectId },
+      });
+      if (!baseline) throw new NotFoundError("Baseline not found");
+
+      res.status(200).json({ success: true, data: baseline, message: "Baseline retrieved" });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+// POST /api/projects/:projectId/scope/baselines — freeze the current tree
+router.post(
+  "/:projectId/scope/baselines",
+  authenticate,
+  requirePermission("project.scope.manage"),
+  validate(createBaselineSchema),
+  async (req: RequestWithUser, res: Response, next: NextFunction) => {
+    try {
+      const projectId = parseInt(req.params.projectId, 10);
+      const project = await resolveProject(projectId);
+      const { name, reason = null } = req.body;
+
+      const baseline = await prisma.$transaction(async (tx: any) => {
+        const items = await tx.scopeItem.findMany({
+          where: { projectId, deletedAt: null },
+          select: SNAPSHOT_FIELDS,
+        });
+
+        // Root-level sum: parents already contain their children's cost.
+        const totalPlanCost = items
+          .filter((item: any) => !item.wbsNumber.includes("."))
+          .reduce((sum: number, item: any) => sum + Number(item.planCost), 0);
+
+        const last = await tx.scopeBaseline.findFirst({
+          where: { projectId },
+          orderBy: { revision: "desc" },
+          select: { revision: true },
+        });
+        const revision = (last?.revision ?? -1) + 1;
+
+        await tx.scopeBaseline.updateMany({
+          where: { projectId, status: "active" },
+          data: { status: "superseded" },
+        });
+
+        return tx.scopeBaseline.create({
+          data: {
+            projectId,
+            revision,
+            name,
+            reason,
+            totalPlanCost,
+            items,
+            createdById: req.user!.id,
+            createdByName: req.user!.name,
+          },
+        });
+      });
+
+      await logActivity({
+        description: `Scope baseline Rev ${baseline.revision} "${name}" created on project "${project.name}"`,
+        subjectType: "App\\Models\\ScopeBaseline",
+        subjectId: baseline.id,
+        event: "created",
+        causerId: req.user!.id,
+        properties: { attributes: { revision: baseline.revision, name, reason } },
+      });
+
+      res.status(201).json({ success: true, data: baseline, message: "Baseline created" });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
 export default router;

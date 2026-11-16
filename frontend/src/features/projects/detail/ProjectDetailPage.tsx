@@ -506,7 +506,7 @@ export function ProjectDetailPage() {
         </TabsContent>
 
         <TabsContent value="timeline">
-          <TimelineTab project={projectData} />
+          <TimelineTab projectId={projectId} project={projectData} />
         </TabsContent>
 
         <TabsContent value="scope">

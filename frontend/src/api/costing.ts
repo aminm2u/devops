@@ -52,16 +52,19 @@ export interface ResourceAssignment {
 export type SheetStatus =
   | 'draft'
   | 'submitted'
-  | 'hod_verified'
-  | 'finance_verified'
+  | 'verified_1'
+  | 'verified_2'
   | 'approved'
   | 'rejected';
 
 export interface CostingApproval {
   id: number;
   step: number;
-  stepKey: 'prepared' | 'hod_verified' | 'finance_verified' | 'ceo_approved';
+  stepKey: 'prepared' | 'verified_1' | 'verified_2' | 'approved';
   status: 'pending' | 'approved' | 'rejected';
+  // The verifier the PM assigned this step to (verify tiers only)
+  assignedUserId: number | null;
+  assignedName: string | null;
   actorUserId: number | null;
   actorName: string | null;
   actedAt: string | null;
@@ -177,9 +180,17 @@ export const costingApi = {
     return response.data;
   },
 
-  submit: async (projectId: number): Promise<ApiResponse<CostingSheet>> => {
+  submit: async (projectId: number, verifier1Id: number, verifier2Id: number): Promise<ApiResponse<CostingSheet>> => {
     const response = await apiClient.post<ApiResponse<CostingSheet>>(
-      `/projects/${projectId}/costing-sheet/submit`
+      `/projects/${projectId}/costing-sheet/submit`,
+      { verifier1Id, verifier2Id }
+    );
+    return response.data;
+  },
+
+  withdraw: async (projectId: number): Promise<ApiResponse<CostingSheet>> => {
+    const response = await apiClient.post<ApiResponse<CostingSheet>>(
+      `/projects/${projectId}/costing-sheet/withdraw`
     );
     return response.data;
   },

@@ -23,6 +23,11 @@ const createProjectSchema = z.object({
   projectTypeId: z.number().int().positive().optional().nullable(),
   startDate: z.string().datetime().optional().nullable(),
   expectedEndDate: z.string().datetime().optional().nullable(),
+  // Commercial value: valueWithoutTax + taxAmount → valueWithTax (server-derived)
+  valueWithoutTax: z.number().min(0).max(999_999_999_999).optional().nullable(),
+  taxAmount: z.number().min(0).max(999_999_999_999).optional().nullable(),
+  hasWarranty: z.boolean().optional(),
+  warrantyMonths: z.number().int().min(0).max(600).optional().nullable(),
 });
 
 const updateProjectSchema = z.object({
@@ -40,6 +45,10 @@ const updateProjectSchema = z.object({
   actualEndDate: z.string().datetime().optional().nullable(),
   healthStatus: z.string().optional(),
   delayReason: z.string().optional().nullable(),
+  valueWithoutTax: z.number().min(0).max(999_999_999_999).optional().nullable(),
+  taxAmount: z.number().min(0).max(999_999_999_999).optional().nullable(),
+  hasWarranty: z.boolean().optional(),
+  warrantyMonths: z.number().int().min(0).max(600).optional().nullable(),
 });
 
 // GET /api/projects - List projects
@@ -173,6 +182,14 @@ router.post(
         throw new AppError(400, "A project with this name already exists");
       }
 
+      // valueWithTax is derived, never accepted from the client
+      const valueWithoutTax = req.body.valueWithoutTax ?? null;
+      const taxAmount = req.body.taxAmount ?? null;
+      const valueWithTax =
+        valueWithoutTax !== null || taxAmount !== null
+          ? Number(valueWithoutTax ?? 0) + Number(taxAmount ?? 0)
+          : null;
+
       const project = await prisma.project.create({
         data: {
           name,
@@ -183,6 +200,11 @@ router.post(
           ownerId: ownerId || req.user!.id,
           repositoryUrl: repositoryUrl || null,
           documentationUrl: documentationUrl || null,
+          valueWithoutTax,
+          taxAmount,
+          valueWithTax,
+          hasWarranty: req.body.hasWarranty ?? false,
+          warrantyMonths: req.body.hasWarranty ? req.body.warrantyMonths ?? null : null,
           isActive: true,
         },
         include: {
@@ -440,6 +462,15 @@ router.put(
         }
       }
 
+      // Commercial value: valueWithTax is derived (without + tax), and the
+      // warranty length only persists while the warranty flag is on.
+      let valueWithTax: number | null | undefined;
+      if (req.body.valueWithoutTax !== undefined || req.body.taxAmount !== undefined) {
+        const withoutTax = req.body.valueWithoutTax ?? project.valueWithoutTax ?? 0;
+        const tax = req.body.taxAmount ?? project.taxAmount ?? 0;
+        valueWithTax = Number(withoutTax) + Number(tax);
+      }
+
       const updatedProject = await prisma.project.update({
         where: { id: project.id },
         data: {
@@ -452,6 +483,12 @@ router.put(
           ...(req.body.repositoryUrl !== undefined && { repositoryUrl: req.body.repositoryUrl }),
           ...(req.body.documentationUrl !== undefined && { documentationUrl: req.body.documentationUrl }),
           ...(req.body.isActive !== undefined && { isActive: req.body.isActive }),
+          ...(req.body.valueWithoutTax !== undefined && { valueWithoutTax: req.body.valueWithoutTax }),
+          ...(req.body.taxAmount !== undefined && { taxAmount: req.body.taxAmount }),
+          ...(valueWithTax !== undefined && { valueWithTax }),
+          ...(req.body.hasWarranty !== undefined && { hasWarranty: req.body.hasWarranty }),
+          ...(req.body.warrantyMonths !== undefined && { warrantyMonths: req.body.warrantyMonths }),
+          ...((req.body.hasWarranty === false || req.body.hasWarranty === null) && { warrantyMonths: null }),
         },
         include: {
           owner: {

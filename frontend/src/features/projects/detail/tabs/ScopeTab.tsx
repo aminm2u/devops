@@ -90,6 +90,8 @@ export function ScopeTab({ project }: { project: any }) {
   return (
     <>
       <ScopeTree
+        projectId={projectId}
+        items={items}
         tree={tree}
         isLoading={isLoading}
         canEdit={canEdit}

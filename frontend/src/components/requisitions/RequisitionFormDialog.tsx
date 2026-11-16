@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { DollarSign, Plus, Trash2 } from 'lucide-react';
+import { DollarSign, Paperclip, Plus, Trash2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -56,6 +56,8 @@ export function RequisitionFormDialog({
   item,
   projectId,
   purchaseType,
+  scopeItems,
+  lockedScopeItemId,
   onSubmit,
   onClose,
   isSubmitting,
@@ -63,10 +65,19 @@ export function RequisitionFormDialog({
   item?: RequisitionForm | null;
   projectId?: number | null;
   purchaseType?: 'project' | 'non_project';
+  /**
+   * Project mode: when scope items are provided, this is spend raised for a
+   * specific scope item — division/process-owner/budget pickers disappear (the
+   * project is the budget), a scope picker ("sub-budget") appears, and
+   * supporting documents (quotations etc.) can be attached.
+   */
+  scopeItems?: { id: number; wbsNumber: string; title: string; planCost: string | number }[];
+  lockedScopeItemId?: number | null;
   onSubmit: (data: any) => void;
   onClose: () => void;
   isSubmitting: boolean;
 }) {
+  const isProjectMode = !!(projectId != null && scopeItems && scopeItems.length > 0);
   const { user } = useAuth();
   // Divisions and units of measure are master data (Settings → Reference Data),
   // not literals: the old arrays here had drifted to 6 of 8 divisions and 8 of
@@ -82,6 +93,7 @@ export function RequisitionFormDialog({
       const res = await apiClient.get('/budget', { params: { limit: 500 } });
       return res.data;
     },
+    enabled: !isProjectMode,
   });
 
   const [form, setForm] = useState({
@@ -92,6 +104,8 @@ export function RequisitionFormDialog({
     requiredDate: item?.requiredDate ? new Date(item.requiredDate).toISOString().split('T')[0] : '',
     purpose: item?.purpose || '',
     status: item?.status || 'draft',
+    // Project mode: which scope item (sub-budget) this spend draws from
+    scopeItemId: lockedScopeItemId ?? item?.scopeItemId ?? null as number | null,
   });
 
   const [items, setItems] = useState<RequisitionItem[]>(
@@ -99,6 +113,40 @@ export function RequisitionFormDialog({
       ? item.items.map((i) => ({ ...i }))
       : [{ ...emptyItem }]
   );
+
+  // Supporting documents: uploaded immediately via /api/upload, listed here,
+  // and persisted on the requisition as metadata.attachments. Editing prefills
+  // from the saved set so nothing is silently dropped on update.
+  const [attachments, setAttachments] = useState<
+    { url: string; name: string; size?: number; mimeType?: string }[]
+  >((item?.metadata?.attachments as any[]) ?? []);
+  const [uploading, setUploading] = useState(false);
+
+  const handleUpload = async (files: FileList | null) => {
+    if (!files || files.length === 0 || projectId == null) return;
+    setUploading(true);
+    try {
+      const formData = new FormData();
+      Array.from(files).forEach((file) => formData.append('files', file));
+      formData.append('projectId', String(projectId));
+      // The api client's default Content-Type is application/json; for a
+      // multipart body the browser must set its own header (with the boundary),
+      // or multer sees an empty body and answers "No files uploaded".
+      const res = await apiClient.post('/upload', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      const uploaded = (res.data?.data ?? []) as { url: string; originalName: string; size: number; mimeType: string }[];
+      setAttachments((prev) => [
+        ...prev,
+        ...uploaded.map((f) => ({ url: f.url, name: f.originalName, size: f.size, mimeType: f.mimeType })),
+      ]);
+      toast.success(`${uploaded.length} file(s) attached`);
+    } catch {
+      toast.error('Upload failed');
+    } finally {
+      setUploading(false);
+    }
+  };
 
   const budgetItems = budgetData?.data || [];
 
@@ -122,7 +170,7 @@ export function RequisitionFormDialog({
   }, 0);
 
   const handleSubmit = () => {
-    if (!form.division) {
+    if (!isProjectMode && !form.division) {
       toast.error('Division is required');
       return;
     }
@@ -130,10 +178,19 @@ export function RequisitionFormDialog({
       toast.error('At least one item with a description is required');
       return;
     }
+    if (isProjectMode && !form.scopeItemId) {
+      toast.error('Pick the scope item this spend draws from');
+      return;
+    }
 
     const payload = {
       ...form,
-      budgetItemId: form.budgetItemId || null,
+      // Project spend: division/processOwner are meaningless — omitted and the
+      // server stamps PROJECT. Budget is the project; the scope item is the
+      // sub-budget and drives actual cost + utilization.
+      ...(isProjectMode
+        ? { division: undefined, processOwner: undefined, budgetItemId: null }
+        : { budgetItemId: form.budgetItemId || null }),
       totalEstimatedCost: calculatedTotal,
       requiredDate: form.requiredDate ? new Date(form.requiredDate + 'T00:00:00').toISOString() : null,
       items: items.filter((i) => i.description.trim()).map((i) => ({
@@ -143,6 +200,7 @@ export function RequisitionFormDialog({
         unitPrice: Number(i.unitPrice) || 0,
       })),
       ...(projectId != null && { projectId }),
+      ...(isProjectMode && { scopeItemId: form.scopeItemId, attachments }),
       ...(purchaseType && { purchaseType }),
       ...(!item && user?.name && {
         requestedByName: user.name,
@@ -169,29 +227,34 @@ export function RequisitionFormDialog({
       isSubmitting={isSubmitting}
     >
       <div className="space-y-6">
-        {/* Top Section */}
+        {/* Top Section — division/process owner only for departmental
+            requisitions; project spend belongs to the project. */}
         <div className="grid gap-4 sm:grid-cols-3">
-          <div className="space-y-2">
-            <Label>Division / Department *</Label>
-            <Select value={form.division} onValueChange={(v) => setForm({ ...form, division: v })}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {divisions.map((d) => (
-                  <SelectItem key={d.value} value={d.value}>{d.label}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-2">
-            <Label>Process Owner</Label>
-            <Input
-              value={form.processOwner}
-              onChange={(e) => setForm({ ...form, processOwner: e.target.value })}
-              placeholder="Enter process owner name"
-            />
-          </div>
+          {!isProjectMode && (
+            <div className="space-y-2">
+              <Label>Division / Department *</Label>
+              <Select value={form.division} onValueChange={(v) => setForm({ ...form, division: v })}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {divisions.map((d) => (
+                    <SelectItem key={d.value} value={d.value}>{d.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+          {!isProjectMode && (
+            <div className="space-y-2">
+              <Label>Process Owner</Label>
+              <Input
+                value={form.processOwner}
+                onChange={(e) => setForm({ ...form, processOwner: e.target.value })}
+                placeholder="Enter process owner name"
+              />
+            </div>
+          )}
           <div className="space-y-2">
             <Label>Required Date</Label>
             <DatePicker
@@ -201,7 +264,39 @@ export function RequisitionFormDialog({
           </div>
         </div>
 
-        {/* Budget Item Selection */}
+        {/* Project mode: budget = the project itself; the scope item is the
+            sub-budget this spend draws down. */}
+        {isProjectMode && (
+          <div className="space-y-2">
+            <Label className="flex items-center gap-2">
+              <DollarSign className="h-4 w-4" />
+              Scope Item (sub-budget) *
+            </Label>
+            <Select
+              value={form.scopeItemId ? String(form.scopeItemId) : undefined}
+              onValueChange={(v) => setForm({ ...form, scopeItemId: Number(v) })}
+              disabled={lockedScopeItemId != null}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Pick the scope item this spend is for" />
+              </SelectTrigger>
+              <SelectContent>
+                {scopeItems!.map((scope) => (
+                  <SelectItem key={scope.id} value={String(scope.id)}>
+                    {scope.wbsNumber} — {scope.title} (plan {formatCurrency(Number(scope.planCost))})
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              Charged to this project's budget. Once approved, the amount counts as actual
+              spend on the scope item and its project cost summary.
+            </p>
+          </div>
+        )}
+
+        {/* Budget Item Selection — departmental mode only */}
+        {!isProjectMode && (
         <div className="space-y-2">
           <Label className="flex items-center gap-2">
             <DollarSign className="h-4 w-4" />
@@ -229,6 +324,7 @@ export function RequisitionFormDialog({
             </p>
           )}
         </div>
+        )}
 
         {/* Items Table */}
         <div className="space-y-2">
@@ -271,19 +367,27 @@ export function RequisitionFormDialog({
                       <Input
                         type="number"
                         value={item.qty}
-                        onChange={(e) => updateItem(index, 'qty', parseInt(e.target.value) || 1)}
+                        onChange={(e) => {
+                          const raw = e.target.value;
+                          // Keep '' while the user clears the field — coercing
+                          // mid-edit would turn "0" into "03…" as they type.
+                          updateItem(index, 'qty', raw === '' ? ('' as any) : parseInt(raw) || 0);
+                        }}
                         min="1"
-                        className="h-8 border-border/40 shadow-none"
+                        className="h-8 border-border/40 shadow-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-inner-spin-button]:m-0"
                       />
                     </TableCell>
                     <TableCell>
                       <Input
                         type="number"
-                        value={item.unitPrice || 0}
-                        onChange={(e) => updateItem(index, 'unitPrice', parseFloat(e.target.value) || 0)}
+                        value={item.unitPrice ?? ''}
+                        onChange={(e) => {
+                          const raw = e.target.value;
+                          updateItem(index, 'unitPrice', raw === '' ? ('' as any) : parseFloat(raw) || 0);
+                        }}
                         min="0"
                         step="0.01"
-                        className="h-8 border-border/40 shadow-none"
+                        className="h-8 border-border/40 shadow-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-inner-spin-button]:m-0"
                       />
                     </TableCell>
                     <TableCell>
@@ -343,6 +447,54 @@ export function RequisitionFormDialog({
             rows={3}
           />
         </div>
+
+        {/* Supporting documents — quotations, approvals, anything that backs
+            the request. Uploaded immediately; removed before submit just drops
+            the file from the list (the upload itself stays in storage). */}
+        {isProjectMode && (
+          <div className="space-y-2">
+            <Label>Supporting Documents</Label>
+            <label className="flex cursor-pointer items-center justify-center gap-2 rounded-md border border-dashed dark:border-gray-600 px-3 py-3 text-sm text-muted-foreground hover:bg-muted/40">
+              <Paperclip className="h-4 w-4" />
+              {uploading ? 'Uploading…' : 'Attach quotation or supporting document'}
+              <input
+                type="file"
+                multiple
+                className="hidden"
+                disabled={uploading}
+                onChange={(e) => {
+                  handleUpload(e.target.files);
+                  e.target.value = '';
+                }}
+              />
+            </label>
+            {attachments.length > 0 && (
+              <div className="space-y-1">
+                {attachments.map((file, index) => (
+                  <div key={file.url} className="flex items-center justify-between rounded-md border dark:border-gray-800 px-3 py-1.5 text-sm">
+                    <a href={file.url} target="_blank" rel="noopener noreferrer" className="truncate text-primary hover:underline">
+                      {file.name}
+                    </a>
+                    <div className="ml-2 flex items-center gap-2">
+                      {file.size != null && (
+                        <span className="text-xs text-muted-foreground">{Math.round(file.size / 1024)} KB</span>
+                      )}
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 w-6 p-0"
+                        onClick={() => setAttachments((prev) => prev.filter((_, i) => i !== index))}
+                      >
+                        <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Approval Section (read-only for editing) */}
         {item && (item.requestedByName || item.approvedByName) && (

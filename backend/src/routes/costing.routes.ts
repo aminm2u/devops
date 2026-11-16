@@ -20,40 +20,42 @@ const router = Router();
  * server-side inside the mutation transaction — never incremented, never
  * trusted from the client.
  *
- * Sign-off is a fixed 4-step chain: prepared → hod_verified →
- * finance_verified → ceo_approved. An approved sheet is immutable until a
- * CEO-gated reopen.
+ * Sign-off: only the project manager (PMO) can initiate. At submit time they
+ * hand-pick two verifiers (tier 1 and tier 2); the final approval step goes to
+ * whoever holds the costing-approve permission. A submitter may withdraw the
+ * sheet back to draft any time before the first verification lands.
  */
 
 const STEPS = [
-  { step: 1, stepKey: "prepared", label: "Prepared by PM/APM" },
-  { step: 2, stepKey: "hod_verified", label: "Verified by HOD" },
-  { step: 3, stepKey: "finance_verified", label: "Verified by Finance" },
-  { step: 4, stepKey: "ceo_approved", label: "Approved by CEO" },
+  { step: 1, stepKey: "prepared", label: "Prepared by PM" },
+  { step: 2, stepKey: "verified_1", label: "Verified (Tier 1)" },
+  { step: 3, stepKey: "verified_2", label: "Verified (Tier 2)" },
+  { step: 4, stepKey: "approved", label: "Approved" },
 ] as const;
 
 type StepKey = (typeof STEPS)[number]["stepKey"];
 
-const STEP_PERMISSIONS: Record<StepKey, string> = {
-  prepared: "project.costing.manage",
-  hod_verified: "project.costing.verify.hod",
-  finance_verified: "project.costing.verify.finance",
-  ceo_approved: "project.costing.approve.ceo",
-};
-
 /** Status each step requires the sheet to be in before it may act. */
 const REQUIRED_STATUS: Record<StepKey, string> = {
   prepared: "draft",
-  hod_verified: "submitted",
-  finance_verified: "hod_verified",
-  ceo_approved: "finance_verified",
+  verified_1: "submitted",
+  verified_2: "verified_1",
+  approved: "verified_2",
 };
 
 const NEXT_STATUS: Record<StepKey, string> = {
   prepared: "submitted",
-  hod_verified: "hod_verified",
-  finance_verified: "finance_verified",
-  ceo_approved: "approved",
+  verified_1: "verified_1",
+  verified_2: "verified_2",
+  approved: "approved",
+};
+
+/** Verify steps are gated by the assigned user, not a global permission. */
+const STEP_PERMISSION: Record<StepKey, string | null> = {
+  prepared: "project.costing.manage",
+  verified_1: null,
+  verified_2: null,
+  approved: "project.costing.approve.ceo",
 };
 
 const money = z.number().min(0).max(999_999_999_999);
@@ -90,10 +92,32 @@ const resourceSchema = z.object({
 const resourceUpdateSchema = resourceSchema.partial();
 
 const signOffSchema = z.object({
-  stepKey: z.enum(["hod_verified", "finance_verified", "ceo_approved"]),
+  stepKey: z.enum(["verified_1", "verified_2", "approved"]),
   decision: z.enum(["approve", "reject"]),
   comments: z.string().max(2000).nullable().optional(),
 });
+
+const submitSchema = z.object({
+  verifier1Id: z.number().int().positive(),
+  verifier2Id: z.number().int().positive(),
+  comments: z.string().max(2000).nullable().optional(),
+});
+
+/** Only the project manager (PMO) may submit or withdraw the sheet. */
+async function assertProjectManager(projectId: number, req: RequestWithUser) {
+  const user = req.user!;
+  if (user.roles?.some((r: any) => r.name === "super-admin")) return;
+  const assignment = await prisma.teamAssignment.findFirst({
+    where: { projectId, userId: user.id, isActive: true },
+    include: { projectRole: { select: { name: true } } },
+  });
+  const roleName = assignment?.projectRole?.name ?? "";
+  const holdsPmo =
+    user.roles?.some((r: any) => r.name === "project-manager-officer") ?? false;
+  if (!holdsPmo || !/project\s*manager/i.test(roleName)) {
+    throw new ForbiddenError("Only the project manager can submit this costing sheet");
+  }
+}
 
 async function resolveProject(projectId: number) {
   const project = await prisma.project.findUnique({
@@ -676,15 +700,17 @@ router.delete(
 
 // ── Sign-off workflow ───────────────────────────────────────────────────────
 
-// POST /api/projects/:projectId/costing-sheet/submit — step 1: prepared
+// POST /api/projects/:projectId/costing-sheet/submit — PM initiates, picking two verifiers
 router.post(
   "/:projectId/costing-sheet/submit",
   authenticate,
   requirePermission("project.costing.manage"),
+  validate(submitSchema),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
-      const projectId = parseInt(req.params.projectId, 10);
+      const projectId = parseInt(req.params.projectId as string, 10);
       const project = await resolveProject(projectId);
+      await assertProjectManager(projectId, req);
       const sheet = await getOrCreateSheet(projectId);
       assertNotLocked(sheet);
       if (sheet.status !== "draft" && sheet.status !== "rejected") {
@@ -693,16 +719,44 @@ router.post(
         });
       }
 
+      const { verifier1Id, verifier2Id, comments = null } = req.body;
+      if (verifier1Id === verifier2Id) {
+        throw new ValidationError({ verifier2Id: ["The two verifiers must be different people"] });
+      }
+      const verifiers = await prisma.user.findMany({
+        where: { id: { in: [verifier1Id, verifier2Id] }, isActive: true },
+        select: { id: true, name: true },
+      });
+      if (verifiers.length !== 2) {
+        throw new ValidationError({ verifier1Id: ["Both verifiers must be active users"] });
+      }
+      const byId = new Map(verifiers.map((v) => [v.id, v]));
+      const verifier1 = byId.get(verifier1Id)!;
+      const verifier2 = byId.get(verifier2Id)!;
+
       const updated = await prisma.$transaction(async (tx: any) => {
-        await tx.costingApproval.updateMany({
-          where: { sheetId: sheet.id, step: 1 },
+        await tx.costingApproval.update({
+          where: { id: sheet.approvals.find((a: any) => a.step === 1)!.id },
           data: {
             status: "approved",
             actorUserId: req.user!.id,
             actorName: req.user!.name,
             actedAt: new Date(),
-            comments: req.body?.comments ?? null,
+            comments,
           },
+        });
+        await tx.costingApproval.update({
+          where: { id: sheet.approvals.find((a: any) => a.step === 2)!.id },
+          data: { assignedUserId: verifier1.id, assignedName: verifier1.name },
+        });
+        await tx.costingApproval.update({
+          where: { id: sheet.approvals.find((a: any) => a.step === 3)!.id },
+          data: { assignedUserId: verifier2.id, assignedName: verifier2.name },
+        });
+        // A resubmit after rejection clears any stale decisions downstream.
+        await tx.costingApproval.updateMany({
+          where: { sheetId: sheet.id, step: { gte: 2 }, status: { in: ["rejected", "approved"] } },
+          data: { status: "pending", actorUserId: null, actorName: null, actedAt: null },
         });
         return tx.costingSheet.update({
           where: { id: sheet.id },
@@ -712,12 +766,12 @@ router.post(
       });
 
       await logActivity({
-        description: `Costing sheet submitted for approval on project "${project.name}"`,
+        description: `Costing sheet submitted for approval on project "${project.name}" (verifiers: ${verifier1.name}, ${verifier2.name})`,
         subjectType: "App\\Models\\CostingSheet",
         subjectId: sheet.id,
         event: "updated",
         causerId: req.user!.id,
-        properties: { attributes: { status: "submitted" } },
+        properties: { attributes: { status: "submitted", verifier1Id, verifier2Id } },
       });
 
       res.status(200).json({ success: true, data: updated, message: "Costing sheet submitted" });
@@ -727,11 +781,78 @@ router.post(
   }
 );
 
-// POST /api/projects/:projectId/costing-sheet/sign-off — steps 2-4 (approve/reject)
+// POST /api/projects/:projectId/costing-sheet/withdraw — PM pulls it back to draft,
+// only while no verification has landed yet.
+router.post(
+  "/:projectId/costing-sheet/withdraw",
+  authenticate,
+  requirePermission("project.costing.manage"),
+  async (req: RequestWithUser, res: Response, next: NextFunction) => {
+    try {
+      const projectId = parseInt(req.params.projectId as string, 10);
+      const project = await resolveProject(projectId);
+      await assertProjectManager(projectId, req);
+      const sheet = await getOrCreateSheet(projectId);
+      assertNotLocked(sheet);
+      if (sheet.status !== "submitted") {
+        throw new ValidationError({
+          status: ["Only a submitted sheet awaiting verification can be withdrawn"],
+        });
+      }
+      const verified = sheet.approvals.some(
+        (a: any) => a.step >= 2 && (a.status === "approved" || a.status === "rejected")
+      );
+      if (verified) {
+        throw new ValidationError({
+          status: ["Verification has already started — the sheet can no longer be withdrawn"],
+        });
+      }
+
+      const updated = await prisma.$transaction(async (tx: any) => {
+        await tx.costingApproval.update({
+          where: { id: sheet.approvals.find((a: any) => a.step === 1)!.id },
+          data: { status: "pending", actorUserId: null, actorName: null, actedAt: null },
+        });
+        await tx.costingApproval.updateMany({
+          where: { sheetId: sheet.id, step: { gte: 2 } },
+          data: {
+            status: "pending",
+            assignedUserId: null,
+            assignedName: null,
+            actorUserId: null,
+            actorName: null,
+            actedAt: null,
+            comments: null,
+          },
+        });
+        return tx.costingSheet.update({
+          where: { id: sheet.id },
+          data: { status: "draft" },
+          include: sheetInclude,
+        });
+      });
+
+      await logActivity({
+        description: `Costing sheet withdrawn back to draft on project "${project.name}"`,
+        subjectType: "App\\Models\\CostingSheet",
+        subjectId: sheet.id,
+        event: "updated",
+        causerId: req.user!.id,
+        properties: { attributes: { status: "draft" } },
+      });
+
+      res.status(200).json({ success: true, data: updated, message: "Costing sheet withdrawn" });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+// POST /api/projects/:projectId/costing-sheet/sign-off — verify/approve/reject.
+// Verify steps are locked to the assigned verifier; approval to the permission holder.
 router.post(
   "/:projectId/costing-sheet/sign-off",
   authenticate,
-  requirePermission(STEP_PERMISSIONS.hod_verified), // base gate; per-step checked below
   validate(signOffSchema),
   async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
@@ -758,7 +879,24 @@ router.post(
       if (earlier.some((a) => a.status !== "approved")) {
         throw new ValidationError({ status: ["Earlier sign-off steps are still pending"] });
       }
-      // Nobody signs two steps of the same sheet — mirrors separation of duties.
+
+      // Who may act: verify steps are locked to the person the PM assigned;
+      // the final approval to whoever holds the costing-approve permission.
+      const requiredPermission = STEP_PERMISSION[stepKey];
+      if (requiredPermission) {
+        const access = req.access;
+        const holds =
+          access?.isSuperAdmin ||
+          access?.permissions?.[requiredPermission] != null ||
+          req.user!.roles?.some((r: any) => r.name === "super-admin");
+        if (!holds) {
+          throw new ForbiddenError("You do not hold the approval permission");
+        }
+      } else if (approval.assignedUserId !== req.user!.id) {
+        throw new ForbiddenError("This step is assigned to another verifier");
+      }
+
+      // Nobody signs two steps of the same sheet — separation of duties.
       if (
         decision === "approve" &&
         earlier.some((a) => a.actorUserId === req.user!.id)
@@ -819,7 +957,15 @@ router.post(
       const updated = await prisma.$transaction(async (tx: any) => {
         await tx.costingApproval.updateMany({
           where: { sheetId: sheet.id, step: { gt: 1 } },
-          data: { status: "pending", actorUserId: null, actorName: null, actedAt: null, comments: null },
+          data: {
+            status: "pending",
+            assignedUserId: null,
+            assignedName: null,
+            actorUserId: null,
+            actorName: null,
+            actedAt: null,
+            comments: null,
+          },
         });
         return tx.costingSheet.update({
           where: { id: sheet.id },

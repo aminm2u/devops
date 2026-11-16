@@ -78,6 +78,12 @@ export interface Project {
   healthStatus?: string;
   delayReason?: string | null;
   recommendation?: string | null;
+  // Commercial value: without-tax + tax → with-tax (server-derived)
+  valueWithoutTax?: string | number | null;
+  taxAmount?: string | number | null;
+  valueWithTax?: string | number | null;
+  hasWarranty?: boolean;
+  warrantyMonths?: number | null;
   isActive?: boolean;
   /** Lets any employee join the project team without PMO action. */
   allowSelfEnroll?: boolean;
@@ -670,6 +676,9 @@ export interface RequisitionForm {
   division: string;
   processOwner: string | null;
   budgetItemId: number | null;
+  projectId: number | null;
+  /** The scope item (sub-budget) this requisition draws from — project mode. */
+  scopeItemId?: number | null;
   totalEstimatedCost: number;
   requiredDate: string | null;
   purpose: string | null;

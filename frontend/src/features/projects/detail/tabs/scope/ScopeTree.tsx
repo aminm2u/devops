@@ -1,12 +1,14 @@
 import { useState } from 'react';
-import { ChevronDown, ChevronRight, ChevronUp, FileText, Pencil, Plus, Trash2 } from 'lucide-react';
+import { ChevronDown, ChevronRight, ChevronUp, History, Pencil, Plus, Trash2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { formatDate } from '@/lib/utils';
 import { formatMYR } from '@/lib/format';
+import type { ScopeItem } from '@/api/scope';
 import type { ScopeNode } from './derive';
 import { SCOPE_STATUS_STYLES } from './derive';
+import { BaselinesDialog } from './BaselinesDialog';
 
 /**
  * The scope tree. Rows indent by depth (like the workbook's WBS column) and
@@ -14,6 +16,8 @@ import { SCOPE_STATUS_STYLES } from './derive';
  * changes from the Costing Sheet tab.
  */
 export function ScopeTree({
+  projectId,
+  items,
   tree,
   canEdit,
   isLoading = false,
@@ -23,6 +27,8 @@ export function ScopeTree({
   onDelete,
   onMove,
 }: {
+  projectId: number;
+  items: ScopeItem[];
   tree: ScopeNode[];
   canEdit: boolean;
   isLoading?: boolean;
@@ -33,17 +39,24 @@ export function ScopeTree({
   onMove: (id: number, direction: 'up' | 'down') => void;
 }) {
   const [collapsed, setCollapsed] = useState<Record<number, boolean>>({});
+  const [baselinesOpen, setBaselinesOpen] = useState(false);
 
   return (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between">
         <CardTitle className="text-base">Scope of Work</CardTitle>
-        {canEdit && (
-          <Button size="sm" onClick={() => onAddSibling(-1, null)} disabled={isLoading}>
-            <Plus className="mr-2 h-4 w-4" />
-            Add Root Item
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={() => setBaselinesOpen(true)}>
+            <History className="mr-2 h-4 w-4" />
+            Baselines
           </Button>
-        )}
+          {canEdit && (
+            <Button size="sm" onClick={() => onAddSibling(-1, null)} disabled={isLoading}>
+              <Plus className="mr-2 h-4 w-4" />
+              Add Root Item
+            </Button>
+          )}
+        </div>
       </CardHeader>
       <CardContent className="space-y-1">
         {isLoading && <p className="py-8 text-center text-sm text-muted-foreground">Loading scope…</p>}
@@ -63,6 +76,14 @@ export function ScopeTree({
           onMove,
         })}
       </CardContent>
+
+      <BaselinesDialog
+        open={baselinesOpen}
+        onOpenChange={setBaselinesOpen}
+        projectId={projectId}
+        canEdit={canEdit}
+        currentItems={items}
+      />
     </Card>
   );
 }
