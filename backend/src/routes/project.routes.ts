@@ -319,10 +319,12 @@ router.get(
           tasks: {
             orderBy: { position: 'asc' },
             include: {
-              subtasks: { select: { id: true, status: true, dueDate: true } }
+              subtasks: { select: { id: true, status: true, dueDate: true } },
+              // The WBS work package each task delivers — Kanban cards show
+              // it as context; no extra frontend query needed.
+              scopeItem: { select: { id: true, wbsNumber: true, title: true } },
             }
-          },
-          infrastructureNodes: {
+          },          infrastructureNodes: {
             where: { deletedAt: null },
           },
           services: {
@@ -378,6 +380,21 @@ router.get(
 
       if (!project) {
         throw new NotFoundError("Project not found");
+      }
+
+      // Per-task logged hours for the Kanban cards — one aggregate, mapped
+      // onto the already-fetched rows.
+      const loggedAgg = await prisma.timeEntry.groupBy({
+        by: ["taskId"],
+        where: { task: { projectId: project.id }, deletedAt: null },
+        _sum: { hours: true },
+      });
+      const hoursByTask = new Map(loggedAgg.map((row) => [row.taskId, Number(row._sum.hours ?? 0)]));
+      if (project.tasks) {
+        project.tasks = project.tasks.map((task: any) => ({
+          ...task,
+          loggedHours: hoursByTask.get(task.id) ?? 0,
+        }));
       }
 
       // Check viewer authorization

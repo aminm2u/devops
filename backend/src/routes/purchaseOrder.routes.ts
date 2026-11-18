@@ -4,7 +4,7 @@ import { authenticate } from "../middleware/auth.js";
 import { requirePermission } from "../middleware/rbac.js";
 import { validate } from "../middleware/validate.js";
 import { RequestWithUser } from "../types/index.js";
-import { NotFoundError } from "../lib/errors.js";
+import { NotFoundError, AppError } from "../lib/errors.js";
 import { logActivity } from "../middleware/activity.js";
 import prisma from "../config/database.js";
 import { generateReferenceNumber } from "../lib/numberGenerator.js";
@@ -40,6 +40,89 @@ const createPoSchema = z.object({
 const updatePoSchema = createPoSchema.partial().extend({
   items: z.array(poItemSchema).optional(),
 });
+
+// ── RF → PO lifecycle ───────────────────────────────────────────────────────
+//
+// A sourced PO advances its requisition: first PO moves an approved RF to
+// `in_procurement`; when every PO of the RF is terminal (completed or
+// cancelled) the RF itself completes. Status-driven only — no per-item
+// coverage tracking in v1.
+
+const PO_TERMINAL_STATUSES = ["completed", "cancelled"];
+const RF_PO_ELIGIBLE_STATUSES = ["approved", "in_procurement"];
+
+function round2(value: number): number {
+  return Math.round(value * 100) / 100;
+}
+
+/** Server-side totals from line items — the client's numbers are informational. */
+function recomputeTotals(
+  items: { qty: number; unitPrice: number }[],
+  taxAmount: number | undefined
+): { totalAmount: number; grandTotal: number } {
+  const totalAmount = round2(items.reduce((sum, item) => sum + item.qty * item.unitPrice, 0));
+  return { totalAmount, grandTotal: round2(totalAmount + (taxAmount ?? 0)) };
+}
+
+/**
+ * RF completion rollup: an eligible RF with at least one active PO and zero
+ * non-terminal POs left is completed. Called after any PO status change that
+ * could be the last one (complete, cancel).
+ */
+async function syncRequisitionProcurementStatus(requisitionId: number | null) {
+  if (!requisitionId) return;
+  const rf = await prisma.requisitionForm.findFirst({
+    where: { id: requisitionId, deletedAt: null },
+    select: { id: true, status: true },
+  });
+  if (!rf || !RF_PO_ELIGIBLE_STATUSES.includes(rf.status)) return;
+
+  const [remaining, total] = await Promise.all([
+    prisma.purchaseOrder.count({
+      where: {
+        requisitionId,
+        deletedAt: null,
+        isActive: true,
+        status: { notIn: PO_TERMINAL_STATUSES },
+      },
+    }),
+    prisma.purchaseOrder.count({
+      where: { requisitionId, deletedAt: null, isActive: true },
+    }),
+  ]);
+
+  if (remaining === 0 && total > 0) {
+    await prisma.requisitionForm.update({
+      where: { id: requisitionId },
+      data: { status: "completed" },
+    });
+  }
+}
+
+/**
+ * Validates a requisition being sourced into a PO: it must exist and be in an
+ * approved or in-procurement state. Returns the RF for inheritance.
+ */
+async function assertSourcableRequisition(requisitionId: number) {
+  const rf = await prisma.requisitionForm.findFirst({
+    where: { id: requisitionId, deletedAt: null },
+    select: {
+      id: true,
+      status: true,
+      projectId: true,
+      budgetItemId: true,
+      budgetItem: { select: { currency: true } },
+    },
+  });
+  if (!rf) throw new NotFoundError("Requisition not found");
+  if (!RF_PO_ELIGIBLE_STATUSES.includes(rf.status)) {
+    throw new AppError(
+      400,
+      `Only approved requisitions can be sourced into a PO — RF #${requisitionId} is "${rf.status}"`
+    );
+  }
+  return rf;
+}
 
 // GET /api/purchase-orders - List POs
 router.get(
@@ -120,7 +203,7 @@ router.get(
   }
 );
 
-// POST /api/purchase-orders - Create PO
+// POST /api/purchase-orders - Create PO (blank or sourced from an approved RF)
 router.post(
   "/",
   authenticate,
@@ -131,35 +214,66 @@ router.post(
       const { items, ...data } = req.body;
       const poNumber = await generateReferenceNumber(data.type === "lo" ? "lo" : "po");
 
-      const po = await prisma.purchaseOrder.create({
-        data: {
-          poNumber,
-          type: data.type || "po",
-          requisitionId: data.requisitionId || null,
-          quotationId: data.quotationId || null,
-          vendorId: data.vendorId,
-          projectId: data.projectId || null,
-          budgetItemId: data.budgetItemId || null,
-          totalAmount: data.totalAmount,
-          taxAmount: data.taxAmount || 0,
-          grandTotal: data.grandTotal,
-          currency: data.currency || "MYR",
-          deliveryAddress: data.deliveryAddress || null,
-          expectedDeliveryDate: data.expectedDeliveryDate ? new Date(data.expectedDeliveryDate) : null,
-          paymentTerms: data.paymentTerms || null,
-          notes: data.notes || null,
-          requestedById: req.user!.id,
-          items: {
-            create: items.map((item: any) => ({
-              description: item.description,
-              qty: item.qty,
-              unitPrice: item.unitPrice,
-              uom: item.uom || null,
-              totalAmount: item.qty * item.unitPrice,
-            })),
+      // Sourcing: the RF must exist and be approvable into procurement. Project
+      // and budget inherit from the RF unless the body overrides them.
+      let sourcedRf: Awaited<ReturnType<typeof assertSourcableRequisition>> | null = null;
+      if (data.requisitionId) {
+        sourcedRf = await assertSourcableRequisition(data.requisitionId);
+        if (
+          sourcedRf.budgetItem?.currency &&
+          data.currency &&
+          sourcedRf.budgetItem.currency !== data.currency
+        ) {
+          return res.status(400).json({
+            error: `Currency mismatch — the requisition's budget is ${sourcedRf.budgetItem.currency}`,
+          });
+        }
+      }
+
+      const totals = recomputeTotals(items, data.taxAmount);
+
+      const po = await prisma.$transaction(async (tx) => {
+        const created = await tx.purchaseOrder.create({
+          data: {
+            poNumber,
+            type: data.type || "po",
+            requisitionId: data.requisitionId || null,
+            quotationId: data.quotationId || null,
+            vendorId: data.vendorId,
+            projectId: data.projectId ?? sourcedRf?.projectId ?? null,
+            budgetItemId: data.budgetItemId ?? sourcedRf?.budgetItemId ?? null,
+            totalAmount: totals.totalAmount,
+            taxAmount: data.taxAmount || 0,
+            grandTotal: totals.grandTotal,
+            currency: data.currency || sourcedRf?.budgetItem?.currency || "MYR",
+            deliveryAddress: data.deliveryAddress || null,
+            expectedDeliveryDate: data.expectedDeliveryDate ? new Date(data.expectedDeliveryDate) : null,
+            paymentTerms: data.paymentTerms || null,
+            notes: data.notes || null,
+            requestedById: req.user!.id,
+            items: {
+              create: items.map((item: any) => ({
+                description: item.description,
+                qty: item.qty,
+                unitPrice: item.unitPrice,
+                uom: item.uom || null,
+                totalAmount: item.qty * item.unitPrice,
+              })),
+            },
           },
-        },
-        include: { items: true, vendor: { select: { id: true, name: true } } },
+          include: { items: true, vendor: { select: { id: true, name: true } } },
+        });
+
+        // First PO from an approved RF moves it into procurement. Idempotent:
+        // already-in_procurement RFs (multi-PO splits) stay as they are.
+        if (sourcedRf && sourcedRf.status === "approved") {
+          await tx.requisitionForm.update({
+            where: { id: sourcedRf.id },
+            data: { status: "in_procurement" },
+          });
+        }
+
+        return created;
       });
 
       await logActivity({
@@ -170,6 +284,16 @@ router.post(
         causerId: req.user!.id,
         properties: { attributes: po },
       });
+      if (sourcedRf && sourcedRf.status === "approved") {
+        await logActivity({
+          description: `Requisition #${sourcedRf.id} moved to in_procurement by PO ${po.poNumber}`,
+          subjectType: "App\\Models\\RequisitionForm",
+          subjectId: sourcedRf.id,
+          event: "updated",
+          causerId: req.user!.id,
+          properties: { attributes: { status: "in_procurement", poId: po.id } },
+        });
+      }
 
       res.status(201).json({ success: true, data: po, message: "Purchase order created" });
     } catch (error) {
@@ -198,16 +322,35 @@ router.put(
 
       const { items, ...formData } = req.body;
 
+      // Same sourcing validation as create when the RF link changes on a draft.
+      if (
+        formData.requisitionId !== undefined &&
+        formData.requisitionId !== null &&
+        formData.requisitionId !== existing.requisitionId
+      ) {
+        await assertSourcableRequisition(formData.requisitionId);
+      }
+
+      // Recompute totals whenever the lines or tax change — never trust the body.
+      const recomputed =
+        items || formData.taxAmount !== undefined
+          ? recomputeTotals(
+              items ?? (await prisma.purchaseOrderItem.findMany({ where: { poId: existing.id, isActive: true } })),
+              formData.taxAmount ?? existing.taxAmount
+            )
+          : null;
+
       const po = await prisma.$transaction(async (tx) => {
         const updated = await tx.purchaseOrder.update({
           where: { id: existing.id },
           data: {
+            ...(formData.requisitionId !== undefined && { requisitionId: formData.requisitionId }),
             ...(formData.vendorId !== undefined && { vendorId: formData.vendorId }),
             ...(formData.projectId !== undefined && { projectId: formData.projectId }),
             ...(formData.budgetItemId !== undefined && { budgetItemId: formData.budgetItemId }),
-            ...(formData.totalAmount !== undefined && { totalAmount: formData.totalAmount }),
+            ...(recomputed && { totalAmount: recomputed.totalAmount }),
             ...(formData.taxAmount !== undefined && { taxAmount: formData.taxAmount }),
-            ...(formData.grandTotal !== undefined && { grandTotal: formData.grandTotal }),
+            ...(recomputed && { grandTotal: recomputed.grandTotal }),
             ...(formData.deliveryAddress !== undefined && { deliveryAddress: formData.deliveryAddress }),
             ...(formData.expectedDeliveryDate !== undefined && {
               expectedDeliveryDate: formData.expectedDeliveryDate ? new Date(formData.expectedDeliveryDate) : null,
@@ -333,6 +476,49 @@ router.put(
   }
 );
 
+// PUT /api/purchase-orders/:id/complete - Mark the PO completed
+router.put(
+  "/:id/complete",
+  authenticate,
+  requirePermission("procurement.po.manage"),
+  async (req: RequestWithUser, res: Response, next: NextFunction) => {
+    try {
+      const id = parseInt(req.params.id);
+      const existing = await prisma.purchaseOrder.findFirst({
+        where: { id, isActive: true, deletedAt: null },
+      });
+      if (!existing) throw new NotFoundError("Purchase order not found");
+
+      if (!["approved", "fully_received", "partially_received"].includes(existing.status)) {
+        return res.status(400).json({
+          error: `Cannot complete PO with status "${existing.status}"`,
+        });
+      }
+
+      const updated = await prisma.purchaseOrder.update({
+        where: { id },
+        data: { status: "completed" },
+      });
+
+      await logActivity({
+        description: `Purchase order ${existing.poNumber} completed`,
+        subjectType: "App\\Models\\PurchaseOrder",
+        subjectId: id,
+        event: "updated",
+        causerId: req.user!.id,
+        properties: { attributes: { status: "completed" } },
+      });
+
+      // This may be the PO that closes out its requisition.
+      await syncRequisitionProcurementStatus(existing.requisitionId);
+
+      res.json({ success: true, data: updated });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
 // DELETE /api/purchase-orders/:id - Cancel PO
 router.delete(
   "/:id",
@@ -354,6 +540,9 @@ router.delete(
         where: { id: existing.id },
         data: { deletedAt: new Date(), isActive: false, status: "cancelled" },
       });
+
+      // Cancelling may complete the requisition (all POs terminal).
+      await syncRequisitionProcurementStatus(existing.requisitionId);
 
       res.status(200).json({ success: true, message: "Purchase order cancelled" });
     } catch (error) {

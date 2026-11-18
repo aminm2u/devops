@@ -3,14 +3,13 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/hooks/useAuth';
 import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { DatePicker } from '@/components/ui/date-picker';
-import { todayLocal } from '@/lib/utils';
+import { MultiSelect, Option } from '@/components/ui/multi-select';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
-  CheckSquare, Square, Plus, Trash2, Timer, Send,
-  ChevronDown, ChevronRight, Loader2
+  CheckSquare, Square, Plus, Trash2, Timer, MessageSquare,
+  ChevronDown, ChevronRight, Loader2, Users
 } from 'lucide-react';
 import apiClient from '@/api/client';
 import toast from '@/lib/toast';
@@ -21,6 +20,15 @@ interface SubtaskChecklistProps {
   members: any[];
   timeEntries?: any[];
   onUpdate: () => void;
+  /**
+   * Present when the host page has a single log-work composer (the task
+   * page's sidebar). Clicking a subtask's clock icon targets that composer
+   * instead of an inline one — one form to fill, wherever the click came
+   * from.
+   */
+  onLogWork?: (subtaskId: number) => void;
+  /** Opens the discussion feed scrolled to this subtask's thread. */
+  onDiscuss?: (subtaskId: number) => void;
 }
 
 const STATUS_OPTIONS = [
@@ -30,30 +38,58 @@ const STATUS_OPTIONS = [
 ];
 
 /**
- * Checklist-style subtasks inside the task detail modal (2-level limit:
- * subtasks never have children). Each subtask supports the same Log Work
- * method as the parent task (hours + work done) writing to the shared
- * TimeEntry work log.
+ * Checklist-style subtasks on the task page (2-level limit: subtasks never
+ * have children). Several people can work one subtask — the assignee picker
+ * is a MultiSelect over the project team. Work logging and discussion live on
+ * the host page; each row offers a clock button (log work) and a chat button
+ * (discuss) that target them.
  */
-export function SubtaskChecklist({ taskId, subtasks, members, timeEntries = [], onUpdate }: SubtaskChecklistProps) {
+export function SubtaskChecklist({ taskId, subtasks, members, timeEntries = [], onUpdate, onLogWork, onDiscuss }: SubtaskChecklistProps) {
   const { can } = useAuth();
+  const canEditTask = can('task.manage');
   const [newTitle, setNewTitle] = useState('');
   const [adding, setAdding] = useState(false);
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<any>(null);
   const [savingId, setSavingId] = useState<number | null>(null);
+  const [editingAssigneesId, setEditingAssigneesId] = useState<number | null>(null);
+  const [assigneesDraft, setAssigneesDraft] = useState<string[]>([]);
 
-  // Log Work mini-composer state (per expanded subtask)
-  const [logHours, setLogHours] = useState('');
-  const [logDescription, setLogDescription] = useState('');
-  const [logging, setLogging] = useState(false);
+  /** Read the assignee array, falling back to the legacy mirror column. */
+  const assigneesOf = (s: any): number[] =>
+    Array.isArray(s.assignees) ? s.assignees : s.assigneeId ? [s.assigneeId] : [];
 
   const doneCount = subtasks.filter((s) => s.status === 'done').length;
 
-  const memberOptions = members.map((m: any) => ({
+  const memberOptions: Option[] = members.map((m: any) => ({
     label: m.user.name,
-    value: m.userId ?? m.id,
+    value: String(m.userId ?? m.id),
   }));
+
+  const memberName = (id: number) => {
+    const m = members.find((x: any) => (x.userId ?? x.id) === id);
+    return m ? m.user.name : `User ${id}`;
+  };
+
+  const openAssignees = (s: any) => {
+    setEditingAssigneesId(s.id);
+    setAssigneesDraft(assigneesOf(s).map(String));
+  };
+
+  const saveAssignees = async (subtaskId: number) => {
+    try {
+      setSavingId(subtaskId);
+      await apiClient.put(`/tasks/${taskId}/subtasks/${subtaskId}`, {
+        assignees: assigneesDraft.map(Number),
+      });
+      setEditingAssigneesId(null);
+      onUpdate();
+    } catch (err) {
+      toast.error('Failed to update assignees');
+    } finally {
+      setSavingId(null);
+    }
+  };
 
   const handleAdd = async () => {
     if (!newTitle.trim()) return;
@@ -91,36 +127,6 @@ export function SubtaskChecklist({ taskId, subtasks, members, timeEntries = [], 
       onUpdate();
     } catch (err) {
       toast.error('Failed to delete subtask');
-    }
-  };
-
-  const handleLogWork = async (subtaskId: number) => {
-    if (!logDescription.trim()) return;
-    try {
-      setLogging(true);
-      const hours = logHours ? Math.round(parseFloat(logHours) * 4) / 4 : 0;
-      if (hours > 0) {
-        // Shared work log: same TimeEntry record as the timesheet page
-        await apiClient.post('/timesheet/entries', {
-          workDate: todayLocal(),
-          hours,
-          description: logDescription.trim(),
-          taskId,
-          subtaskId,
-        });
-      } else {
-        await apiClient.post(`/tasks/${taskId}/comments`, {
-          content: logDescription.trim(),
-        });
-      }
-      setLogHours('');
-      setLogDescription('');
-      toast.success(hours > 0 ? 'Work logged' : 'Comment added');
-      onUpdate();
-    } catch (err) {
-      toast.error('Failed to log work');
-    } finally {
-      setLogging(false);
     }
   };
 
@@ -169,10 +175,36 @@ export function SubtaskChecklist({ taskId, subtasks, members, timeEntries = [], 
                   </span>
                 </button>
 
-                {s.assignee && (
-                  <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded shrink-0">
-                    {s.assignee.name}
+                {/* Everyone working this subtask — click to edit the roster */}
+                {editingAssigneesId === s.id ? (
+                  <span className="shrink-0 flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                    <MultiSelect
+                      options={memberOptions}
+                      selected={assigneesDraft}
+                      onChange={setAssigneesDraft}
+                      placeholder="Assignees..."
+                    />
+                    <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => saveAssignees(s.id)}>
+                      ✓
+                    </Button>
+                    <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => setEditingAssigneesId(null)}>
+                      ✕
+                    </Button>
                   </span>
+                ) : (
+                  canEditTask && (
+                    <button
+                      type="button"
+                      className="shrink-0 flex items-center gap-0.5 text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded hover:bg-muted/70 transition-colors"
+                      onClick={(e) => { e.stopPropagation(); openAssignees(s); }}
+                      title="Edit assignees"
+                    >
+                      <Users className="h-3 w-3" />
+                      {assigneesOf(s).length > 0
+                        ? assigneesOf(s).slice(0, 2).map(memberName).join(', ') + (assigneesOf(s).length > 2 ? ` +${assigneesOf(s).length - 2}` : '')
+                        : 'Assign'}
+                    </button>
+                  )
                 )}
                 {s.dueDate && (
                   <span className={`text-[10px] shrink-0 ${isOverdue(s) ? 'text-red-500 font-medium' : 'text-muted-foreground'}`}>
@@ -180,6 +212,28 @@ export function SubtaskChecklist({ taskId, subtasks, members, timeEntries = [], 
                   </span>
                 )}
                 {savingId === s.id && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />}
+                {onDiscuss && (
+                  <button
+                    type="button"
+                    className="shrink-0 text-muted-foreground/60 hover:text-primary transition-colors"
+                    onClick={(e) => { e.stopPropagation(); onDiscuss(s.id); }}
+                    title="Discuss this subtask"
+                    aria-label={`Discuss ${s.title}`}
+                  >
+                    <MessageSquare className="h-3.5 w-3.5" />
+                  </button>
+                )}
+                {onLogWork && (
+                  <button
+                    type="button"
+                    className="shrink-0 text-muted-foreground/60 hover:text-primary transition-colors"
+                    onClick={() => onLogWork(s.id)}
+                    title="Log work against this subtask"
+                    aria-label={`Log work against ${s.title}`}
+                  >
+                    <Timer className="h-3.5 w-3.5" />
+                  </button>
+                )}
                 {expanded
                   ? <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" />
                   : <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />}
@@ -187,7 +241,7 @@ export function SubtaskChecklist({ taskId, subtasks, members, timeEntries = [], 
 
               {expanded && (
                 <div className="px-2.5 pb-2.5 space-y-2.5 border-t border-border/40">
-                  <div className="grid grid-cols-3 gap-2 pt-2">
+                  <div className="grid grid-cols-2 gap-2 pt-2">
                     <div>
                       <label className="text-[10px] text-muted-foreground mb-1 block">Status</label>
                       <Select
@@ -203,23 +257,6 @@ export function SubtaskChecklist({ taskId, subtasks, members, timeEntries = [], 
                       </Select>
                     </div>
                     <div>
-                      <label className="text-[10px] text-muted-foreground mb-1 block">Assignee</label>
-                      <Select
-                        value={s.assigneeId != null ? String(s.assigneeId) : 'unassigned'}
-                        onValueChange={(v) =>
-                          handleUpdate(s.id, { assigneeId: v === 'unassigned' ? null : Number(v) })
-                        }
-                      >
-                        <SelectTrigger className="h-7 text-xs"><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="unassigned">Unassigned</SelectItem>
-                          {memberOptions.map((m) => (
-                            <SelectItem key={m.value} value={String(m.value)}>{m.label}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div>
                       <label className="text-[10px] text-muted-foreground mb-1 block">Due date</label>
                       <DatePicker
                         value={s.dueDate ? new Date(s.dueDate).toISOString().split('T')[0] : ''}
@@ -230,40 +267,8 @@ export function SubtaskChecklist({ taskId, subtasks, members, timeEntries = [], 
                     </div>
                   </div>
 
-                  {/* Log Work mini-composer — same method as the parent task */}
-                  <div>
-                    <label className="text-[10px] text-muted-foreground mb-1 flex items-center gap-1">
-                      <Timer className="h-3 w-3" /> Log Work
-                    </label>
-                    <div className="flex gap-1.5">
-                      <Input
-                        type="number"
-                        min="0"
-                        max="24"
-                        step="0.25"
-                        value={logHours}
-                        onChange={(e) => setLogHours(e.target.value)}
-                        placeholder="Hrs"
-                        className="h-7 text-xs w-16"
-                      />
-                      <Textarea
-                        value={logDescription}
-                        onChange={(e) => setLogDescription(e.target.value)}
-                        placeholder="What did you work on?"
-                        rows={1}
-                        className="resize-none h-7 text-xs min-h-[28px]"
-                      />
-                      <Button
-                        size="sm"
-                        className="h-7 px-2"
-                        disabled={!logDescription.trim() || logging}
-                        onClick={() => handleLogWork(s.id)}
-                      >
-                        <Send className="h-3 w-3" />
-                      </Button>
-                    </div>
-                  </div>
-
+                  {/* Hours logged against this subtask — entries themselves are
+                      created from the page's single log-work composer. */}
                   {subEntries.length > 0 && (
                     <div className="space-y-1">
                       {subEntries.map((e: any) => (

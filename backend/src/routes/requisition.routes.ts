@@ -10,6 +10,7 @@ import { logActivity } from "../middleware/activity.js";
 import prisma from "../config/database.js";
 import { createApprovalChain, processApprovalStep } from "../services/approvalEngine.js";
 import { recomputeScopeCosts } from "./scope.routes.js";
+import { generateReferenceNumber } from "../lib/numberGenerator.js";
 
 const router = Router();
 
@@ -32,12 +33,14 @@ const attachmentSchema = z.object({
 });
 
 const createRequisitionSchema = z.object({
-  // Division is only required for non-project requisitions — project spend
-  // raised through a costing sheet belongs to the project, not a division.
-  division: z.string().min(1).optional(),
+  // Departmental RFs get their division derived from the raiser's department
+  // when omitted; project/programme RFs leave it null.
+  division: z.string().min(1).optional().nullable(),
   processOwner: z.string().optional().nullable(),
   budgetItemId: z.number().int().positive().optional().nullable(),
   projectId: z.number().int().positive().optional().nullable(),
+  // Programme requisitions draw from an internal project
+  internalProjectId: z.number().int().positive().optional().nullable(),
   // The scope item this procurement raises for — feeds its actual cost
   scopeItemId: z.number().int().positive().optional().nullable(),
   // Quotations and supporting documents, already uploaded via /api/upload
@@ -57,6 +60,26 @@ const createRequisitionSchema = z.object({
   approvedByDate: z.string().datetime().optional().nullable(),
   items: z.array(requisitionItemSchema).min(1, "At least one item is required"),
 });
+
+/**
+ * Derives the raiser's division from their HR record:
+ * user.departmentId → Department.code, which is exactly what the
+ * `division` reference group's values hold (the join reference.routes.ts
+ * uses). Returns null when the user has no department or the code has no
+ * matching division entry — the caller decides whether that's an error.
+ */
+async function deriveDivision(userId: number): Promise<string | null> {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { department: { select: { code: true } } },
+  });
+  if (!user?.department?.code) return null;
+  const divisionEntry = await prisma.referenceData.findFirst({
+    where: { group: 'division', value: user.department.code, isActive: true },
+    select: { value: true },
+  });
+  return divisionEntry?.value ?? null;
+}
 
 const updateRequisitionSchema = createRequisitionSchema.partial().extend({
   items: z.array(requisitionItemSchema).optional(),
@@ -90,8 +113,19 @@ router.get(
           include: {
             items: { where: { deletedAt: null, isActive: true } },
             budgetItem: { select: { id: true, description: true, division: true, allocatedBudget: true, utilizedBudget: true, currency: true, budgetType: true } },
+            project: { select: { id: true, name: true } },
+            internalProject: { select: { id: true, name: true } },
             approvals: {
-              include: { approver: { select: { id: true, name: true, email: true } } },
+              include: {
+                approver: {
+                  select: {
+                    id: true,
+                    name: true,
+                    email: true,
+                    position: { select: { name: true } },
+                  },
+                },
+              },
               orderBy: { order: "asc" },
             },
           },
@@ -160,15 +194,32 @@ router.post(
     try {
       const { items, ...formData } = req.body;
       const isProjectRaised = formData.projectId != null;
+      const isProgrammeRaised = formData.internalProjectId != null;
+
+      // Division applies only to departmental RFs. Project/programme spend
+      // stays null (the FKs say where the money belongs); departmental RFs
+      // take the raiser's derived division — an explicit body value wins for
+      // API callers, the UI no longer sends one.
+      let division: string | null = formData.division ?? null;
+      if (!isProjectRaised && !isProgrammeRaised && !division) {
+        division = await deriveDivision(req.user!.id);
+        if (!division) {
+          return res.status(400).json({
+            success: false,
+            error:
+              'Your account has no department assigned, so the requisition cannot be charged. Ask HR to set your department (its code must exist in Reference Data → Division) or pick a budget item explicitly.',
+          });
+        }
+      }
 
       const form = await prisma.requisitionForm.create({
         data: {
-          // Project-raised spend belongs to the project; division only applies
-          // to departmental requisitions.
-          division: formData.division || (isProjectRaised ? 'PROJECT' : 'IT'),
-          processOwner: formData.processOwner || null,
+          // Printed reference from the `req` numbering config (REQ-2026-0001)
+          referenceNumber: await generateReferenceNumber('req'),
+          division,
           budgetItemId: formData.budgetItemId || null,
           projectId: formData.projectId || null,
+          internalProjectId: formData.internalProjectId || null,
           scopeItemId: formData.scopeItemId || null,
           totalEstimatedCost: formData.totalEstimatedCost || 0,
           requiredDate: formData.requiredDate ? new Date(formData.requiredDate) : null,
@@ -178,7 +229,7 @@ router.post(
           isUnbudgeted: formData.isUnbudgeted || false,
           procurementType: formData.procurementType || "material",
           urgencyLevel: formData.urgencyLevel || "normal",
-          purchaseType: formData.purchaseType || "non_project",
+          purchaseType: formData.purchaseType || (isProjectRaised || isProgrammeRaised ? 'project' : 'non_project'),
           requestedByName: formData.requestedByName || null,
           requestedByDate: formData.requestedByDate ? new Date(formData.requestedByDate) : null,
           approvedByName: formData.approvedByName || null,
@@ -202,6 +253,8 @@ router.post(
         include: {
           items: true,
           budgetItem: { select: { id: true, description: true } },
+          project: { select: { id: true, name: true } },
+          internalProject: { select: { id: true, name: true } },
         },
       });
 
@@ -216,7 +269,8 @@ router.post(
 
       if (form.projectId) await recomputeScopeCosts(prisma, form.projectId);
 
-      res.status(201).json({ success: true, data: form, message: "Requisition form created" });
+      const mode = form.projectId ? 'project' : form.internalProjectId ? 'programme' : 'departmental';
+      res.status(201).json({ success: true, data: { ...form, mode }, message: "Requisition form created" });
     } catch (error) {
       next(error);
     }
@@ -258,12 +312,25 @@ router.put(
           where: { id: existing.id },
           data: {
             ...(formData.division !== undefined && { division: formData.division }),
-            ...(formData.processOwner !== undefined && { processOwner: formData.processOwner }),
+            // processOwner is legacy — no longer written; the column survives
+            // for old rows.
             ...(formData.budgetItemId !== undefined && {
               budgetItem: formData.budgetItemId ? { connect: { id: formData.budgetItemId } } : { disconnect: true },
             }),
-            ...(formData.projectId !== undefined && { projectId: formData.projectId }),
-            ...(formData.scopeItemId !== undefined && { scopeItemId: formData.scopeItemId }),
+            // Relation syntax for every FK: with budgetItem above, Prisma
+            // selects its strict (relation-only) input type, where scalar
+            // foreign keys like projectId are rejected as unknown arguments.
+            ...(formData.projectId !== undefined && {
+              project: formData.projectId ? { connect: { id: formData.projectId } } : { disconnect: true },
+            }),
+            ...(formData.internalProjectId !== undefined && {
+              internalProject: formData.internalProjectId
+                ? { connect: { id: formData.internalProjectId } }
+                : { disconnect: true },
+            }),
+            ...(formData.scopeItemId !== undefined && {
+              scopeItem: formData.scopeItemId ? { connect: { id: formData.scopeItemId } } : { disconnect: true },
+            }),
             ...(formData.attachments !== undefined && {
               metadata: Object.keys(nextMetadata).length > 0 ? nextMetadata : Prisma.JsonNull,
             }),
@@ -415,12 +482,15 @@ router.put(
         },
       });
 
-      // Try to create approval chain based on policy
+      // Try to create approval chain based on policy. Project/programme RFs
+      // pass null division so they match budgetType-only or global policies —
+      // the old 'PROJECT' literal matched nothing.
       const budgetType = existing.budgetItem?.budgetType || null;
+      const divisionForPolicy = existing.projectId || existing.internalProjectId ? null : existing.division;
       const hasChain = await createApprovalChain(
         id,
         budgetType,
-        existing.division,
+        divisionForPolicy,
         Number(existing.totalEstimatedCost)
       );
 

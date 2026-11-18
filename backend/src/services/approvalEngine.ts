@@ -28,9 +28,12 @@ interface PolicyMatch {
  */
 async function findMatchingPolicy(
   budgetType: string | null,
-  division: string
+  division: string | null
 ): Promise<any> {
-  // Try exact match first
+  // Try exact match first. With division null (project/programme RFs) the
+  // `division: null` in this where matches only policies that have no
+  // division of their own — so an exact-null match IS a budgetType-only
+  // policy, and the later steps degrade to the global default correctly.
   let policy = await prisma.approvalPolicy.findFirst({
     where: {
       isActive: true,
@@ -57,18 +60,20 @@ async function findMatchingPolicy(
     if (policy) return policy;
   }
 
-  // Try division only
-  policy = await prisma.approvalPolicy.findFirst({
-    where: {
-      isActive: true,
-      deletedAt: null,
-      budgetType: null,
-      division: division,
-    },
-    include: { tiers: { orderBy: { minAmount: "asc" } }, assignments: true },
-  });
+  // Try division only (a non-null division matches its division-only policy)
+  if (division) {
+    policy = await prisma.approvalPolicy.findFirst({
+      where: {
+        isActive: true,
+        deletedAt: null,
+        budgetType: null,
+        division: division,
+      },
+      include: { tiers: { orderBy: { minAmount: "asc" } }, assignments: true },
+    });
 
-  if (policy) return policy;
+    if (policy) return policy;
+  }
 
   // Fall back to global default
   policy = await prisma.approvalPolicy.findFirst({
@@ -89,7 +94,7 @@ async function findMatchingPolicy(
  */
 export async function evaluateApproval(
   budgetType: string | null,
-  division: string,
+  division: string | null,
   totalAmount: number
 ): Promise<PolicyMatch | null> {
   const policy = await findMatchingPolicy(budgetType, division);
@@ -141,7 +146,7 @@ export async function evaluateApproval(
 export async function createApprovalChain(
   requisitionId: number,
   budgetType: string | null,
-  division: string,
+  division: string | null,
   totalAmount: number
 ): Promise<boolean> {
   const match = await evaluateApproval(budgetType, division, totalAmount);

@@ -389,6 +389,9 @@ export async function login(
 export async function getMe(userId: number) {
   const user = await prisma.user.findUnique({
     where: { id: userId },
+    // Department rides along: the requisition form shows the "charged to"
+    // department, which is derived from this relation server-side.
+    include: { department: { select: { id: true, name: true, code: true } } },
   });
 
   if (!user) {

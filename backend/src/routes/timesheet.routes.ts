@@ -984,6 +984,7 @@ router.get(
         return {
           kind: "task" as const,
           id: t.id,
+          publicId: t.publicId,
           title: t.title,
           dueDate: fmtDate(t.dueDate),
           projectId: t.projectId,
@@ -1011,6 +1012,7 @@ router.get(
               column: s.status,
               isOverdue: s.dueDate < today && s.status !== "done",
               parentTaskId: t.id,
+              parentTaskPublicId: t.publicId,
             });
           }
         }
@@ -1026,6 +1028,7 @@ router.get(
           task: {
             select: {
               id: true,
+              publicId: true,
               title: true,
               priority: true,
               projectId: true,
@@ -1047,6 +1050,7 @@ router.get(
           column: s.status,
           isOverdue: s.dueDate != null && s.dueDate < today && s.status !== "done",
           parentTaskId: s.task.id,
+          parentTaskPublicId: s.task.publicId,
         });
       }
 
@@ -1157,10 +1161,13 @@ router.get(
             OR: [
               { assignees: { array_contains: [userId] } },
               { subtasks: { some: { assigneeId: userId } } },
+              { subtasks: { some: { assignees: { array_contains: [userId] } } } },
             ],
           },
           include: {
             project: { select: { id: true, name: true } },
+            // WBS context so people log against the right work package.
+            scopeItem: { select: { wbsNumber: true, title: true } },
             subtasks: {
               where: { status: { not: "done" } },
               orderBy: { position: "asc" },
@@ -1201,6 +1208,7 @@ router.get(
               title: task.title,
               projectId: task.projectId,
               projectName: task.project.name,
+              scopeItem: task.scopeItem,
               subtasks: task.subtasks.map((s) => ({
                 id: s.id,
                 title: s.title,
@@ -1232,10 +1240,12 @@ router.get(
           OR: [
             { assignees: { array_contains: [userId] } },
             { subtasks: { some: { assigneeId: userId } } },
+              { subtasks: { some: { assignees: { array_contains: [userId] } } } },
           ],
         },
         include: {
           project: { select: { id: true, name: true } },
+          scopeItem: { select: { wbsNumber: true, title: true } },
           subtasks: {
             where: { status: { not: "done" } },
             orderBy: { position: "asc" },
@@ -1253,6 +1263,7 @@ router.get(
           title: t.title,
           projectId: t.projectId,
           projectName: t.project.name,
+          scopeItem: t.scopeItem,
           subtasks: t.subtasks,
         })),
       });

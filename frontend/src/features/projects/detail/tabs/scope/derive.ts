@@ -76,3 +76,19 @@ export const SCOPE_STATUS_STYLES: Record<ScopeItem['status'], string> = {
   in_progress: 'border-blue-500/60 text-blue-600 dark:text-blue-400',
   completed: 'border-green-600/60 text-green-600 dark:text-green-400',
 };
+
+/**
+ * Tree order: compare WBS segment by numeric segment — "1.1" < "1.2" < "2" <
+ * "2.1.1". A plain string sort would put "2.1.1" before "11" and after "1.10";
+ * numeric segments keep the workbook order people expect.
+ */
+export function compareWbs(a: { wbsNumber: string }, b: { wbsNumber: string }): number {
+  const segsA = a.wbsNumber.split('.').map(Number);
+  const segsB = b.wbsNumber.split('.').map(Number);
+  const len = Math.max(segsA.length, segsB.length);
+  for (let i = 0; i < len; i += 1) {
+    const diff = (segsA[i] ?? 0) - (segsB[i] ?? 0);
+    if (diff !== 0) return diff;
+  }
+  return 0;
+}

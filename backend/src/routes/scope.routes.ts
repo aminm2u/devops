@@ -257,7 +257,72 @@ router.get(
         select: scopeSelect,
       });
 
-      res.status(200).json({ success: true, data: items, message: "Scope retrieved" });
+      // Logged hours roll up from the time entries of each item's linked
+      // tasks (whatever their approval state — a draft entry is still work
+      // someone did). Parents fold up their subtree below.
+      const [hourRows, taskCounts, doneCounts] = await Promise.all([
+        prisma.projectTask.findMany({
+          where: { projectId, scopeItemId: { not: null } },
+          select: {
+            id: true,
+            scopeItemId: true,
+            column: { select: { name: true } },
+            timeEntries: { where: { deletedAt: null }, select: { hours: true } },
+          },
+        }),
+        prisma.projectTask.groupBy({
+          by: ["scopeItemId"],
+          where: { projectId, scopeItemId: { not: null } },
+          _count: { _all: true },
+        }),
+        prisma.projectTask.groupBy({
+          by: ["scopeItemId"],
+          where: { projectId, scopeItemId: { not: null }, column: { name: DONE_COLUMN_PATTERN as any } },
+          _count: { _all: true },
+        }),
+      ]);
+
+      const hoursByItem = new Map<number, number>();
+      for (const task of hourRows) {
+        if (!task.scopeItemId) continue;
+        const sum = task.timeEntries.reduce((acc, e) => acc + Number(e.hours), 0);
+        hoursByItem.set(task.scopeItemId, (hoursByItem.get(task.scopeItemId) ?? 0) + sum);
+      }
+      const countByItem = new Map(taskCounts.map((r: any) => [r.scopeItemId, Number(r._count?._all ?? 0)]));
+      const doneByItem = new Map(doneCounts.map((r: any) => [r.scopeItemId, Number(r._count?._all ?? 0)]));
+
+      // Subtree rollup for parents (post-order over the fetched rows).
+      const childrenOf = new Map<number, number[]>();
+      for (const item of items) {
+        if (item.parentId) {
+          if (!childrenOf.has(item.parentId)) childrenOf.set(item.parentId, []);
+          childrenOf.get(item.parentId)!.push(item.id);
+        }
+      }
+      const roll = (id: number): { hours: number; tasks: number; done: number } => {
+        const own = {
+          hours: hoursByItem.get(id) ?? 0,
+          tasks: countByItem.get(id) ?? 0,
+          done: doneByItem.get(id) ?? 0,
+        };
+        for (const child of childrenOf.get(id) ?? []) {
+          const sub = roll(child);
+          own.hours += sub.hours;
+          own.tasks += sub.tasks;
+          own.done += sub.done;
+        }
+        return own;
+      };
+      const rollupById = new Map(items.map((item) => [item.id, roll(item.id)]));
+
+      const withRollups = items.map((item) => ({
+        ...item,
+        loggedHours: rollupById.get(item.id)!.hours,
+        taskCount: rollupById.get(item.id)!.tasks,
+        doneTaskCount: rollupById.get(item.id)!.done,
+      }));
+
+      res.status(200).json({ success: true, data: withRollups, message: "Scope retrieved" });
     } catch (error) {
       next(error);
     }
@@ -467,17 +532,25 @@ router.put(
 );
 
 /**
- * Recomputes progress for every item from the tasks that deliver it.
+ * Recomputes progress AND status for every item from the tasks that deliver
+ * it.
  *
  * Progress is not typed into the form — it is contributed by the kanban tasks
  * linked to each item (ProjectTask.scopeItemId), innermost first, folded up to
  * the outermost. A leaf averages its tasks (simple mean — tasks carry no
  * weights); parents average their children.
+ *
+ * Status follows the same spine, only when tasks exist:
+ *   leaf, ≥1 linked task  → all done ⇒ completed; some done ⇒ in_progress;
+ *                           none done ⇒ in_progress if it was, else planned.
+ *   leaf, no tasks        → status untouched (manual edits are the only truth
+ *                            for task-less items — they are never overwritten)
+ *   parent                → derived from children when any descendant has tasks
  */
 export async function recomputeScopeProgress(tx: any, projectId: number) {
   const items = await tx.scopeItem.findMany({
     where: { projectId, deletedAt: null },
-    select: { id: true, parentId: true },
+    select: { id: true, parentId: true, status: true },
   });
 
   const childrenOf = new Map<number, number[]>();
@@ -503,7 +576,12 @@ export async function recomputeScopeProgress(tx: any, projectId: number) {
     },
     _count: { _all: true },
   });
-  const doneByItem = new Map(doneAgg.map((row: any) => [row.scopeItemId, row._count._all]));
+  const doneByItem = new Map<number, number>(
+    doneAgg.map((row: any) => [row.scopeItemId as number, Number(row._count._all)])
+  );
+  const taskCountByItem = new Map<number, number>(
+    taskAgg.map((row: any) => [row.scopeItemId as number, Number(row._count._all)])
+  );
 
   const progressOf = new Map<number, number | null>();
   for (const row of taskAgg) {
@@ -538,6 +616,54 @@ export async function recomputeScopeProgress(tx: any, projectId: number) {
 
   for (const [id, progress] of progressOf) {
     await tx.scopeItem.update({ where: { id }, data: { progress } });
+  }
+
+  // ── Status derivation ────────────────────────────────────────────────────
+  // A linked item's status is owned by its tasks: work started ⇒ in_progress,
+  // every task done ⇒ completed. A task-less item keeps whatever a human set —
+  // recompute never touches what it has nothing to say about.
+  const statusById = new Map<number, string>();
+  for (const item of items) {
+    const leafTaskCount = taskCountByItem.get(item.id) ?? 0;
+    if (leafTaskCount > 0) {
+      const done = Number(doneByItem.get(item.id) ?? 0);
+      if (done >= leafTaskCount) statusById.set(item.id, "completed");
+      else if (done > 0) statusById.set(item.id, "in_progress");
+      // Nothing done yet: keep a manually-started item moving, otherwise it
+      // is still planned — a stale manual "completed" gets reopened here,
+      // which is the point of deriving once tasks exist.
+      else if (item.status === "in_progress") statusById.set(item.id, "in_progress");
+      else statusById.set(item.id, "planned");
+    }
+    // task-less leaf: no entry — untouched below.
+  }
+
+  // Parents fold up from children (post-order), but only when something in
+  // their subtree actually has tasks — otherwise the manual status stands.
+  // A node with its own linked tasks keeps the status those tasks derived
+  // (same precedence as the progress fold above).
+  const deriveParent = (id: number): string | null => {
+    if (statusById.has(id)) return statusById.get(id)!;
+    const kids = childrenOf.get(id) ?? [];
+    const childStatuses = kids
+      .map((child) => deriveParent(child) ?? statusById.get(child) ?? null)
+      .filter((s): s is string => s !== null);
+    if (childStatuses.length === 0) return null;
+    const allDone = childStatuses.every((s) => s === "completed");
+    const anyActive = childStatuses.some((s) => s === "in_progress" || s === "completed");
+    const derived = allDone ? "completed" : anyActive ? "in_progress" : "planned";
+    statusById.set(id, derived);
+    return derived;
+  };
+  for (const item of items) {
+    if (!item.parentId) deriveParent(item.id);
+  }
+
+  for (const [id, status] of statusById) {
+    const current = items.find((i: any) => i.id === id)?.status;
+    if (status !== current) {
+      await tx.scopeItem.update({ where: { id }, data: { status } });
+    }
   }
 }
 
@@ -632,6 +758,9 @@ router.delete(
           data: { sortOrder: { decrement: 1 } },
         });
         await renumberTree(tx, projectId);
+        // SetNull just unlinked the subtree's tasks — refresh the surviving
+        // ancestors' progress and derived status.
+        await recomputeScopeProgress(tx, projectId);
       });
 
       await logActivity({

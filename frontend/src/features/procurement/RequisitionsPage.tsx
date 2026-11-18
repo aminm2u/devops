@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import {
+import { useNavigate } from 'react-router-dom';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';import {
   FileText,
   Plus,
   Trash2,
@@ -11,6 +11,7 @@ import {
   ChevronUp,
   Send,
   CheckCircle,
+  ShoppingCart,
 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -34,7 +35,7 @@ import apiClient from '@/api/client';
 import { RequisitionForm } from '@/types';
 import { useAuth } from '@/hooks/useAuth';
 import { useReferenceData, toSelectOptions } from '@/hooks/useReferenceData';
-import { formatDate } from '@/lib/utils';
+import { formatDate, formatDateTime } from '@/lib/utils';
 import toast from '@/lib/toast';
 
 function formatCurrency(amount: number): string {
@@ -49,6 +50,7 @@ function formatCurrency(amount: number): string {
 
 export function RequisitionsPage() {
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const { can } = useAuth();
   // The four statuses this filter used to hard-code were a subset of the real
   // lifecycle — "under review", "in procurement" and "completed" were
@@ -163,18 +165,23 @@ export function RequisitionsPage() {
       key: 'ref',
       header: 'Ref #',
       className: 'font-mono text-sm font-medium',
-      accessor: (form) => `RF-${String(form.id).padStart(4, '0')}`,
+      // Prefer the configured number (REQ-2026-0001); legacy rows predate it.
+      accessor: (form) => form.referenceNumber || `RF-${String(form.id).padStart(4, '0')}`,
     },
     {
       key: 'division',
-      header: 'Division',
-      render: (form) => <Badge variant="outline">{form.division}</Badge>,
-    },
-    {
-      key: 'processOwner',
-      header: 'Process Owner',
-      className: 'text-muted-foreground',
-      accessor: (form) => form.processOwner || '-',
+      header: 'Division / Project',
+      render: (form) => {
+        // Three disjoint modes: departmental shows its division; project and
+        // programme show what the spend belongs to. Process Owner is legacy.
+        if (form.projectId) {
+          return <Badge variant="outline" className="text-blue-700 dark:text-blue-400">Project</Badge>;
+        }
+        if ((form as any).internalProjectId) {
+          return <Badge variant="outline" className="text-purple-700 dark:text-purple-400">Programme</Badge>;
+        }
+        return form.division ? <Badge variant="outline">{form.division}</Badge> : <span className="text-muted-foreground">—</span>;
+      },
     },
     {
       key: 'items',
@@ -214,6 +221,16 @@ export function RequisitionsPage() {
           >
             <Eye className="h-4 w-4" />
           </Button>
+          {['approved', 'in_procurement'].includes(form.status) && (
+            <Button
+              variant="ghost"
+              size="sm"
+              title="Create Purchase Order"
+              onClick={() => navigate(`/procurement/purchase-orders/new?requisitionId=${form.id}`)}
+            >
+              <ShoppingCart className="h-4 w-4" />
+            </Button>
+          )}
           {form.status === 'draft' && can('procurement.requisition.manage') && (
             <>
               <Button
@@ -344,17 +361,24 @@ export function RequisitionsPage() {
                     {form.items?.length ? (
                       <div className="space-y-1.5">
                         {form.items.map((itm, i) => (
-                          <div key={i} className="flex items-center justify-between gap-4 text-sm border-b border-border/40 pb-1.5 last:border-0 last:pb-0">
-                            <span className="truncate">
-                              <span className="text-muted-foreground mr-2">{i + 1}.</span>
-                              {itm.description}
-                            </span>
-                            <span className="whitespace-nowrap text-muted-foreground tabular-nums shrink-0">
-                              {itm.qty} × {formatCurrency(itm.unitPrice || 0)} ={' '}
-                              <span className="font-medium text-foreground">
-                                {formatCurrency(itm.qty * (itm.unitPrice || 0))}
+                          <div key={i} className="border-b border-border/40 pb-1.5 last:border-0 last:pb-0">
+                            <div className="flex items-center justify-between gap-4 text-sm">
+                              <span className="truncate">
+                                <span className="text-muted-foreground mr-2">{i + 1}.</span>
+                                {itm.description}
                               </span>
-                            </span>
+                              <span className="whitespace-nowrap text-muted-foreground tabular-nums shrink-0">
+                                {itm.qty} × {formatCurrency(itm.unitPrice || 0)} ={' '}
+                                <span className="font-medium text-foreground">
+                                  {formatCurrency(itm.qty * (itm.unitPrice || 0))}
+                                </span>
+                              </span>
+                            </div>
+                            {/* The remark is the item's longer description — it
+                                reads as a sub-line under the item name. */}
+                            {itm.remark && (
+                              <p className="pl-6 text-xs text-muted-foreground">{itm.remark}</p>
+                            )}
                           </div>
                         ))}
                       </div>
@@ -435,6 +459,29 @@ function RequisitionViewDialog({
   item: RequisitionForm;
   onClose: () => void;
 }) {
+  // The printed document carries the company identity (Settings → Company)
+  // and the requisition's configured reference number — not hard-coded text.
+  const { data: company } = useQuery({
+    queryKey: ['company-settings'],
+    queryFn: async () => {
+      const res = await apiClient.get('/settings', { params: { group: 'company' } });
+      return res.data.data as Record<string, unknown>;
+    },
+  });
+  const companyName = typeof company?.['company.name'] === 'string' ? company['company.name'] : 'MAP2U SDN BHD';
+  const companyAddress = typeof company?.['company.address'] === 'string' ? company['company.address'] : '';
+  const companyPhone = typeof company?.['company.phone'] === 'string' ? company['company.phone'] : '';
+  const companyEmail = typeof company?.['company.email'] === 'string' ? company['company.email'] : '';
+  const companyRegNo = typeof company?.['company.registrationNo'] === 'string' ? company['company.registrationNo'] : '';
+  const modeLabel = item.projectId ? 'Project' : item.internalProjectId ? 'Programme' : item.division || '-';
+
+  // The real sign-off record: every chain approver who has decided, in order.
+  // The legacy approvedByName ("Approved by chain") is only a fallback for
+  // rows approved before the chain existed.
+  const chainApprovals = (item.approvals ?? [])
+    .filter((a) => a.status === 'approved' || a.status === 'rejected')
+    .sort((a, b) => a.order - b.order);
+
   const handlePrint = () => {
     const printContent = document.getElementById('requisition-print-area');
     if (!printContent) return;
@@ -446,7 +493,7 @@ function RequisitionViewDialog({
       <!DOCTYPE html>
       <html>
       <head>
-        <title>Requisition Form RF-${String(item.id).padStart(4, '0')}</title>
+        <title>Requisition Form ${item.referenceNumber || `RF-${String(item.id).padStart(4, '0')}`}</title>
         <style>
           * { margin: 0; padding: 0; box-sizing: border-box; }
           body { font-family: 'Roboto', Arial, sans-serif; padding: 20px; color: #000; }
@@ -481,7 +528,7 @@ function RequisitionViewDialog({
     <FormDialog
       open
       onOpenChange={onClose}
-      title={`Requisition Form RF-${String(item.id).padStart(4, '0')}`}
+      title={`Requisition Form ${item.referenceNumber || `RF-${String(item.id).padStart(4, '0')}`}`}
       maxWidth="xl"
       footer={
         <div className="flex justify-end gap-2 pt-2">
@@ -495,28 +542,42 @@ function RequisitionViewDialog({
     >
 
         <div id="requisition-print-area" className="border rounded-lg p-6 bg-white text-black">
-          {/* Header */}
+          {/* Header — company identity from Settings → Company */}
           <div className="flex items-center justify-between border-b-2 border-black pb-4 mb-6">
             <div className="flex items-center gap-4">
-              <img src="/map2u-logo.png" alt="MAP2U" className="h-12" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+              <img src="/api/branding/logo" alt={companyName} className="h-12" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
               <div>
-                <h1 className="text-lg font-bold">MAP2U SDN BHD</h1>
+                <h1 className="text-lg font-bold">{companyName}</h1>
+                {companyRegNo && <div className="text-xs text-gray-600">Reg. No.: {companyRegNo}</div>}
               </div>
             </div>
             <div className="text-right text-sm">
               <div className="font-bold text-base">REQUISITION FORM</div>
-              <div>F-MAP2U-QMS-003</div>
-              <div>Rev: 00</div>
+              <div>{item.referenceNumber || `RF-${String(item.id).padStart(4, '0')}`}</div>
             </div>
           </div>
+
+          {/* Company address block */}
+          {(companyAddress || companyPhone || companyEmail) && (
+            <div className="mb-6 text-xs text-gray-700 whitespace-pre-line">
+              {companyAddress}
+              {(companyPhone || companyEmail) && (
+                <div>
+                  {[companyPhone, companyEmail].filter(Boolean).join(' · ')}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Form Info */}
           <div className="grid grid-cols-2 gap-4 mb-6 text-sm">
             <div>
-              <span className="font-bold">Division / Department:</span> {item.division}
+              <span className="font-bold">{item.projectId ? 'Project' : item.internalProjectId ? 'Programme' : 'Division / Department'}:</span>{' '}
+              {modeLabel}
             </div>
             <div>
-              <span className="font-bold">Process Owner:</span> {item.processOwner || '-'}
+              <span className="font-bold">Required Date:</span>{' '}
+              {item.requiredDate ? formatDate(item.requiredDate) : '-'}
             </div>
             {item.budgetItem && (
               <div className="col-span-2">
@@ -525,33 +586,37 @@ function RequisitionViewDialog({
             )}
           </div>
 
-          {/* Items Table */}
+          {/* Items Table — the description reads as a sub-line under each
+              item name, lighter, mirroring the expanded-row view */}
           <table className="w-full border-collapse border mb-6 text-sm">
             <thead>
               <tr className="bg-gray-100">
                 <th className="border border-black p-2 w-10">No.</th>
-                <th className="border border-black p-2">Description</th>
+                <th className="border border-black p-2">Item</th>
                 <th className="border border-black p-2 w-20">Qty</th>
                 <th className="border border-black p-2 w-28">Unit Price (RM)</th>
                 <th className="border border-black p-2 w-28">UoM</th>
-                <th className="border border-black p-2">Remark</th>
               </tr>
             </thead>
             <tbody>
               {item.items?.map((itm, idx) => (
                 <tr key={idx}>
-                  <td className="border border-black p-2 text-center">{idx + 1}</td>
-                  <td className="border border-black p-2">{itm.description}</td>
-                  <td className="border border-black p-2 text-center">{itm.qty}</td>
-                  <td className="border border-black p-2 text-right">{formatCurrency(itm.unitPrice || 0)}</td>
-                  <td className="border border-black p-2">{itm.uom || '-'}</td>
-                  <td className="border border-black p-2">{itm.remark || '-'}</td>
+                  <td className="border border-black p-2 text-center align-top">{idx + 1}</td>
+                  <td className="border border-black p-2 align-top">
+                    <div className="font-medium">{itm.description}</div>
+                    {itm.remark && (
+                      <div className="text-xs font-normal text-gray-600">{itm.remark}</div>
+                    )}
+                  </td>
+                  <td className="border border-black p-2 text-center align-top">{itm.qty}</td>
+                  <td className="border border-black p-2 text-right align-top">{formatCurrency(itm.unitPrice || 0)}</td>
+                  <td className="border border-black p-2 align-top">{itm.uom || '-'}</td>
                 </tr>
               ))}
               {(!item.items || item.items.length === 0) && (
                 <tr>
                   <td className="border border-black p-2 text-center">1</td>
-                  <td className="border border-black p-2" colSpan={5}>-</td>
+                  <td className="border border-black p-2" colSpan={4}>-</td>
                 </tr>
               )}
             </tbody>
@@ -563,34 +628,59 @@ function RequisitionViewDialog({
               <span className="font-bold">Total Estimated Cost (RM):</span>{' '}
               {formatCurrency(item.totalEstimatedCost)}
             </div>
-            <div>
-              <span className="font-bold">Required Date:</span>{' '}
-              {item.requiredDate ? formatDate(item.requiredDate) : '-'}
-            </div>
           </div>
 
           <div className="mb-6 text-sm">
             <span className="font-bold">Purpose:</span> {item.purpose || '-'}
           </div>
 
-          {/* Approval Section */}
-          <div className="grid grid-cols-2 gap-16 mt-10 text-sm">
-            <div>
-              <div className="font-bold mb-2">Requested By:</div>
-              <div className="border-b border-black h-10 mb-1"></div>
-              <div className="flex justify-between">
-                <span>{item.requestedByName || '___________________'}</span>
-                <span>{item.requestedByDate ? formatDate(item.requestedByDate) : '____/____/____'}</span>
+          {/* Approval Section — one signature block per requester + every
+              approver in the chain, with position and full timestamp */}
+          <div className="mt-10 text-sm">
+            <div className="grid grid-cols-2 gap-16">
+              <div>
+                <div className="font-bold mb-2">Requested By:</div>
+                <div className="border-b border-black h-10 mb-1"></div>
+                <div className="font-medium">{item.requestedByName || '—'}</div>
+                <div className="text-xs text-gray-600">
+                  {item.requestedByDate
+                    ? `${formatDateTime(item.requestedByDate)}`
+                    : '____/____/____'}
+                </div>
               </div>
+              {chainApprovals.length === 0 && (
+                <div>
+                  <div className="font-bold mb-2">Approved By:</div>
+                  <div className="border-b border-black h-10 mb-1"></div>
+                  <div className="font-medium">{item.approvedByName || '—'}</div>
+                  <div className="text-xs text-gray-600">
+                    {item.approvedByDate ? formatDateTime(item.approvedByDate) : '____/____/____'}
+                  </div>
+                </div>
+              )}
             </div>
-            <div>
-              <div className="font-bold mb-2">Approved By:</div>
-              <div className="border-b border-black h-10 mb-1"></div>
-              <div className="flex justify-between">
-                <span>{item.approvedByName || '___________________'}</span>
-                <span>{item.approvedByDate ? formatDate(item.approvedByDate) : '____/____/____'}</span>
+            {chainApprovals.length > 0 && (
+              <div className="mt-8">
+                <div className="font-bold mb-3">Approved By:</div>
+                <div className="grid grid-cols-2 gap-10">
+                  {chainApprovals.map((approval, index) => (
+                    <div key={approval.id}>
+                      <div className="text-xs text-gray-600 mb-1">
+                        {index + 1}. {approval.approver?.position?.name ?? 'Approver'}
+                      </div>
+                      <div className="border-b border-black h-10 mb-1"></div>
+                      <div className="font-medium">{approval.approver?.name ?? `User #${approval.approverId}`}</div>
+                      <div className="text-xs text-gray-600">
+                        {approval.respondedAt
+                          ? formatDateTime(approval.respondedAt)
+                          : 'Pending'}
+                        {approval.status === 'rejected' && ' — REJECTED'}
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
-            </div>
+            )}
           </div>
         </div>
     </FormDialog>

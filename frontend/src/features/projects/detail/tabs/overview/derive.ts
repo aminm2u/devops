@@ -8,12 +8,16 @@
 
 export interface OverviewTask {
   id: number;
+  publicId?: string | null;
   title: string;
   columnId: number;
   priority: string;
   dueDate: string | null;
   createdAt: string;
   assignees?: unknown;
+  loggedHours?: number;
+  scopeItemId?: number | null;
+  scopeItem?: { id: number; wbsNumber: string; title: string } | null;
   subtasks?: { id: number; status: string; dueDate?: string | null }[];
 }
 
@@ -407,4 +411,49 @@ export function scheduleSlipDays(project: any, completionPercent: number, now: D
   const elapsed = Math.max(0, Math.min(total, daysBetween(start, now)));
   const expectedCompletion = Math.round((elapsed / total) * 100);
   return expectedCompletion - completionPercent;
+}
+
+// ── Scope rollup ────────────────────────────────────────────────────────────
+// The scope tree is the spine: tasks deliver it, the timeline draws it, cost
+// hangs off it. The overview summarises it from the slim payload rows.
+
+export interface ScopeRollup {
+  total: number;
+  leaves: number;
+  completed: number;
+  inProgress: number;
+  overdue: number;
+  /** Mean progress across root items (parents already average children). */
+  progressPercent: number | null;
+}
+
+export function rollupScope(project: any, now: Date = new Date()): ScopeRollup {
+  const items: any[] = project.scopeItems ?? [];
+  const today = startOfDay(now);
+  const parentIds = new Set(items.map((item) => item.parentId).filter(Boolean));
+
+  const leaves = items.filter((item) => !parentIds.has(item.id));
+  const completed = leaves.filter((item) => item.status === 'completed').length;
+  const inProgress = items.filter((item) => item.status === 'in_progress').length;
+  const overdue = items.filter(
+    (item) => item.endDate && item.status !== 'completed' && startOfDay(new Date(item.endDate)) < today
+  ).length;
+
+  const roots = items.filter((item) => !item.parentId);
+  const progressValues = roots
+    .map((item) => item.progress)
+    .filter((value): value is number => value != null);
+  const progressPercent =
+    progressValues.length > 0
+      ? Math.round(progressValues.reduce((a, b) => a + b, 0) / progressValues.length)
+      : null;
+
+  return {
+    total: items.length,
+    leaves: leaves.length,
+    completed,
+    inProgress,
+    overdue,
+    progressPercent,
+  };
 }

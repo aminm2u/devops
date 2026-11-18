@@ -2,13 +2,14 @@ import {
   AlertTriangle,
   ArrowRight,
   Bug,
-  CalendarClock,
   CheckCircle2,
   Circle,
   GitPullRequestArrow,
   ListTodo,
   ShieldAlert,
   Wallet,
+  Link2,
+  Timer,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import {
@@ -21,6 +22,7 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
+import { useQuery } from '@tanstack/react-query';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { ProgressBar } from '@/components/progress-bar';
@@ -28,17 +30,19 @@ import { StatCard } from '@/components/stat-card';
 import { ChartFrame, ChartTooltip, useChartAxis } from '@/components/charts/ChartFrame';
 import { ChartEmpty, LegendSwatch } from '@/components/charts/chart-primitives';
 import { useChartTheme } from '@/components/charts/chart-theme';
+import { costingApi } from '@/api/costing';
 import { formatDate } from '@/lib/utils';
 import {
   collectRisks,
   rollupBudget,
   rollupHealth,
+  rollupScope,
   rollupTasks,
-  rollupTimeline,
   scheduleSlipDays,
   type RiskItem,
 } from './overview/derive';
-import { ProjectGantt } from './overview/ProjectGantt';
+import { buildScopeTimeline } from './timeline/derive';
+import { ScopeGantt } from './timeline/ScopeGantt';
 
 /**
  * Project overview dashboard.
@@ -53,17 +57,39 @@ export function ProjectOverviewDashboard({ project }: { project: any }) {
 
   const tasks = rollupTasks(project.tasks ?? [], project.taskColumns ?? []);
   const budget = rollupBudget(project);
-  const timeline = rollupTimeline(project);
+  const scope = rollupScope(project);
   const risks = collectRisks(project);
   const slipDays = scheduleSlipDays(project, tasks.completionPercent);
   const health = rollupHealth(risks, slipDays);
 
-  const daysRemaining =
-    project.expectedEndDate != null
-      ? Math.ceil(
-          (new Date(project.expectedEndDate).getTime() - Date.now()) / 86_400_000
-        )
-      : null;
+  // The scope Gantt reads the full costing rollup nowhere — it only needs the
+  // slim scope rows the payload carries, so it builds straight from them with
+  // the Timeline tab's own derivation. Same input, same output, one truth.
+  const scopeTimeline = buildScopeTimeline(
+    (project.scopeItems ?? []).map((item: any) => ({
+      id: item.id,
+      parentId: item.parentId,
+      wbsNumber: item.wbsNumber,
+      sortOrder: item.sortOrder,
+      title: item.title,
+      status: item.status,
+      startDate: item.startDate,
+      endDate: item.endDate,
+      roleCodes: item.roleCodes,
+      progress: item.progress,
+    }))
+  );
+
+  // Costing-sheet totals ride their own query — the fat project payload
+  // deliberately excludes the sheet, so a refetch here cannot stale against
+  // what the Costing tab shows.
+  const { data: costingData } = useQuery({
+    queryKey: ['project-costing', project.id],
+    queryFn: () => costingApi.getSheet(project.id),
+    enabled: project.id != null,
+    staleTime: 30_000,
+  });
+  const sheet = costingData?.data?.sheet;
 
   return (
     <div className="space-y-6">
@@ -89,25 +115,30 @@ export function ProjectOverviewDashboard({ project }: { project: any }) {
           valueClassName={tasks.overdue > 0 ? 'text-destructive' : undefined}
         />
         <StatCard
-          label="Budget remaining"
-          value={formatMoney(budget.remaining)}
-          caption={`${budget.utilizationPercent}% of ${formatMoney(budget.allocated)} used`}
-          icon={Wallet}
-          iconClassName="text-muted-foreground"
+          label="Scope progress"
+          value={scope.progressPercent != null ? `${scope.progressPercent}%` : '—'}
+          caption={
+            scope.total === 0
+              ? 'No scope defined yet'
+              : `${scope.completed}/${scope.leaves} work packages done${scope.overdue > 0 ? ` · ${scope.overdue} overdue` : ''}`
+          }
+          icon={Link2}
+          iconClassName={scope.overdue > 0 ? 'text-destructive' : 'text-muted-foreground'}
         />
         <StatCard
-          label={daysRemaining == null ? 'Target end' : 'Days to target'}
-          value={daysRemaining == null ? '—' : Math.abs(daysRemaining)}
-          caption={
-            daysRemaining == null
-              ? 'No target end date set'
-              : daysRemaining < 0
-                ? `Past target by ${Math.abs(daysRemaining)} days`
-                : `Due ${formatDate(project.expectedEndDate)}`
+          label="Costing plan vs actual"
+          value={
+            sheet
+              ? `${compactMoney(Number(sheet.totalPlanCost))} / ${compactMoney(Number(sheet.totalActualCost))}`
+              : '—'
           }
-          icon={CalendarClock}
-          iconClassName={daysRemaining != null && daysRemaining < 0 ? 'text-destructive' : 'text-muted-foreground'}
-          valueClassName={daysRemaining != null && daysRemaining < 0 ? 'text-destructive' : undefined}
+          caption={
+            sheet
+              ? `${sheet.status.replace(/_/g, ' ')}${Number(sheet.resourcesBudget) > 0 ? ` · resources ${compactMoney(Number(sheet.resourcesBudget))}` : ''}`
+              : 'No costing sheet yet'
+          }
+          icon={Wallet}
+          iconClassName="text-muted-foreground"
         />
       </div>
 
@@ -244,7 +275,7 @@ export function ProjectOverviewDashboard({ project }: { project: any }) {
               <p className="text-xs text-muted-foreground">Open tasks with a due date, soonest first.</p>
             </div>
             <Link
-              to={`/projects/${project.id}?tab=board`}
+              to={`/projects/${project.id}?tab=kanban`}
               className="inline-flex shrink-0 items-center gap-1 text-xs text-primary hover:underline"
             >
               Open board <ArrowRight className="h-3 w-3" />
@@ -268,10 +299,33 @@ export function ProjectOverviewDashboard({ project }: { project: any }) {
                         )}
                       </span>
                       <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-medium">{task.title}</p>
+                        <Link
+                          to={task.publicId ? `/tasks/${task.publicId}` : `/tasks/${task.id}`}
+                          className="block truncate text-sm font-medium hover:text-primary hover:underline"
+                        >
+                          {task.title}
+                        </Link>
                         <p className="text-[11px] text-muted-foreground">
                           {overdue ? 'Overdue · ' : 'Due '}
                           {formatDate(task.dueDate!)}
+                          {task.scopeItem && (
+                            <>
+                              {' · '}
+                              <span className="font-mono">{task.scopeItem.wbsNumber}</span>{' '}
+                              {task.scopeItem.title}
+                            </>
+                          )}
+                          {!!task.loggedHours && task.loggedHours > 0 && (
+                            <>
+                              {' · '}
+                              <Timer className="inline h-3 w-3 -translate-y-px" />
+                              {' '}
+                              {Number(task.loggedHours) % 1 === 0
+                                ? Number(task.loggedHours)
+                                : Number(task.loggedHours).toFixed(2)}
+                              h
+                            </>
+                          )}
                           {task.subtasks && task.subtasks.length > 0 && (
                             <>
                               {' · '}
@@ -351,18 +405,24 @@ export function ProjectOverviewDashboard({ project }: { project: any }) {
         </Card>
       </div>
 
-      {/* ── Gantt ─────────────────────────────────────────────────────── */}
+      {/* ── Gantt — scope-driven, same as the Timeline tab ────────────── */}
       <Card>
         <CardHeader className="pb-2">
           <CardTitle className="text-base">Schedule</CardTitle>
           <p className="text-xs text-muted-foreground">
-            {timeline
-              ? `${formatDate(timeline.start)} → ${formatDate(timeline.end)} · ${timeline.totalDays} days`
-              : 'Set a start date and a target end date to draw the schedule.'}
+            {scopeTimeline
+              ? `${formatDate(scopeTimeline.start)} → ${formatDate(scopeTimeline.end)} · drawn from the scope tree`
+              : 'Add start and end dates to scope items on the Scope tab to draw the schedule.'}
           </p>
+          <Link
+            to={`/projects/${project.id}?tab=timeline`}
+            className="inline-flex shrink-0 items-center gap-1 text-xs text-primary hover:underline"
+          >
+            Full timeline <ArrowRight className="h-3 w-3" />
+          </Link>
         </CardHeader>
         <CardContent>
-          <ProjectGantt timeline={timeline} />
+          <ScopeGantt timeline={scopeTimeline} />
         </CardContent>
       </Card>
 

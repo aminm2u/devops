@@ -2,14 +2,62 @@ import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcryptjs";
 import { PERMISSION_CATALOG, ROLE_PRESETS, resolvePresetPermissions } from "../src/rbac/catalog.js";
 import { MODEL_USER } from "../src/rbac/effective.js";
+import { snapshotExists, clearAll, restoreSnapshot } from "./restore-snapshot.js";
 
 const prisma = new PrismaClient();
 
 async function main() {
+  // ── Snapshot mode (default) ─────────────────────────────────────────────
+  //
+  // prisma/snapshot/data.json is a verbatim export of the live system, taken
+  // with `npm run snapshot:export`. When it ships, it IS the default state:
+  // a fresh deployment boots with today's projects, tasks, tickets and
+  // accounts — same ids, same uuid links, same passwords — rather than the
+  // generated demo data this file used to invent. Delete the snapshot file
+  // (or run with SEED_MODE=generated) to get the old behaviour.
+  const wantsGenerated = process.env.SEED_MODE === "generated";
+  if (snapshotExists() && !wantsGenerated) {
+    console.log("Seeding from snapshot (prisma/snapshot/data.json)...");
+    await clearAll();
+    await restoreSnapshot();
+    console.log("Database seeded successfully!");
+    return;
+  }
+  if (wantsGenerated) {
+    console.log("SEED_MODE=generated — using the generated demo data.");
+  }
+
   console.log("Seeding database...");
 
-  // Clean existing data (order matters for foreign keys)
+  // Clean existing data (order matters for foreign keys). Scope, costing,
+  // timesheet rules, helpdesk and task commentary hang off projects/tasks —
+  // they must go before their parents.
+  await prisma.activityLog.deleteMany();
   await prisma.approvalRequest.deleteMany();
+  await prisma.notification.deleteMany();
+  await prisma.taskAttachment.deleteMany();
+  await prisma.taskComment.deleteMany();
+  await prisma.taskActivity.deleteMany();
+  await prisma.taskSubtask.deleteMany();
+  await prisma.timeEntry.deleteMany();
+  await prisma.calendarEvent.deleteMany();
+  await prisma.microsoftAccount.deleteMany();
+  await prisma.timesheetRuleApprover.deleteMany();
+  await prisma.timesheetRuleAppliesTo.deleteMany();
+  await prisma.timesheetApprovalRule.deleteMany();
+  await prisma.costingApproval.deleteMany();
+  await prisma.costingSheet.deleteMany();
+  await prisma.costItem.deleteMany();
+  await prisma.resourceAssignment.deleteMany();
+  await prisma.costCategory.deleteMany();
+  await prisma.scopeBaseline.deleteMany();
+  await prisma.scopeItem.deleteMany();
+  await prisma.credential.deleteMany();
+  await prisma.helpdeskAttachment.deleteMany();
+  await prisma.helpdeskComment.deleteMany();
+  await prisma.helpdeskTicket.deleteMany();
+  await prisma.helpdeskPortalSession.deleteMany();
+  await prisma.helpdeskCategory.deleteMany();
   await prisma.notificationPreference.deleteMany();
   await prisma.teamMember.deleteMany();
   await prisma.team.deleteMany();
@@ -53,13 +101,13 @@ async function main() {
   await prisma.teamAssignment.deleteMany();
   await prisma.environment.deleteMany();
   await prisma.project.deleteMany();
-  await prisma.activityLog.deleteMany();
   await prisma.roleHasPermission.deleteMany();
   await prisma.modelHasRole.deleteMany();
   await prisma.modelHasPermission.deleteMany();
   await prisma.permission.deleteMany();
   await prisma.role.deleteMany();
   await prisma.user.deleteMany();
+  await prisma.setting.deleteMany();
   // Units before departments: `units.department_id` cascades, but deleting the
   // parent explicitly keeps the reset order readable rather than relying on it.
   await prisma.unit.deleteMany();

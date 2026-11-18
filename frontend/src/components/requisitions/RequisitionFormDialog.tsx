@@ -79,13 +79,18 @@ export function RequisitionFormDialog({
 }) {
   const isProjectMode = !!(projectId != null && scopeItems && scopeItems.length > 0);
   const { user } = useAuth();
-  // Divisions and units of measure are master data (Settings → Reference Data),
-  // not literals: the old arrays here had drifted to 6 of 8 divisions and 8 of
-  // 12 UoMs, so a requisition could not be raised against Finance or Operations.
+  // Division labels are reference data — resolve the stored code ("PMO") to
+  // its display name ("Project Management Office") for the Charged To line.
   const { data: divisionData } = useReferenceData('division');
+  // Units of measure are master data too (Settings → Reference Data). Division
+  // is no longer picked — departmental RFs are charged to the raiser's own
+  // department, derived server-side from their HR record.
   const { data: uomData } = useReferenceData('uom');
-  const divisions = toSelectOptions(divisionData);
   const uoms = toSelectOptions(uomData);
+  const divisionLabel = (code: string) => {
+    const entry = (divisionData ?? []).find((d) => d.value === code);
+    return entry?.label ?? code;
+  };
 
   const { data: budgetData } = useQuery({
     queryKey: ['budget-items-for-requisition'],
@@ -97,8 +102,6 @@ export function RequisitionFormDialog({
   });
 
   const [form, setForm] = useState({
-    division: item?.division || 'IT',
-    processOwner: item?.processOwner || '',
     budgetItemId: item?.budgetItemId || null as number | null,
     totalEstimatedCost: item?.totalEstimatedCost || 0,
     requiredDate: item?.requiredDate ? new Date(item.requiredDate).toISOString().split('T')[0] : '',
@@ -170,10 +173,6 @@ export function RequisitionFormDialog({
   }, 0);
 
   const handleSubmit = () => {
-    if (!isProjectMode && !form.division) {
-      toast.error('Division is required');
-      return;
-    }
     if (items.length === 0 || !items.some((i) => i.description.trim())) {
       toast.error('At least one item with a description is required');
       return;
@@ -185,12 +184,11 @@ export function RequisitionFormDialog({
 
     const payload = {
       ...form,
-      // Project spend: division/processOwner are meaningless — omitted and the
-      // server stamps PROJECT. Budget is the project; the scope item is the
-      // sub-budget and drives actual cost + utilization.
-      ...(isProjectMode
-        ? { division: undefined, processOwner: undefined, budgetItemId: null }
-        : { budgetItemId: form.budgetItemId || null }),
+      // Division is never sent: departmental RFs are charged to the raiser's
+      // department (derived server-side); project spend belongs to the project.
+      division: undefined,
+      processOwner: undefined,
+      budgetItemId: form.budgetItemId || null,
       totalEstimatedCost: calculatedTotal,
       requiredDate: form.requiredDate ? new Date(form.requiredDate + 'T00:00:00').toISOString() : null,
       items: items.filter((i) => i.description.trim()).map((i) => ({
@@ -221,40 +219,32 @@ export function RequisitionFormDialog({
       onOpenChange={onClose}
       title={item ? 'Edit Requisition Form' : 'New Requisition Form'}
       description={item ? 'Update the requisition details' : 'Create a new requisition form'}
-      maxWidth="xl"
+      maxWidth="2xl"
       onSubmit={handleSubmit}
       submitLabel={item ? 'Update' : 'Create'}
       isSubmitting={isSubmitting}
     >
       <div className="space-y-6">
-        {/* Top Section — division/process owner only for departmental
-            requisitions; project spend belongs to the project. */}
-        <div className="grid gap-4 sm:grid-cols-3">
-          {!isProjectMode && (
-            <div className="space-y-2">
-              <Label>Division / Department *</Label>
-              <Select value={form.division} onValueChange={(v) => setForm({ ...form, division: v })}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {divisions.map((d) => (
-                    <SelectItem key={d.value} value={d.value}>{d.label}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+        {/* Charged to — what this requisition actually draws from. Editing
+            shows the stored division (the RF keeps its original charge even
+            if the raiser has since moved department); a new departmental RF
+            shows the raiser's current department, derived server-side on
+            save. Project/programme RFs say so instead. */}
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div className="space-y-2">
+            <Label>Charged To</Label>
+            <div className="flex h-9 items-center rounded-md border bg-muted/30 px-3 text-sm">
+              {isProjectMode ? (
+                'Project budget — scope sub-budget below'
+              ) : item?.division ? (
+                divisionLabel(item.division)
+              ) : user?.department?.name ? (
+                user.department.name
+              ) : (
+                <span className="text-muted-foreground">Your department (derived on save)</span>
+              )}
             </div>
-          )}
-          {!isProjectMode && (
-            <div className="space-y-2">
-              <Label>Process Owner</Label>
-              <Input
-                value={form.processOwner}
-                onChange={(e) => setForm({ ...form, processOwner: e.target.value })}
-                placeholder="Enter process owner name"
-              />
-            </div>
-          )}
+          </div>
           <div className="space-y-2">
             <Label>Required Date</Label>
             <DatePicker
@@ -343,11 +333,11 @@ export function RequisitionFormDialog({
               <TableHeader>
                 <TableRow className="bg-muted/40 hover:bg-muted/40">
                   <TableHead className="w-10">No.</TableHead>
-                  <TableHead>Description *</TableHead>
+                  <TableHead>Item *</TableHead>
                   <TableHead className="w-20">Qty *</TableHead>
                   <TableHead className="w-28">Unit Price (RM) *</TableHead>
                   <TableHead className="w-28">UoM</TableHead>
-                  <TableHead>Remark</TableHead>
+                  <TableHead>Description</TableHead>
                   <TableHead className="w-10"></TableHead>
                 </TableRow>
               </TableHeader>
@@ -359,7 +349,7 @@ export function RequisitionFormDialog({
                       <Input
                         value={item.description}
                         onChange={(e) => updateItem(index, 'description', e.target.value)}
-                        placeholder="Enter description"
+                        placeholder="e.g., King Deluxe Room"
                         className="h-8 border-border/40 shadow-none"
                       />
                     </TableCell>
@@ -409,7 +399,7 @@ export function RequisitionFormDialog({
                       <Input
                         value={item.remark || ''}
                         onChange={(e) => updateItem(index, 'remark', e.target.value)}
-                        placeholder="Optional remark"
+                        placeholder="Further details of the item (optional)"
                         className="h-8 border-border/40 shadow-none"
                       />
                     </TableCell>

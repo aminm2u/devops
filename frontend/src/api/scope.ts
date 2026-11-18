@@ -21,6 +21,12 @@ export interface ScopeItem {
   planCost: string | number;
   manualPlanCost: string | number;
   actualCost: string | number;
+  // Server-derived from the kanban tasks linked to this item: logged hours
+  // across their time entries, and how many of those tasks are in a done
+  // column. Parents roll up their subtree.
+  loggedHours?: number;
+  taskCount?: number;
+  doneTaskCount?: number;
   assignee?: { id: number; name: string } | null;
 }
 

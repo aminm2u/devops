@@ -12,5 +12,5 @@
     "declarationMap": false,
     "noEmitOnError": false
   },
-  "include": ["prisma/seed.ts", "prisma/add-test-users.ts"]
+  "include": ["prisma/seed.ts", "prisma/add-test-users.ts", "prisma/restore-snapshot.ts"]
 }

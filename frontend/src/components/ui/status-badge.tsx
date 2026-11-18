@@ -90,7 +90,10 @@ export const statusBadgeClasses: Record<StatusDomain, Record<string, string>> = 
   requisition: {
     draft: gray,
     submitted: blue,
+    under_review: purple,
+    in_procurement: amber,
     approved: green,
+    completed: emerald,
     rejected: red,
   },
   helpdeskStatus: {

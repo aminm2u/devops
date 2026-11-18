@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -11,15 +12,16 @@ import { Label } from '@/components/ui/label';
 import { MultiSelect, Option } from '@/components/ui/multi-select';
 import { StatusBadge } from '@/components/ui/status-badge';
 import { DatePicker } from '@/components/ui/date-picker';
-import { Calendar, Plus, Trash2, CheckSquare } from 'lucide-react';
+import { Calendar, Plus, Trash2, CheckSquare, Clock, Link2, Sparkles } from 'lucide-react';
 import apiClient from '@/api/client';
 import toast from '@/lib/toast';
-import { TaskDetailModal } from './TaskDetailModal';
+import { GenerateTasksDialog } from './GenerateTasksDialog';
 import { useAuth } from '@/hooks/useAuth';
 import { useReferenceData, toSelectOptions } from '@/hooks/useReferenceData';
 
 export function KanbanTab({ project, refetch }: { project: any, refetch: () => void }) {
   const { can } = useAuth();
+  const navigate = useNavigate();
   // Task priority is project priority — the same four-plus-one scale the
   // project itself uses, so both read one master list.
   const { data: priorityData } = useReferenceData('project_priority');
@@ -40,16 +42,34 @@ export function KanbanTab({ project, refetch }: { project: any, refetch: () => v
   const [taskDialogOpen, setTaskDialogOpen] = useState(false);
   const [activeColId, setActiveColId] = useState<number | null>(null);
 
-  const [selectedTaskId, setSelectedTaskId] = useState<number | null>(null);
-  const [taskDetailOpen, setTaskDetailOpen] = useState(false);
+  const [generateDialogOpen, setGenerateDialogOpen] = useState(false);
 
   const [taskForm, setTaskForm] = useState({
     title: '',
     description: '',
     assignees: [] as number[],
     priority: 'medium',
-    dueDate: ''
+    dueDate: '',
+    scopeItemId: ''
   });
+
+  // Leaf scope items — the only kind a task can deliver. A parent's work is
+  // the sum of its children, so pointing a task at one would double-count it
+  // in the progress rollup.
+  const scopeLeaves = React.useMemo(() => {
+    const items = project.scopeItems || [];
+    const parentIds = new Set(items.map((i: any) => i.parentId).filter(Boolean));
+    return items.filter((i: any) => !parentIds.has(i.id));
+  }, [project.scopeItems]);
+
+  const scopeOptions = React.useMemo(
+    () =>
+      scopeLeaves.map((item: any) => ({
+        value: String(item.id),
+        label: `${item.wbsNumber} — ${item.title}`,
+      })),
+    [scopeLeaves]
+  );
 
   // Build assignee options from team members
   const assigneeOptions: Option[] = (project.teamAssignments || []).map((m: any) => ({
@@ -118,11 +138,12 @@ export function KanbanTab({ project, refetch }: { project: any, refetch: () => v
         columnId: activeColId,
         ...taskForm,
         assignees: taskForm.assignees.map(Number),
-        dueDate: taskForm.dueDate ? new Date(taskForm.dueDate).toISOString() : null
+        dueDate: taskForm.dueDate ? new Date(taskForm.dueDate).toISOString() : null,
+        scopeItemId: taskForm.scopeItemId ? Number(taskForm.scopeItemId) : null
       });
       toast.success('Task added');
       setTaskDialogOpen(false);
-      setTaskForm({ title: '', description: '', assignees: [], priority: 'medium', dueDate: '' });
+      setTaskForm({ title: '', description: '', assignees: [], priority: 'medium', dueDate: '', scopeItemId: '' });
       refetch();
     } catch (err) {
       toast.error('Failed to add task');
@@ -133,29 +154,36 @@ export function KanbanTab({ project, refetch }: { project: any, refetch: () => v
     try {
       await apiClient.delete(`/tasks/${taskId}`);
       toast.success('Task deleted');
-      setTaskDetailOpen(false);
-      setSelectedTaskId(null);
       refetch();
     } catch (err) {
       toast.error('Failed to delete task');
     }
   };
 
+  // Card click opens the full task page — the modal was retired once the
+  // page existed; the URL makes tasks linkable from calendar and chat.
   const openTaskDetail = (taskId: number, e: React.MouseEvent) => {
     e.stopPropagation(); // prevent drag
-    setSelectedTaskId(taskId);
-    setTaskDetailOpen(true);
+    const task = tasks.find((t: any) => t.id === taskId);
+    navigate(task?.publicId ? `/tasks/${task.publicId}` : `/tasks/${taskId}`);
   };
 
   return (
     <div className="h-full">
       <div className="flex justify-between mb-4">
         <h2 className="text-xl font-bold">Project Board</h2>
-        {can('task.create') && (
-          <Button onClick={() => setColDialogOpen(true)} variant="outline">
-            <Plus className="w-4 h-4 mr-2" /> Add Board
-          </Button>
-        )}
+        <div className="flex gap-2">
+          {can('task.create') && scopeLeaves.length > 0 && columns.length > 0 && (
+            <Button onClick={() => setGenerateDialogOpen(true)} variant="outline">
+              <Sparkles className="w-4 h-4 mr-2" /> Generate from Scope
+            </Button>
+          )}
+          {can('task.create') && (
+            <Button onClick={() => setColDialogOpen(true)} variant="outline">
+              <Plus className="w-4 h-4 mr-2" /> Add Board
+            </Button>
+          )}
+        </div>
       </div>
 
       <DragDropContext onDragEnd={onDragEnd}>
@@ -217,6 +245,13 @@ export function KanbanTab({ project, refetch }: { project: any, refetch: () => v
                                       </Button>
                                     )}
                                   </div>
+                                  {task.scopeItem && (
+                                    <p className="mb-1.5 flex items-center gap-1 text-[10px] text-muted-foreground">
+                                      <Link2 className="h-3 w-3 shrink-0" />
+                                      <span className="font-mono">{task.scopeItem.wbsNumber}</span>
+                                      <span className="truncate">· {task.scopeItem.title}</span>
+                                    </p>
+                                  )}
                                   {task.description && (
                                     <p className="text-xs text-muted-foreground mb-2.5 line-clamp-2">{task.description}</p>
                                   )}
@@ -249,6 +284,15 @@ export function KanbanTab({ project, refetch }: { project: any, refetch: () => v
                                         <div className="flex items-center text-xs text-muted-foreground">
                                           <CheckSquare className="w-3 h-3 mr-1" />
                                           {task.subtasks.filter((s: any) => s.status === 'done').length}/{task.subtasks.length}
+                                        </div>
+                                      )}
+                                      {!!task.loggedHours && task.loggedHours > 0 && (
+                                        <div className="flex items-center text-xs text-muted-foreground">
+                                          <Clock className="w-3 h-3 mr-1" />
+                                          {Number(task.loggedHours) % 1 === 0
+                                            ? Number(task.loggedHours)
+                                            : Number(task.loggedHours).toFixed(2)}
+                                          h
                                         </div>
                                       )}
                                       {task.dueDate && (
@@ -335,15 +379,35 @@ export function KanbanTab({ project, refetch }: { project: any, refetch: () => v
           <Label>Due Date</Label>
           <DatePicker value={taskForm.dueDate} onChange={v => setTaskForm({...taskForm, dueDate: v})} />
         </div>
+        {scopeOptions.length > 0 && (
+          <div className="space-y-2">
+            <Label>Scope item <span className="text-muted-foreground font-normal">(optional — links this task to a work package)</span></Label>
+            <Select
+              value={taskForm.scopeItemId || 'none'}
+              onValueChange={v => setTaskForm({...taskForm, scopeItemId: v === 'none' ? '' : v})}
+            >
+              <SelectTrigger><SelectValue placeholder="No scope item" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">No scope item</SelectItem>
+                {scopeOptions.map((option: { value: string; label: string }) => (
+                  <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
       </FormDialog>
 
-      {/* Task Detail Modal */}
-      <TaskDetailModal
-        taskId={selectedTaskId}
-        open={taskDetailOpen}
-        onClose={() => { setTaskDetailOpen(false); setSelectedTaskId(null); }}
-        onDelete={handleDeleteTask}
-        members={project.teamAssignments || []}
+      {/* Generate Tasks from Scope */}
+      <GenerateTasksDialog
+        open={generateDialogOpen}
+        onOpenChange={setGenerateDialogOpen}
+        projectId={project.id}
+        scopeItems={project.scopeItems || []}
+        columns={columns}
+        tasks={tasks}
+        teamAssignments={project.teamAssignments || []}
+        onGenerated={refetch}
       />
     </div>
   );

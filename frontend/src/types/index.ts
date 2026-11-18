@@ -33,6 +33,9 @@ export interface User {
   email: string;
   emailVerifiedAt?: string | null;
   isActive?: boolean;
+  /** HR record linkage — department drives requisition charge-to and approvals. */
+  departmentId?: number | null;
+  department?: { id: number; name: string; code: string } | null;
   createdAt?: string;
   updatedAt?: string;
   roles: Role[] | string[];
@@ -668,17 +671,28 @@ export interface RequisitionApprovalStep {
   order: number;
   comments: string | null;
   respondedAt: string | null;
-  approver?: { id: number; name: string; email: string };
+  approver?: {
+    id: number;
+    name: string;
+    email: string;
+    /** The approver's job title — printed on the requisition signature block. */
+    position?: { name: string } | null;
+  };
 }
 
 export interface RequisitionForm {
   id: number;
+  /** Printed reference from the `req` numbering config (REQ-2026-0001). */
+  referenceNumber?: string | null;
   division: string;
   processOwner: string | null;
   budgetItemId: number | null;
   projectId: number | null;
   /** The scope item (sub-budget) this requisition draws from — project mode. */
   scopeItemId?: number | null;
+  /** Programme linkage when raised against an internal project. */
+  internalProjectId?: number | null;
+  internalProject?: { id: number; name: string } | null;
   totalEstimatedCost: number;
   requiredDate: string | null;
   purpose: string | null;
@@ -896,6 +910,8 @@ export interface TimesheetChainStep {
 export interface CalendarTaskEvent {
   kind: 'task' | 'subtask';
   id: number;
+  /** uuid URL token — /tasks/:publicId, when the backend returned it. */
+  publicId?: string | null;
   title: string;
   dueDate: string | null;
   projectId: number;
@@ -904,6 +920,7 @@ export interface CalendarTaskEvent {
   column: string | null;
   isOverdue: boolean;
   parentTaskId: number | null;
+  parentTaskPublicId?: string | null;
 }
 
 export interface CalendarMeetingEvent {
@@ -926,11 +943,19 @@ export interface CalendarEventsResponse {
   entries: TimeEntry[];
 }
 
+/** The WBS work package a task delivers (scope ↔ kanban spine). */
+export interface TaskScopeRef {
+  id?: number;
+  wbsNumber: string;
+  title: string;
+}
+
 export interface MyTaskOption {
   id: number;
   title: string;
   projectId: number;
   projectName: string;
+  scopeItem?: TaskScopeRef | null;
   subtasks: { id: number; title: string; status: string; assigneeId: number | null }[];
 }
 
@@ -940,6 +965,7 @@ export interface EnrollableTask {
   title: string;
   projectId: number;
   projectName: string;
+  scopeItem?: TaskScopeRef | null;
   subtasks: {
     id: number;
     title: string;

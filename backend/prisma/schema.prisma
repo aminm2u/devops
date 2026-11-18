@@ -160,6 +160,7 @@ model User {
   microsoftAccount           MicrosoftAccount?
   timesheetToApprove         TimeEntry[]                   @relation("TimesheetApprover")
   subtasksAssigned           TaskSubtask[]                 @relation("SubtaskAssignee")
+  taskAttachmentsUploaded    TaskAttachment[]              @relation("TaskAttachmentUploader")
   timesheetRuleUsers         TimesheetRuleAppliesTo[]      @relation("TimesheetRuleAppliesToUser")
   timesheetRuleApprovals     TimesheetRuleApprover[]       @relation("TimesheetRuleApproverUser")
   // Team membership & approvals
@@ -661,6 +662,12 @@ model TaskColumn {
 
 model ProjectTask {
   id          Int       @id @default(autoincrement())
+  /// Stable non-sequential identifier for URLs, same pattern as User.publicId:
+  /// detail pages live at /tasks/:publicId so task records cannot be enumerated
+  /// by editing the number in the address bar. Nullable because Prisma's
+  /// `@default(uuid())` is client-side only — existing rows are filled by a
+  /// one-time backfill, new creates get it for free.
+  publicId    String?   @unique @default(uuid()) @map("public_id")
   projectId   Int       @map("project_id")
   columnId    Int       @map("column_id")
   title       String
@@ -675,6 +682,7 @@ model ProjectTask {
   project    Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
   column     TaskColumn     @relation(fields: [columnId], references: [id], onDelete: Cascade)
   comments   TaskComment[]
+  attachments TaskAttachment[]
   activities TaskActivity[]
   subtasks   TaskSubtask[]
   timeEntries TimeEntry[]
@@ -689,6 +697,9 @@ model ProjectTask {
 model TaskComment {
   id           Int      @id @default(autoincrement())
   taskId       Int      @map("task_id")
+  // Which subtask this message is about (null = the task itself) — the
+  // discussion feed groups bubbles by work item.
+  subtaskId    Int?     @map("subtask_id")
   userId       Int      @map("user_id")
   content      String   @db.Text
   workingHours Decimal? @map("working_hours") @db.Decimal(5, 2)
@@ -696,9 +707,37 @@ model TaskComment {
 
   task ProjectTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
   user User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subtask TaskSubtask? @relation(fields: [subtaskId], references: [id], onDelete: Cascade)
+  attachments TaskAttachment[]
 
   @@index([taskId])
+  @@index([subtaskId])
   @@map("task_comments")
+}
+
+/// A file posted with a task comment — same shape as HelpdeskAttachment,
+/// scoped to a project task instead of a ticket. Stored on disk under
+/// uploads/tasks/ with the display name and mime kept for the chat bubble.
+model TaskAttachment {
+  id           Int      @id @default(autoincrement())
+  taskId       Int      @map("task_id")
+  commentId    Int?     @map("comment_id")
+  filename     String
+  originalName String   @map("original_name")
+  mimeType     String   @map("mime_type")
+  size         Int
+  path         String
+  uploadedBy   Int?     @map("uploaded_by")
+  isActive     Boolean  @default(true) @map("is_active")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  task     ProjectTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  comment  TaskComment? @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  uploader User?       @relation("TaskAttachmentUploader", fields: [uploadedBy], references: [id], onDelete: SetNull)
+
+  @@index([taskId])
+  @@index([commentId])
+  @@map("task_attachments")
 }
 
 model TaskActivity {
@@ -723,7 +762,9 @@ model TaskSubtask {
   taskId      Int       @map("task_id")
   title       String
   description String?   @db.Text
-  assigneeId  Int?      @map("assignee_id")
+  // Several people can work one subtask — array of user IDs, same pattern as
+  // ProjectTask.assignees. Replaces the old single `assigneeId` (migrated).
+  assignees   Json?
   dueDate     DateTime? @map("due_date")
   status      String    @default("open") // open | in_progress | done
   position    Int       @default(0)
@@ -732,7 +773,9 @@ model TaskSubtask {
 
   task        ProjectTask  @relation(fields: [taskId], references: [id], onDelete: Cascade)
   assignee    User?        @relation("SubtaskAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  assigneeId  Int?         @map("assignee_id")
   timeEntries TimeEntry[]
+  comments    TaskComment[]
 
   @@index([taskId])
   @@index([assigneeId])
@@ -1658,10 +1701,17 @@ model Credential {
 
 model RequisitionForm {
   id                 Int       @id @default(autoincrement())
+  // Printed reference from the `req` numbering config (REQ-2026-0001);
+  // the id stays the stable API key.
+  referenceNumber    String?   @unique @map("reference_number")
   projectId          Int?      @map("project_id")
-  division           String
+  // Departmental RFs carry the raiser's division (derived from their
+  // department); project/programme RFs leave it null and use the FKs below.
+  division           String?
   processOwner       String?   @map("process_owner")
   budgetItemId       Int?      @map("budget_item_id")
+  // Programme requisitions draw from an internal project (the programme)
+  internalProjectId  Int?      @map("internal_project_id")
   totalEstimatedCost Decimal   @default(0) @map("total_estimated_cost") @db.Decimal(12, 2)
   requiredDate       DateTime? @map("required_date")
   purpose            String?   @db.Text
@@ -1687,6 +1737,7 @@ model RequisitionForm {
   items               RequisitionItem[]
   budgetItem          BudgetItem?           @relation(fields: [budgetItemId], references: [id], onDelete: SetNull)
   project             Project?              @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  internalProject     InternalProject?      @relation("RequisitionProgramme", fields: [internalProjectId], references: [id], onDelete: SetNull)
   createdByUser       User?                 @relation("RequisitionCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
   approvals           RequisitionApproval[]
   RequestForQuotation RequestForQuotation[]
@@ -1696,6 +1747,7 @@ model RequisitionForm {
   scopeItem           ScopeItem?            @relation(fields: [scopeItemId], references: [id], onDelete: SetNull)
 
   @@index([status])
+  @@index([referenceNumber])
   @@index([projectId])
   @@index([division])
   @@index([budgetItemId])
@@ -1703,6 +1755,7 @@ model RequisitionForm {
   @@index([procurementType])
   @@index([purchaseType])
   @@index([scopeItemId])
+  @@index([internalProjectId])
   @@index([isActive])
   @@map("requisition_forms")
 }
@@ -2408,6 +2461,7 @@ model InternalProject {
   vendor        Vendor?           @relation(fields: [vendorId], references: [id], onDelete: SetNull)
   budgetItem    BudgetItem?       @relation(fields: [budgetItemId], references: [id], onDelete: SetNull)
   assignedTo    User?             @relation("InternalProjectAssignedTo", fields: [assignedToId], references: [id], onDelete: SetNull)
+  requisitions  RequisitionForm[] @relation("RequisitionProgramme")
 
   @@index([status])
   @@index([type])

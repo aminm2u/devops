@@ -6,7 +6,6 @@ import {
   BarChart3,
   Building2,
   CalendarDays,
-  ClipboardCheck,
   ClipboardList,
   CreditCard,
   DollarSign,
@@ -35,10 +34,10 @@ import { RegisterPage } from '@/features/auth/RegisterPage';
 import { DashboardPage } from '@/features/dashboard/DashboardPage';
 import { CalendarPage } from '@/features/my-work/calendar/CalendarPage';
 import { TimesheetPage } from '@/features/my-work/timesheet/TimesheetPage';
-import { TimesheetApprovalsPage } from '@/features/my-work/approvals/TimesheetApprovalsPage';
 import { ApprovalsPage } from '@/features/my-work/approvals/ApprovalsPage';
 import { ProjectsPage } from '@/features/projects/ProjectsPage';
 import { ProjectDetailPage } from '@/features/projects/detail/ProjectDetailPage';
+import { TaskDetailPage } from '@/features/tasks/TaskDetailPage';
 import { InfrastructurePage } from '@/features/devops/infrastructure/InfrastructurePage';
 import { DeploymentsPage } from '@/features/devops/deployments/DeploymentsPage';
 import { IncidentsPage } from '@/features/devops/incidents/IncidentsPage';
@@ -54,6 +53,7 @@ import { RequisitionsPage } from '@/features/procurement/RequisitionsPage';
 import { RequisitionManagePage } from '@/features/procurement/RequisitionManagePage';
 import { VendorManagementPage } from '@/features/procurement/VendorManagementPage';
 import { PurchaseOrderListPage } from '@/features/procurement/PurchaseOrderListPage';
+import { PurchaseOrderFormPage } from '@/features/procurement/PurchaseOrderFormPage';
 import { PurchaseOrderDetailPage } from '@/features/procurement/PurchaseOrderDetailPage';
 import { DirectPurchaseListPage } from '@/features/procurement/DirectPurchaseListPage';
 import { GoodsReceiptListPage } from '@/features/procurement/GoodsReceiptListPage';
@@ -159,18 +159,11 @@ export const APP_ROUTES: AppRoute[] = [
     meta: {
       // The queue is personal; the audit view inside the page is a separate
       // grant that the API enforces, so the route itself only needs this one.
+      // Timesheet approvals ride in here as a module tab — there is no
+      // separate "Timesheet Approvals" destination anymore.
       title: 'Approvals',
       permission: 'approval.request.view.own',
       nav: { group: 'mywork', label: 'Approvals', icon: Inbox },
-    },
-  },
-  {
-    path: 'my-work/approvals',
-    element: <TimesheetApprovalsPage />,
-    meta: {
-      title: 'Timesheet Approvals',
-      permission: 'timesheet.entry.approve',
-      nav: { group: 'mywork', label: 'Timesheet Approvals', icon: ClipboardCheck },
     },
   },
   {
@@ -204,6 +197,14 @@ export const APP_ROUTES: AppRoute[] = [
     path: 'helpdesk/:id',
     element: <HelpdeskTicketDetailPage />,
     meta: { title: 'Ticket' },
+  },
+  // Standalone task workspace, addressed by the task's publicId uuid so task
+  // URLs cannot be enumerated. Reached from the Kanban board, the calendar or
+  // any shared link.
+  {
+    path: 'tasks/:id',
+    element: <TaskDetailPage />,
+    meta: { title: 'Task' },
   },
   {
     path: 'helpdesk/reports',
@@ -374,6 +375,11 @@ export const APP_ROUTES: AppRoute[] = [
       permission: 'procurement.po.view',
       nav: { group: 'procurement', label: 'Purchase Orders', icon: ShoppingCart },
     },
+  },
+  {
+    path: 'procurement/purchase-orders/new',
+    element: <PurchaseOrderFormPage />,
+    meta: { title: 'New Purchase Order', permission: 'procurement.po.manage' },
   },
   {
     path: 'procurement/purchase-orders/:id',

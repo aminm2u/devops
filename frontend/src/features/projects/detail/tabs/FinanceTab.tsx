@@ -1,12 +1,12 @@
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { Eye, FilePlus2, MoreVertical, Pencil, Send, Trash2 } from 'lucide-react';
+import { Eye, MoreVertical, Pencil, Send, ShoppingCart, Trash2 } from 'lucide-react';
 import { StatusBadge } from '@/components/ui/status-badge';
 import { RequisitionFormDialog } from '@/components/requisitions/RequisitionFormDialog';
 import { SpendingChart } from './finance/SpendingChart';
@@ -25,10 +25,10 @@ import type { RequisitionForm } from '@/types';
  */
 export function FinanceTab({ project, refetch }: { project: any, refetch: () => void }) {
   const { can } = useAuth();
+  const navigate = useNavigate();
   const requisitions = project.requisitionForms || [];
   const purchaseOrders = project.purchaseOrders || [];
 
-  const canCreate = can('procurement.requisition.create');
   const canManageReq = can('procurement.requisition.manage');
 
   const [reqOpen, setReqOpen] = useState(false);
@@ -166,7 +166,7 @@ export function FinanceTab({ project, refetch }: { project: any, refetch: () => 
                         <TableCell className="dark:text-gray-400 text-gray-800">{formatMYR(req.totalEstimatedCost)}</TableCell>
                         <TableCell><StatusBadge domain="requisition" value={req.status} /></TableCell>
                         <TableCell>
-                          {(canManageReq || req.status === 'draft') && (
+                          {(canManageReq || req.status === 'draft' || ['approved', 'in_procurement'].includes(req.status)) && (
                             <DropdownMenu>
                               <DropdownMenuTrigger asChild>
                                 <Button variant="ghost" size="icon" className="h-7 w-7" aria-label="Requisition actions">
@@ -193,6 +193,18 @@ export function FinanceTab({ project, refetch }: { project: any, refetch: () => 
                                       Delete
                                     </DropdownMenuItem>
                                   </>
+                                )}
+                                {['approved', 'in_procurement'].includes(req.status) && (
+                                  <DropdownMenuItem
+                                    onClick={() =>
+                                      navigate(
+                                        `/procurement/purchase-orders/new?requisitionId=${req.id}&projectId=${project.id}`
+                                      )
+                                    }
+                                  >
+                                    <ShoppingCart className="mr-2 h-3.5 w-3.5" />
+                                    Create PO
+                                  </DropdownMenuItem>
                                 )}
                               </DropdownMenuContent>
                             </DropdownMenu>

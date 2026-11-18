@@ -157,6 +157,16 @@ function renderLevel(
               {item.endDate && <span>→ {formatDate(item.endDate)}</span>}
               {item.assignee && <span>· {item.assignee.name}</span>}
               {item.progress != null && <span>· {item.progress}%</span>}
+              {!!item.taskCount && (
+                <span>
+                  · {item.doneTaskCount}/{item.taskCount} task{item.taskCount === 1 ? '' : 's'} done
+                </span>
+              )}
+              {!!item.loggedHours && (
+                <span className="font-medium text-foreground/80">
+                  · {Number(item.loggedHours) % 1 === 0 ? Number(item.loggedHours) : Number(item.loggedHours).toFixed(2)}h logged
+                </span>
+              )}
               <span className="font-medium text-foreground/80">{formatMYR(item.planCost)}</span>
             </div>
             {item.description && <p className="mt-0.5 truncate text-xs text-muted-foreground">{item.description}</p>}

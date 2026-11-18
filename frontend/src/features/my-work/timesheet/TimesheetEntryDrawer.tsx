@@ -376,6 +376,7 @@ export function TimesheetEntryDrawer({
                       {tasksForProject.map((task) => (
                         <SelectItem key={task.id} value={String(task.id)}>
                           {task.title}
+                          {task.scopeItem ? ` — ${task.scopeItem.wbsNumber} ${task.scopeItem.title}` : ''}
                         </SelectItem>
                       ))}
                     </SelectContent>

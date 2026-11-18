@@ -1,4 +1,5 @@
 import { useState, useMemo, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Calendar as BigCalendar, dateFnsLocalizer, Event as RbcEvent } from 'react-big-calendar';
 import { format, parse, startOfWeek, getDay, addDays, addMonths, addWeeks, subDays, subMonths, subWeeks, endOfWeek, endOfDay, startOfDay } from 'date-fns';
@@ -7,7 +8,6 @@ import { Video } from 'lucide-react';
 import 'react-big-calendar/lib/css/react-big-calendar.css';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { CalendarToolbar, CalendarView } from '@/components/calendar/CalendarToolbar';
-import { TaskDetailModal } from '@/features/projects/detail/tabs/TaskDetailModal';
 import { TimeEntryFormDialog } from '@/components/timesheet/TimeEntryFormDialog';
 import { useCalendarEvents } from '@/hooks/useTimeEntries';
 import { microsoftApi } from '@/api/microsoft';
@@ -108,10 +108,10 @@ function toCalEvents(
 
 export function CalendarPage() {
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const [view, setView] = useState<CalendarView>(loadDefaultView);
   const [date, setDate] = useState<Date>(new Date());
 
-  const [taskModal, setTaskModal] = useState<{ taskId: number | null; open: boolean }>({ taskId: null, open: false });
   const [entryDialog, setEntryDialog] = useState<{ entry: TimeEntry | null; open: boolean }>({ entry: null, open: false });
 
   // Range covering the visible calendar period (a little padding for month edges)
@@ -167,10 +167,14 @@ export function CalendarPage() {
     if (e.kind === 'entry') {
       setEntryDialog({ entry: e.payload as TimeEntry, open: true });
     } else {
-      const t = e.payload as CalendarTaskEvent;
-      setTaskModal({ taskId: t.kind === 'subtask' ? (t.parentTaskId ?? t.id) : t.id, open: true });
+      // Tasks open the full task page (uuid URL when the payload carries one).
+      const t = e.payload as CalendarTaskEvent & { publicId?: string | null; parentTaskPublicId?: string | null };
+      const token = t.kind === 'subtask'
+        ? (t.parentTaskPublicId ?? t.parentTaskId ?? t.id)
+        : (t.publicId ?? t.id);
+      navigate(`/tasks/${token}`);
     }
-  }, [logAttendanceMutation]);
+  }, [logAttendanceMutation, navigate]);
 
   const eventPropGetter = useCallback((event: RbcEvent) => {
     const e = event as CalEvent;
@@ -284,13 +288,6 @@ export function CalendarPage() {
           Overdue
         </span>
       </div>
-
-      <TaskDetailModal
-        taskId={taskModal.taskId}
-        open={taskModal.open}
-        onClose={() => setTaskModal({ taskId: null, open: false })}
-        onDelete={() => setTaskModal({ taskId: null, open: false })}
-      />
 
       <TimeEntryFormDialog
         open={entryDialog.open}
