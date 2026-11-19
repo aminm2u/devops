@@ -1,4 +1,5 @@
-import { AlertTriangle, Pencil, Plus } from 'lucide-react';
+import { AlertTriangle, ExternalLink, Pencil, Plus } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -38,7 +39,17 @@ export function IncidentsTab({
   return (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between">
-        <CardTitle className="text-base">Incidents</CardTitle>
+        <div className="flex items-center gap-3">
+          <CardTitle className="text-base">Incidents</CardTitle>
+          {/* Same records as the DevOps Operations queue; ?project narrows it. */}
+          <Link
+            to={`/devops/incidents?project=${project.id}`}
+            className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-primary hover:underline"
+          >
+            Open in DevOps queue
+            <ExternalLink className="h-3 w-3" />
+          </Link>
+        </div>
         {canCreate && (
           <Button size="sm" onClick={onAdd}>
             <Plus className="mr-2 h-4 w-4" />

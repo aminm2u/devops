@@ -217,6 +217,13 @@ export function ProjectDetailPage() {
   /** Anything written here invalidates the project, and usually the list too. */
   const refresh = () => {
     queryClient.invalidateQueries({ queryKey: ['project', projectId] });
+    // The DevOps Operations pages hold their own caches for the very records
+    // this page writes (nodes, incidents, deployments) — drop those too, or the
+    // module page shows a count that no longer matches what you just saved.
+    queryClient.invalidateQueries({ queryKey: ['infrastructure'] });
+    queryClient.invalidateQueries({ queryKey: ['incidents'] });
+    queryClient.invalidateQueries({ queryKey: ['deployments'] });
+    queryClient.invalidateQueries({ queryKey: ['services'] });
   };
 
   const updateMutation = useMutation({

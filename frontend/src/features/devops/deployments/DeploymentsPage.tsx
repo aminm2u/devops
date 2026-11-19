@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Rocket, Plus, Pencil, Trash2 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
@@ -51,6 +52,11 @@ interface Deployment {
 export function DeploymentsPage() {
   const queryClient = useQueryClient();
 
+  // /devops/deployments?project=<id> — deep link from a project detail tab opens
+  // the page already narrowed to that project's deployments.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const presetProject = searchParams.get('project');
+
   // Deployment states are master data, so the filter and both dialogs read the
   // same list the API validates against.
   const { data: statusData } = useReferenceData('status_deployment');
@@ -58,6 +64,18 @@ export function DeploymentsPage() {
 
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
+  const [projectFilter, setProjectFilter] = useState(presetProject ?? 'all');
+
+  // A link can arrive while the page is already mounted (e.g. switching between
+  // two projects' deployment lists from a nav menu), so the preset cannot be
+  // read only at mount time — follow the param whenever it changes.
+  useEffect(() => {
+    if (presetProject && presetProject !== projectFilter) {
+      setProjectFilter(presetProject);
+      setPage(1);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [presetProject]);
   const [teamFilter, setTeamFilter] = useState('all');
   const [page, setPage] = useState(1);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
@@ -85,11 +103,12 @@ export function DeploymentsPage() {
   const [editNotes, setEditNotes] = useState('');
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ['deployments', search, statusFilter, teamFilter, page],
+    queryKey: ['deployments', search, statusFilter, projectFilter, teamFilter, page],
     queryFn: async () => {
       const params: any = { page, limit: 20 };
       if (search) params.search = search;
       if (statusFilter !== 'all') params.status = statusFilter;
+      if (projectFilter !== 'all') params.projectId = projectFilter;
       if (teamFilter !== 'all') params.teamId = teamFilter;
       const res = await apiClient.get('/deployments', { params });
       return res.data;
@@ -113,8 +132,11 @@ export function DeploymentsPage() {
 
   const createMutation = useMutation({
     mutationFn: (d: any) => apiClient.post('/deployments', d),
-    onSuccess: () => {
+    onSuccess: (_res, variables) => {
       queryClient.invalidateQueries({ queryKey: ['deployments'] });
+      if (variables?.projectId) {
+        queryClient.invalidateQueries({ queryKey: ['project', variables.projectId] });
+      }
       setShowCreateDialog(false);
       resetCreateForm();
       toast.success('Deployment recorded');
@@ -127,6 +149,10 @@ export function DeploymentsPage() {
       apiClient.put(`/deployments/${id}`, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['deployments'] });
+      // The project detail payload embeds this deployment list.
+      if (selectedDeployment?.project?.id) {
+        queryClient.invalidateQueries({ queryKey: ['project', selectedDeployment.project.id] });
+      }
       setShowEditDialog(false);
       setSelectedDeployment(null);
       toast.success('Deployment updated');
@@ -138,6 +164,9 @@ export function DeploymentsPage() {
     mutationFn: (id: number) => apiClient.delete(`/deployments/${id}`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['deployments'] });
+      if (selectedDeployment?.project?.id) {
+        queryClient.invalidateQueries({ queryKey: ['project', selectedDeployment.project.id] });
+      }
       setShowDeleteDialog(false);
       setSelectedDeployment(null);
       toast.success('Deployment deleted');
@@ -211,7 +240,17 @@ export function DeploymentsPage() {
     {
       key: 'project',
       header: 'Project',
-      accessor: (dep) => <Badge variant="outline">{dep.project.name}</Badge>,
+      // Clickable: jumps into the project's Infrastructure tab (deployments
+      // section) — this row and that section are the same record.
+      accessor: (dep) => (
+        <Link
+          to={`/projects/${dep.project.id}?tab=infrastructure&section=deployments`}
+          className="hover:text-primary hover:underline"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <Badge variant="outline">{dep.project.name}</Badge>
+        </Link>
+      ),
       sortValue: (dep) => dep.project.name,
       sortable: true,
     },
@@ -367,6 +406,28 @@ export function DeploymentsPage() {
               </SelectContent>
             </Select>
             <TeamFilter value={teamFilter} onChange={(v) => { setTeamFilter(v); setPage(1); }} />
+            <Select
+              value={projectFilter}
+              onValueChange={(v) => {
+                setProjectFilter(v);
+                setPage(1);
+                // Keep the URL honest: ?project= describes this state.
+                const params = new URLSearchParams(searchParams);
+                if (v === 'all') params.delete('project');
+                else params.set('project', v);
+                setSearchParams(params, { replace: true });
+              }}
+            >
+              <SelectTrigger className="w-full sm:w-[170px]">
+                <SelectValue placeholder="Project" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Projects</SelectItem>
+                {projects.map((p: any) => (
+                  <SelectItem key={p.id} value={String(p.id)}>{p.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </>
         }
         pagination={{

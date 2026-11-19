@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Server,
@@ -127,6 +128,11 @@ export function InfrastructurePage() {
   const { can } = useAuth();
   const canManage = can('devops.infrastructure.manage');
 
+  // /devops/infrastructure?project=<id> — deep link from a project detail tab
+  // opens the page already narrowed to that project's nodes.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const presetProject = searchParams.get('project');
+
   // Node types and health states are master data, so infra can grow a new kind
   // of node without a release.
   const { data: typeData } = useReferenceData('infrastructure_node_type');
@@ -135,7 +141,16 @@ export function InfrastructurePage() {
   const nodeStatuses = toSelectOptions(statusData);
 
   const [search, setSearch] = useState('');
-  const [projectFilter, setProjectFilter] = useState('all');
+  const [projectFilter, setProjectFilter] = useState(presetProject ?? 'all');
+
+  // A link can arrive while the page is already mounted, so the preset cannot
+  // be read only at mount time — follow the param whenever it changes.
+  useEffect(() => {
+    if (presetProject && presetProject !== projectFilter) {
+      setProjectFilter(presetProject);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [presetProject]);
   const [typeFilter, setTypeFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
   const [teamFilter, setTeamFilter] = useState('all');
@@ -172,6 +187,7 @@ export function InfrastructurePage() {
     mutationFn: (d: any) => apiClient.post('/infrastructure', d),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['infrastructure'] });
+      invalidateProjectsTouched(nodes.map((n) => n.projectId));
       setShowFormDialog(false);
       setForm(emptyForm);
       toast.success('Node created');
@@ -184,6 +200,7 @@ export function InfrastructurePage() {
       apiClient.put(`/infrastructure/${id}`, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['infrastructure'] });
+      invalidateProjectsTouched(nodes.map((n) => n.projectId));
       setShowFormDialog(false);
       setEditingNode(null);
       setForm(emptyForm);
@@ -196,11 +213,24 @@ export function InfrastructurePage() {
     mutationFn: (id: number) => apiClient.delete(`/infrastructure/${id}`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['infrastructure'] });
+      invalidateProjectsTouched(nodes.map((n) => n.projectId));
       setShowDeleteDialog(null);
       toast.success('Node deleted');
     },
     onError: (err: any) => toast.error(err.response?.data?.message || 'Failed to delete node'),
   });
+
+  /**
+   * The project detail page embeds this same node list in its payload, so a
+   * write here would leave its Infrastructure tab showing a stale count or a
+   * deleted row until its next refetch. The set is usually one project; `new
+   * Set` keeps a bulk write from fanning out per node.
+   */
+  const invalidateProjectsTouched = (projectIds: (number | null | undefined)[]) => {
+    for (const id of new Set(projectIds)) {
+      if (id != null) queryClient.invalidateQueries({ queryKey: ['project', id] });
+    }
+  };
 
   const openCreateDialog = () => {
     setEditingNode(null);
@@ -396,7 +426,17 @@ export function InfrastructurePage() {
       </div>
       {showFilters && (
         <div className="flex gap-3 flex-wrap">
-          <Select value={projectFilter} onValueChange={setProjectFilter}>
+          <Select
+            value={projectFilter}
+            onValueChange={(v) => {
+              setProjectFilter(v);
+              // Keep the URL honest: ?project= describes this state.
+              const params = new URLSearchParams(searchParams);
+              if (v === 'all') params.delete('project');
+              else params.set('project', v);
+              setSearchParams(params, { replace: true });
+            }}
+          >
             <SelectTrigger className="w-[180px]">
               <SelectValue placeholder="Project" />
             </SelectTrigger>
@@ -431,7 +471,7 @@ export function InfrastructurePage() {
             </SelectContent>
           </Select>
           {hasActiveFilters && (
-            <Button variant="ghost" size="sm" onClick={() => { setProjectFilter('all'); setTypeFilter('all'); setStatusFilter('all'); setTeamFilter('all'); setSearch(''); }}>
+            <Button variant="ghost" size="sm" onClick={() => { setProjectFilter('all'); setTypeFilter('all'); setStatusFilter('all'); setTeamFilter('all'); setSearch(''); const params = new URLSearchParams(searchParams); params.delete('project'); setSearchParams(params, { replace: true }); }}>
               Clear
             </Button>
           )}
@@ -483,7 +523,13 @@ export function InfrastructurePage() {
                           <Layers className={cn('h-5 w-5', color.text)} />
                         </div>
                         <div>
-                          <CardTitle className="text-base font-semibold">{project.name}</CardTitle>
+                          {/* Clickable: jumps into the project's Infrastructure tab. */}
+                          <Link
+                            to={`/projects/${project.id}?tab=infrastructure&section=infrastructure`}
+                            className="hover:text-primary hover:underline"
+                          >
+                            <CardTitle className="text-base font-semibold">{project.name}</CardTitle>
+                          </Link>
                           <p className="text-xs text-muted-foreground">{project.nodes.length} node{project.nodes.length !== 1 ? 's' : ''}</p>
                         </div>
                       </div>
@@ -591,7 +637,13 @@ export function InfrastructurePage() {
                       <Layers className={cn('h-4 w-4', color.text)} />
                     </div>
                     <div>
-                      <CardTitle className="text-sm font-semibold">{project.name}</CardTitle>
+                      {/* Clickable: jumps into the project's Infrastructure tab. */}
+                      <Link
+                        to={`/projects/${project.id}?tab=infrastructure&section=infrastructure`}
+                        className="hover:text-primary hover:underline"
+                      >
+                        <CardTitle className="text-sm font-semibold">{project.name}</CardTitle>
+                      </Link>
                       <p className="text-xs text-muted-foreground">{project.nodes.length} node{project.nodes.length !== 1 ? 's' : ''}</p>
                     </div>
                   </div>

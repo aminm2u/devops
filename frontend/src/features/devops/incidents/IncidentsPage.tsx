@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, Plus } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
@@ -46,6 +47,11 @@ interface Incident {
 export function IncidentsPage() {
   const queryClient = useQueryClient();
 
+  // /devops/incidents?project=<id> — deep link from a project detail tab opens
+  // the queue already narrowed to that project's incidents.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const presetProject = searchParams.get('project');
+
   // Severity and lifecycle come from master data (Admin settings → Reference
   // data) so a new state only has to be added in one place.
   const { data: severityData } = useReferenceData('incident_severity');
@@ -57,6 +63,18 @@ export function IncidentsPage() {
   const [severityFilter, setSeverityFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
   const [teamFilter, setTeamFilter] = useState('all');
+  const [projectFilter, setProjectFilter] = useState(presetProject ?? 'all');
+
+  // A link can arrive while the page is already mounted (e.g. switching between
+  // two projects' queues from a nav menu), so the preset cannot be read only at
+  // mount time — follow the param whenever it changes.
+  useEffect(() => {
+    if (presetProject && presetProject !== projectFilter) {
+      setProjectFilter(presetProject);
+      setPage(1);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [presetProject]);
   const [teamId, setTeamId] = useState<number | null>(null);
   const [page, setPage] = useState(1);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
@@ -81,13 +99,14 @@ export function IncidentsPage() {
   });
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ['incidents', search, severityFilter, statusFilter, teamFilter, page],
+    queryKey: ['incidents', search, severityFilter, statusFilter, teamFilter, projectFilter, page],
     queryFn: async () => {
       const params: any = { page, limit: 20 };
       if (search) params.search = search;
       if (severityFilter !== 'all') params.severity = severityFilter;
       if (statusFilter !== 'all') params.status = statusFilter;
       if (teamFilter !== 'all') params.teamId = teamFilter;
+      if (projectFilter !== 'all') params.projectId = projectFilter;
       const res = await apiClient.get('/incidents', { params });
       return res.data;
     },
@@ -103,8 +122,11 @@ export function IncidentsPage() {
 
   const createMutation = useMutation({
     mutationFn: (data: any) => apiClient.post('/incidents', data),
-    onSuccess: () => {
+    onSuccess: (_res, variables) => {
       queryClient.invalidateQueries({ queryKey: ['incidents'] });
+      if (variables?.projectId) {
+        queryClient.invalidateQueries({ queryKey: ['project', variables.projectId] });
+      }
       setShowCreateDialog(false);
       resetForm();
       toast.success('Incident reported');
@@ -116,6 +138,11 @@ export function IncidentsPage() {
     mutationFn: ({ id, data }: { id: number; data: any }) => apiClient.put(`/incidents/${id}`, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['incidents'] });
+      // The project detail payload embeds this incident list; drop its cache so
+      // its Incidents tab and Overview risk list reflect the change.
+      if (showUpdateDialog?.project?.id) {
+        queryClient.invalidateQueries({ queryKey: ['project', showUpdateDialog.project.id] });
+      }
       setShowUpdateDialog(null);
       toast.success('Incident updated');
     },
@@ -168,7 +195,17 @@ export function IncidentsPage() {
     {
       key: 'project',
       header: 'Project',
-      accessor: (incident) => <Badge variant="outline">{incident.project.name}</Badge>,
+      // Clickable: jumps into the project's Incidents tab — this row and that
+      // tab are the same record, so navigation should be frictionless.
+      accessor: (incident) => (
+        <Link
+          to={`/projects/${incident.project.id}?tab=incidents`}
+          className="hover:text-primary hover:underline"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <Badge variant="outline">{incident.project.name}</Badge>
+        </Link>
+      ),
       sortValue: (incident) => incident.project.name,
       sortable: true,
     },
@@ -328,6 +365,28 @@ export function IncidentsPage() {
               </SelectContent>
             </Select>
             <TeamFilter value={teamFilter} onChange={(v) => { setTeamFilter(v); setPage(1); }} />
+            <Select
+              value={projectFilter}
+              onValueChange={(v) => {
+                setProjectFilter(v);
+                setPage(1);
+                // Keep the URL honest: ?project= describes this state.
+                const params = new URLSearchParams(searchParams);
+                if (v === 'all') params.delete('project');
+                else params.set('project', v);
+                setSearchParams(params, { replace: true });
+              }}
+            >
+              <SelectTrigger className="w-full sm:w-[170px]">
+                <SelectValue placeholder="Project" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Projects</SelectItem>
+                {projects.map((p: any) => (
+                  <SelectItem key={p.id} value={String(p.id)}>{p.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </>
         }
         pagination={{
