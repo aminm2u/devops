@@ -61,10 +61,16 @@ export function SubtaskChecklist({ taskId, subtasks, members, timeEntries = [], 
 
   const doneCount = subtasks.filter((s) => s.status === 'done').length;
 
-  const memberOptions: Option[] = members.map((m: any) => ({
-    label: m.user.name,
-    value: String(m.userId ?? m.id),
-  }));
+  // Options offer only ACTIVE members — a removed member keeps an
+  // `isActive: false` assignment row, and assigning them is rejected by the
+  // server. `members` itself stays unfiltered so `memberName` can still label
+  // a departed person left over on an older subtask.
+  const memberOptions: Option[] = members
+    .filter((m: any) => m.isActive !== false)
+    .map((m: any) => ({
+      label: m.user.name,
+      value: String(m.userId ?? m.id),
+    }));
 
   const memberName = (id: number) => {
     const m = members.find((x: any) => (x.userId ?? x.id) === id);

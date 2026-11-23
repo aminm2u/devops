@@ -1,5 +1,5 @@
 import prisma from "../config/database.js";
-import { getIO } from "../lib/socket.js";
+import { emitTaskEvent } from "../lib/socket.js";
 
 type ActivityAction =
   | "created"
@@ -21,6 +21,12 @@ interface LogTaskActivityParams {
   userId: number;
   action: ActivityAction;
   details?: Record<string, any>;
+  /**
+   * The task's project, so the live update can be scoped to the project room
+   * instead of broadcast to every connected client. Optional only for legacy
+   * call sites; omit it and the activity is persisted without a live push.
+   */
+  projectId?: number | null;
 }
 
 export async function logTaskActivity({
@@ -28,6 +34,7 @@ export async function logTaskActivity({
   userId,
   action,
   details,
+  projectId,
 }: LogTaskActivityParams) {
   try {
     const activity = await prisma.taskActivity.create({
@@ -43,7 +50,7 @@ export async function logTaskActivity({
     });
 
     try {
-      getIO().emit("task-activity", { taskId, activity });
+      emitTaskEvent(projectId, "task-activity", { taskId, activity });
     } catch (e) {}
 
     return activity;

@@ -128,3 +128,19 @@ export function emitToUser(userId: number, event: string, payload: unknown): voi
   if (!io) return;
   io.to(`user-${userId}`).emit(event, payload);
 }
+
+/**
+ * Emit a task event to everyone viewing that task's project.
+ *
+ * Task events used to be global broadcasts that each client filtered by
+ * `taskId` — every connected user received every task comment on the server.
+ * The only consumer is the task detail page, which joins `project-<id>` on
+ * mount, so scoping here is both cheaper and no less correct. Callers that
+ * cannot resolve a project id get a silent no-op rather than a throw: the
+ * task data itself has already been written, and a live update is a bonus.
+ */
+export function emitTaskEvent(projectId: number | null | undefined, event: string, payload: unknown): void {
+  if (!io) return;
+  if (!Number.isInteger(projectId) || (projectId as number) <= 0) return;
+  io.to(`project-${projectId}`).emit(event, payload);
+}

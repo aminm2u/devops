@@ -1,15 +1,15 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { Link, useNavigate, useNavigationType, useParams } from 'react-router-dom';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Textarea } from '@/components/ui/textarea';
-import { Input } from '@/components/ui/input';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Separator } from '@/components/ui/separator';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Progress } from '@/components/ui/progress';
 import { MultiSelect, Option } from '@/components/ui/multi-select';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
+import { StatusBadge } from '@/components/ui/status-badge';
+import { UserAvatar } from '@/components/ui/UserAvatar';
 import {
   Select,
   SelectContent,
@@ -19,33 +19,54 @@ import {
 } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import {
-  AlertTriangle, ArrowLeft, Calendar, Clock, MessageSquare, Send, Timer,
-  UserPlus, UserMinus, ArrowRight, Plus, Edit, Check, X,
-  ChevronDown, ChevronRight, Link2, FolderKanban, Trash2,
-  Paperclip, Download, FileText,
+  AlertTriangle, ArrowLeft, Calendar, Clock, MessageSquare, UserPlus, UserMinus,
+  ArrowRight, Plus, Edit, Check, X, ChevronDown, ChevronRight, Link2,
+  FolderKanban, Trash2, Download, FileText, Timer, Activity,
 } from 'lucide-react';
 import { DatePicker } from '@/components/ui/date-picker';
-import { todayLocal, formatRelativeTime } from '@/lib/utils';
+import { todayLocal, formatRelativeTime, cn } from '@/lib/utils';
 import apiClient from '@/api/client';
 import toast from '@/lib/toast';
 import { useSocket } from '@/hooks/useSocket';
 import { useAuth } from '@/hooks/useAuth';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { SubtaskChecklist } from '@/components/tasks/SubtaskChecklist';
+import { MessageBubble, type ChatMessage } from '@/components/chat/MessageBubble';
+import { ChatComposer, type ComposerMode, type ComposerTarget } from '@/components/chat/ChatComposer';
 
 /**
  * The full-page task workspace at /tasks/:id (publicId uuid).
  *
- * The old modal had outgrown its dialog: assignee stats, a subtask checklist
- * with per-subtask work logging, an activity timeline and a work-log composer
- * do not fit a popover. This page is that content re-laid-out — main column
- * (description, subtasks, chat-style discussion, activity) plus a sidebar
- * (scope link, assignees, due date, log-work composer) — and it is
- * URL-addressable, so a task can be linked from chat, the calendar or a
- * timesheet entry.
+ * Two zones, two jobs:
+ *
+ *   left  — the work itself: description, subtasks, activity history. Scrolls
+ *           with the page like any document.
+ *   right — the task's conversation: a permanent, independently-scrolling
+ *           Discussion pane. The task thread is the default channel and each
+ *           subtask gets its own pill, so a task owns its discussion instead
+ *           of the discussion being one collapsible box among many.
+ *
+ * One composer serves both talking and logging hours — two modes of one form,
+ * not two boxes writing into the same state (which is what the old layout did).
  *
  * Accepts a numeric id too (legacy links), same as the backend resolver.
  */
+
+/** Comments page size — mirrors the backend's default. */
+const COMMENT_PAGE = 50;
+
+const MAX_FILES = 5;
+const MAX_FILE_MB = 10;
+const ACCEPTED_LABEL = 'Images, PDF, Word, Excel, PowerPoint, text, CSV, ZIP/RAR';
+
+interface CommentPage {
+  messages: ChatMessage[];
+  hasMore: boolean;
+  nextBefore: number | null;
+}
+
+type ChannelKey = 'all' | 'task' | number;
+
 export function TaskDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -55,46 +76,33 @@ export function TaskDetailPage() {
   // the app or doing nothing.
   const navigationType = useNavigationType();
   const canGoBack = navigationType === 'PUSH';
-  const { can } = useAuth();
-  const { user } = useAuth();
+  const { can, user } = useAuth();
   const canEditTask = can('task.manage');
-
-  const handleBack = () => {
-    if (canGoBack) navigate(-1);
-    else if (task?.projectId) navigate(`/projects/${task.projectId}?tab=kanban`);
-    else navigate('/projects');
-  };
 
   const [task, setTask] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [notFound, setNotFound] = useState(false);
   const [project, setProject] = useState<any>(null);
 
-  // Work-log composer. `logSubtaskId` targets a subtask — set by the clock
-  // button on a subtask row, cleared when the user picks "the task itself".
-  const [comment, setComment] = useState('');
-  const [workingHours, setWorkingHours] = useState('');
-  const [sendingComment, setSendingComment] = useState(false);
-  const [logSubtaskId, setLogSubtaskId] = useState<number | null>(null);
-
-  // Discussion (chat-style) composer. `threadSubtaskId` is the thread the
-  // composer posts to — null = the task itself; set by the chat icon on a
-  // subtask row or by the thread picker beside the composer.
-  const [newFiles, setNewFiles] = useState<File[]>([]);
-  const [threadSubtaskId, setThreadSubtaskId] = useState<number | null>(null);
-  const [sendingMessage, setSendingMessage] = useState(false);
+  // ── Discussion ────────────────────────────────────────────────────────────
+  // Messages are paged per channel. `channelCache` keeps what each channel has
+  // loaded so switching pills is instant; `channel` is the visible one.
+  const [channel, setChannel] = useState<ChannelKey>('all');
+  const [channelCache, setChannelCache] = useState<Record<string, CommentPage>>({});
+  const [commentCounts, setCommentCounts] = useState<Record<string, number>>({});
+  const [loadingMessages, setLoadingMessages] = useState(false);
+  const [seenChannels, setSeenChannels] = useState<Record<string, number>>({});
   const [viewingAttachment, setViewingAttachment] = useState<any>(null);
-  // Collapsed thread sections (key: subtask id or 'task' for the task thread).
-  const [collapsedThreads, setCollapsedThreads] = useState<Record<string, boolean>>({});
-  const discussionEndRef = useRef<HTMLDivElement>(null);
 
-  // Same limits the backend's multer middleware enforces — kept side by side
-  // so the composer's copy and the server's rule stay honest together.
-  const MAX_FILES = 5;
-  const MAX_FILE_MB = 10;
-  const ACCEPTED_LABEL = 'Images, PDF, Word, Excel, PowerPoint, text, CSV, ZIP/RAR';
+  // ── Composer ──────────────────────────────────────────────────────────────
+  const [composerMode, setComposerMode] = useState<ComposerMode>('message');
+  const [messageDraft, setMessageDraft] = useState('');
+  const [logHours, setLogHours] = useState('');
+  const [logDraft, setLogDraft] = useState('');
+  const [newFiles, setNewFiles] = useState<File[]>([]);
+  const [posting, setPosting] = useState(false);
 
-  // Inline editors
+  // ── Inline editors ────────────────────────────────────────────────────────
   const [editAssignees, setEditAssignees] = useState(false);
   const [selectedAssignees, setSelectedAssignees] = useState<string[]>([]);
   const [savingAssignees, setSavingAssignees] = useState(false);
@@ -106,50 +114,30 @@ export function TaskDetailPage() {
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [activityOpen, setActivityOpen] = useState(false);
 
-  const { socket } = useSocket();
+  const discussionEndRef = useRef<HTMLDivElement>(null);
+  const discussionPaneRef = useRef<HTMLDivElement>(null);
+  const { socket, isConnected } = useSocket();
 
-  const effectiveMembers = project?.teamAssignments ?? [];
-  const assigneeOptions: Option[] = effectiveMembers.map((m: any) => ({
+  // Only ACTIVE members may be assigned. Removing someone flips `isActive`
+  // rather than deleting the assignment row, so an unfiltered list still
+  // offers people who have left the project — they cannot see the work, and
+  // the server rejects the assignment anyway.
+  //
+  // The checklist gets the FULL list so it can still print the name of a
+  // departed member left over on an old subtask; it filters its own options.
+  const teamMembers = project?.teamAssignments ?? [];
+  const activeMembers = useMemo(
+    () => teamMembers.filter((m: any) => m.isActive !== false),
+    [teamMembers]
+  );
+  const assigneeOptions: Option[] = activeMembers.map((m: any) => ({
     label: m.user.name,
     value: String(m.userId ?? m.id),
   }));
 
-  useEffect(() => {
-    if (id) fetchTask();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id]);
+  const channelKey = (key: ChannelKey) => String(key);
 
-  // Keep the newest chat bubble in view when the thread changes.
-  useEffect(() => {
-    discussionEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-  }, [task?.comments?.length, threadSubtaskId]);
-
-  useEffect(() => {
-    if (socket && task?.id) {
-      const handleActivity = (data: any) => {
-        if (data.taskId === task.id) {
-          setTask((prev: any) => ({
-            ...prev,
-            activities: [...(prev?.activities || []), data.activity],
-          }));
-        }
-      };
-      const handleComment = (data: any) => {
-        if (data.taskId === task.id) {
-          setTask((prev: any) => ({
-            ...prev,
-            comments: [...(prev?.comments || []), data.comment],
-          }));
-        }
-      };
-      socket.on('task-activity', handleActivity);
-      socket.on('task-comment', handleComment);
-      return () => {
-        socket.off('task-activity', handleActivity);
-        socket.off('task-comment', handleComment);
-      };
-    }
-  }, [socket, task?.id]);
+  // ── Fetching ──────────────────────────────────────────────────────────────
 
   const fetchTask = async () => {
     try {
@@ -159,6 +147,7 @@ export function TaskDetailPage() {
       const data = res.data.data;
       setTask(data);
       setSelectedAssignees((data.assignees || []).map(String));
+      setCommentCounts(data.commentCounts ?? {});
       // The board passes the team in; standalone we fetch the project once.
       try {
         const projRes = await apiClient.get(`/projects/${data.projectId}`);
@@ -173,80 +162,143 @@ export function TaskDetailPage() {
     }
   };
 
-  const handleAddComment = async () => {
-    if (!comment.trim() || !task) return;
-    try {
-      setSendingComment(true);
-      const hours = workingHours ? Math.round(parseFloat(workingHours) * 4) / 4 : 0;
+  const fetchComments = useCallback(
+    async (key: ChannelKey, opts: { before?: number; append?: boolean } = {}) => {
+      if (!task) return;
+      const cacheKey = channelKey(key);
+      setLoadingMessages(true);
+      try {
+        const params = new URLSearchParams({ channel: cacheKey, limit: String(COMMENT_PAGE) });
+        if (opts.before) params.set('before', String(opts.before));
+        const res = await apiClient.get(`/tasks/${task.id}/comments?${params.toString()}`);
+        const page: ChatMessage[] = res.data.data ?? [];
+        setChannelCache((prev) => {
+          const existing = prev[cacheKey];
+          const merged =
+            opts.append && existing
+              ? // `append` prepends an older page; dedupe by id in case the
+                // boundary row arrived through the socket meanwhile.
+                [
+                  ...page,
+                  ...existing.messages.filter((m) => !page.some((p) => p.id === m.id)),
+                ]
+              : page;
+          return {
+            ...prev,
+            [cacheKey]: { messages: merged, hasMore: !!res.data.meta?.hasMore, nextBefore: res.data.meta?.nextBefore ?? null },
+          };
+        });
+      } catch {
+        toast.error('Failed to load messages');
+      } finally {
+        setLoadingMessages(false);
+      }
+    },
+    [task?.id]
+  );
 
-      if (hours > 0) {
-        // Shared work log — same TimeEntry record as the Timesheet page.
-        // A subtask target (from the row's clock button) rides along.
-        const res = await apiClient.post('/timesheet/entries', {
-          workDate: todayLocal(),
-          hours,
-          description: comment.trim(),
-          taskId: task.id,
-          ...(logSubtaskId ? { subtaskId: logSubtaskId } : {}),
-        });
+  useEffect(() => {
+    if (id) fetchTask();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
+
+  // Load the visible channel on first need. `all` is the default view.
+  useEffect(() => {
+    if (!task) return;
+    if (!channelCache[channelKey(channel)]) fetchComments(channel);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [task?.id, channel]);
+
+  // Track "seen" so a channel pill can flag messages that arrived while you
+  // were reading another channel. Local to this session — no read receipts.
+  // Counts compare like with like: stored counts are comment totals, the seen
+  // marker is the number of loaded comments, so a paged channel that is
+  // currently open does not keep flagging itself.
+  useEffect(() => {
+    const page = channelCache[channelKey(channel)];
+    if (!page) return;
+    const total = channel === 'all'
+      ? Object.values(commentCounts).reduce((a, b) => a + b, 0)
+      : commentCounts[channelKey(channel)] ?? 0;
+    setSeenChannels((prev) => ({ ...prev, [channelKey(channel)]: total }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [channel, channelCache, commentCounts]);
+
+  // Keep the newest bubble in view when the visible channel grows.
+  const visibleMessages = channelCache[channelKey(channel)]?.messages ?? [];
+  useEffect(() => {
+    discussionEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }, [visibleMessages.length, channel]);
+
+  // ── Realtime ──────────────────────────────────────────────────────────────
+
+  useEffect(() => {
+    if (!socket || !task?.id) return;
+    // The backend scopes task events to project-<id>; without the join this
+    // page would receive nothing at all.
+    if (task.projectId) socket.emit('join-project', task.projectId);
+
+    const handleActivity = (data: any) => {
+      if (data.taskId === task.id) {
         setTask((prev: any) => ({
           ...prev,
-          timeEntries: [...(prev?.timeEntries || []), res.data.data],
-        }));
-        toast.success(
-          logSubtaskId ? 'Work logged on subtask' : 'Work logged'
-        );
-      } else {
-        // Text-only update — plain comment, no hours
-        const res = await apiClient.post(`/tasks/${task.id}/comments`, {
-          content: comment.trim(),
-        });
-        setTask((prev: any) => ({
-          ...prev,
-          comments: [...(prev?.comments || []), res.data.data],
+          activities: [...(prev?.activities || []), data.activity],
         }));
       }
-      setComment('');
-      setWorkingHours('');
-      setLogSubtaskId(null);
-    } catch {
-      toast.error('Failed to log work');
-    } finally {
-      setSendingComment(false);
-    }
-  };
+    };
+    const handleComment = (data: any) => {
+      if (data.taskId !== task.id || !data.comment) return;
+      const comment: ChatMessage = data.comment;
+      const key = comment.subtaskId == null ? 'task' : String(comment.subtaskId);
+      setCommentCounts((prev) => ({
+        ...prev,
+        task: prev.task ?? 0,
+        [key]: (prev[key] ?? 0) + 1,
+      }));
+      // Drop it into whichever caches are already loaded.
+      setChannelCache((prev) => {
+        const next = { ...prev };
+        for (const cacheKey of ['all', key]) {
+          const page = next[cacheKey];
+          if (page && !page.messages.some((m) => m.id === comment.id)) {
+            next[cacheKey] = { ...page, messages: [...page.messages, comment] };
+          }
+        }
+        return next;
+      });
+    };
+    const handleUpdate = (data: any) => {
+      if (data?.taskId === task.id || data?.task?.id === task.id) fetchTask();
+    };
 
-  /** Subtask clock button → aim the single composer at that subtask. */
-  const targetSubtask = (subtaskId: number) => {
-    setLogSubtaskId(subtaskId);
-    const el = document.getElementById('log-work-composer');
-    el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    el?.querySelector('textarea')?.focus();
-  };
+    socket.on('task-activity', handleActivity);
+    socket.on('task-comment', handleComment);
+    socket.on('task-updated', handleUpdate);
 
-  /** Subtask chat button → open that subtask's thread in the discussion. */
-  const discussSubtask = (subtaskId: number) => {
-    setThreadSubtaskId(subtaskId);
-    // The thread's messages must be visible for the reply to have context —
-    // expand it if a previous visit collapsed it.
-    setCollapsedThreads((prev) => ({ ...prev, [subtaskId]: false }));
-    setTimeout(() => {
-      const el = document.getElementById('discussion-section');
-      el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      el?.querySelector('textarea')?.focus();
-    }, 50);
-  };
+    return () => {
+      socket.off('task-activity', handleActivity);
+      socket.off('task-comment', handleComment);
+      socket.off('task-updated', handleUpdate);
+      if (task.projectId) socket.emit('leave-project', task.projectId);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [socket, task?.id, task?.projectId]);
 
-  /** Post a chat message (multipart when files ride along, JSON otherwise). */
-  const handleSendMessage = async () => {
-    if (!comment.trim() || !task) return;
+  // ── Posting ───────────────────────────────────────────────────────────────
+
+  /** Target of the next post: `all` falls back to the task itself. */
+  const targetSubtaskId: number | null =
+    typeof channel === 'number' ? channel : null;
+
+  const submitMessage = async () => {
+    if (!task || !messageDraft.trim()) return;
     try {
-      setSendingMessage(true);
+      setPosting(true);
       let res;
       if (newFiles.length > 0) {
         const form = new FormData();
-        form.append('content', comment.trim());
-        if (threadSubtaskId) form.append('subtaskId', String(threadSubtaskId));
+        form.append('content', messageDraft.trim());
+        if (targetSubtaskId != null) form.append('subtaskId', String(targetSubtaskId));
         newFiles.forEach((file) => form.append('attachments', file));
         res = await apiClient.post(`/tasks/${task.id}/comments`, form, {
           // The shared client pins Content-Type to application/json, which
@@ -257,39 +309,88 @@ export function TaskDetailPage() {
         });
       } else {
         res = await apiClient.post(`/tasks/${task.id}/comments`, {
-          content: comment.trim(),
-          subtaskId: threadSubtaskId,
+          content: messageDraft.trim(),
+          subtaskId: targetSubtaskId,
         });
       }
-      // Only keep the new bubble when it belongs to the visible thread.
-      const saved = res.data.data;
-      if (!threadSubtaskId || saved.subtaskId === threadSubtaskId) {
-        setTask((prev: any) => ({
-          ...prev,
-          comments: [...(prev?.comments || []), saved],
-        }));
-      }
-      setComment('');
+      const saved: ChatMessage = res.data.data;
+      const savedKey = saved.subtaskId == null ? 'task' : String(saved.subtaskId);
+      setCommentCounts((prev) => ({
+        ...prev,
+        task: prev.task ?? 0,
+        [savedKey]: (prev[savedKey] ?? 0) + 1,
+      }));
+      setChannelCache((prev) => {
+        const next = { ...prev };
+        for (const cacheKey of ['all', savedKey]) {
+          const page = next[cacheKey];
+          if (page && !page.messages.some((m) => m.id === saved.id)) {
+            next[cacheKey] = { ...page, messages: [...page.messages, saved] };
+          }
+        }
+        return next;
+      });
+      setMessageDraft('');
       setNewFiles([]);
     } catch {
       toast.error('Failed to send message');
     } finally {
-      setSendingMessage(false);
+      setPosting(false);
     }
+  };
+
+  const submitLog = async () => {
+    if (!task) return;
+    const hours = Math.round((Number.parseFloat(logHours || '0') || 0) * 4) / 4;
+    if (hours <= 0 || !logDraft.trim()) return;
+    try {
+      setPosting(true);
+      // Shared work log — same TimeEntry record as the Timesheet page.
+      const res = await apiClient.post('/timesheet/entries', {
+        workDate: todayLocal(),
+        hours,
+        description: logDraft.trim(),
+        taskId: task.id,
+        ...(targetSubtaskId != null ? { subtaskId: targetSubtaskId } : {}),
+      });
+      setTask((prev: any) => ({
+        ...prev,
+        timeEntries: [...(prev?.timeEntries || []), res.data.data],
+        // The header reads this scalar; keep it honest without a refetch.
+        loggedHours: Number(prev?.loggedHours || 0) + Number(res.data.data?.hours || 0),
+      }));
+      toast.success(targetSubtaskId != null ? 'Work logged on subtask' : 'Work logged');
+      setLogHours('');
+      setLogDraft('');
+    } catch {
+      toast.error('Failed to log work');
+    } finally {
+      setPosting(false);
+    }
+  };
+
+  const submitComposer = () => {
+    if (composerMode === 'log') submitLog();
+    else submitMessage();
   };
 
   const pickFiles = (picked: FileList | null) => {
     const files = Array.from(picked ?? []);
     const rejected = files.filter((f) => f.size > MAX_FILE_MB * 1024 * 1024);
     const accepted = files.filter((f) => f.size <= MAX_FILE_MB * 1024 * 1024);
-    setNewFiles((prev) => [...prev, ...accepted].slice(0, MAX_FILES));
+    // Compute the combined list before storing so the overflow check sees the
+    // array that will actually be kept, not the pre-update state.
+    const combined = [...newFiles, ...accepted];
+    setNewFiles(combined.slice(0, MAX_FILES));
     if (rejected.length > 0) {
       toast.error(`${rejected.length} file${rejected.length > 1 ? 's' : ''} skipped — over the ${MAX_FILE_MB}MB limit`);
     }
-    if (newFiles.length + accepted.length > MAX_FILES) {
+    if (combined.length > MAX_FILES) {
       toast.error(`At most ${MAX_FILES} files per message`);
     }
   };
+
+  // ── Detail editors ────────────────────────────────────────────────────────
 
   const handleSaveAssignees = async () => {
     if (!task) return;
@@ -350,18 +451,13 @@ export function TaskDetailPage() {
     }
   };
 
-  const getPriorityColor = (priority: string) => {
-    switch (priority) {
-      case 'urgent': return 'bg-red-500/15 text-red-400 border-red-500/30';
-      case 'high': return 'bg-orange-500/15 text-orange-400 border-orange-500/30';
-      case 'medium': return 'bg-yellow-500/15 text-yellow-400 border-yellow-500/30';
-      case 'low': return 'bg-green-500/15 text-green-400 border-green-500/30';
-      default: return 'bg-muted text-muted-foreground';
-    }
-  };
+  // ── Derived ───────────────────────────────────────────────────────────────
 
-  const getInitials = (name: string) =>
-    name.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2);
+  const handleBack = () => {
+    if (canGoBack) navigate(-1);
+    else if (task?.projectId) navigate(`/projects/${task.projectId}?tab=kanban`);
+    else navigate('/projects');
+  };
 
   const getActivityIcon = (action: string) => {
     switch (action) {
@@ -386,7 +482,7 @@ export function TaskDetailPage() {
       case 'moved':
         return <><strong>{userName}</strong> moved from <Badge variant="outline" className="text-[10px]">{d.from}</Badge> <ArrowRight className="inline h-3 w-3" /> <Badge variant="outline" className="text-[10px]">{d.to}</Badge></>;
       case 'commented':
-        return <><strong>{userName}</strong> commented: <em className="text-muted-foreground">"{d.preview}"</em></>;
+        return <><strong>{userName}</strong> commented: <em className="text-muted-foreground">&quot;{d.preview}&quot;</em></>;
       case 'assigned':
         return <><strong>{userName}</strong> assigned <strong>{d.assigneeName}</strong></>;
       case 'unassigned':
@@ -394,7 +490,7 @@ export function TaskDetailPage() {
       case 'updated':
         return <><strong>{userName}</strong> updated {d.fields?.join(', ')}</>;
       case 'work_logged':
-        return <><strong>{userName}</strong> logged <strong>{d.hours}h</strong> of work{d.subtaskId ? ' on a subtask' : ''}: <em className="text-muted-foreground">"{d.description}"</em></>;
+        return <><strong>{userName}</strong> logged <strong>{d.hours}h</strong> of work{d.subtaskId ? ' on a subtask' : ''}: <em className="text-muted-foreground">&quot;{d.description}&quot;</em></>;
       case 'subtask_created':
         return <><strong>{userName}</strong> added subtask <strong>{d.title}</strong></>;
       case 'subtask_updated':
@@ -412,20 +508,27 @@ export function TaskDetailPage() {
 
   const getAssigneeStats = () => {
     if (!task?.assigneeDetails) return [];
+    const userCounts: Record<string, number> = task.commentUserCounts ?? {};
     return task.assigneeDetails.map((a: any) => {
       const assignActivities = (task.activities || []).filter(
         (act: any) => act.action === 'assigned' && act.details?.assigneeId === a.id
       );
-      const userComments = (task.comments || []).filter((c: any) => c.userId === a.id);
       const userEntries = (task.timeEntries || []).filter((e: any) => e.userId === a.id);
-      const totalHoursLogged =
-        userEntries.reduce((sum: number, e: any) => sum + (parseFloat(e.hours) || 0), 0) +
-        userComments.reduce((sum: number, c: any) => sum + (parseFloat(c.workingHours) || 0), 0);
+      const totalHoursLogged = userEntries.reduce(
+        (sum: number, e: any) => sum + (parseFloat(e.hours) || 0),
+        0
+      );
       const assignedAt = assignActivities.length > 0 ? new Date(assignActivities[0].createdAt) : null;
       const hoursActive = assignedAt
         ? Math.round((Date.now() - assignedAt.getTime()) / (1000 * 60 * 60))
         : 0;
-      return { ...a, commentCount: userComments.length, totalHoursLogged, assignedAt, hoursActive };
+      return {
+        ...a,
+        commentCount: userCounts[String(a.id)] ?? 0,
+        totalHoursLogged,
+        assignedAt,
+        hoursActive,
+      };
     });
   };
 
@@ -440,32 +543,42 @@ export function TaskDetailPage() {
       .map((i: any) => ({ value: String(i.id), label: `${i.wbsNumber} — ${i.title}` }));
   }, [project?.scopeItems]);
 
-  // The conversation, grouped by work item: the task itself plus one thread
-  // per subtask. Comments and work logs weave together chronologically —
-  // "logged 2h" entries read as chat updates from the person who did them.
-  // (Above the early returns: hooks must run on every render.)
-  const threads = useMemo(() => {
-    const comments: any[] = task?.comments || [];
-    const asMessages = (task?.timeEntries || []).map((e: any) => ({
-      id: `work-${e.id}`,
-      subtaskId: e.subtaskId ?? null,
-      user: e.user,
-      content: `⏱ Logged ${Number(e.hours)}h — ${e.description}`,
-      createdAt: e.createdAt || e.workDate,
-      attachments: [],
-      isWorkLog: true,
-    }));
-    const all = [...comments, ...asMessages].sort(
-      (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
-    );
-    // Task thread = everything without a subtask; each subtask gets its own.
-    const taskThread = all.filter((m) => !m.subtaskId);
-    const subtaskThreads = (task?.subtasks || []).map((s: any) => ({
-      subtask: s,
-      messages: all.filter((m) => m.subtaskId === s.id),
-    }));
-    return { taskThread, subtaskThreads, total: all.length };
-  }, [task?.comments, task?.timeEntries, task?.subtasks]);
+  /**
+   * The conversation, grouped by work item. Comments arrive paged per channel;
+   * work logs come whole from the task payload and are woven in by timestamp so
+   * "logged 2h" entries read as chat updates from the person who did them.
+   * (Above the early returns: hooks must run on every render.)
+   */
+  const mergeChannel = useCallback(
+    (key: ChannelKey): ChatMessage[] => {
+      const comments = channelCache[channelKey(key)]?.messages ?? [];
+      // Work logs are TimeEntry rows, not comments, so they are not part of a
+      // paged comment fetch — they come whole from the task payload and are
+      // filtered to the visible channel here ('all' keeps every one).
+      const inChannel = (subtaskId: number | null | undefined) => {
+        if (key === 'all') return true;
+        if (key === 'task') return subtaskId == null;
+        return subtaskId === key;
+      };
+      const workLogs: ChatMessage[] = (task?.timeEntries || [])
+        .filter((e: any) => inChannel(e.subtaskId))
+        .map((e: any) => ({
+          id: `work-${e.id}`,
+          subtaskId: e.subtaskId ?? null,
+          user: e.user,
+          content: `⏱ Logged ${Number(e.hours)}h — ${e.description}`,
+          createdAt: e.createdAt || e.workDate,
+          attachments: [],
+          isWorkLog: true,
+        }));
+      return [...comments, ...workLogs].sort(
+        (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+      );
+    },
+    [channelCache, task?.timeEntries]
+  );
+
+  const visibleThread = useMemo(() => mergeChannel(channel), [mergeChannel, channel]);
 
   // System events only — the human conversation lives in the Discussion.
   const activityItems = useMemo(
@@ -475,6 +588,50 @@ export function TaskDetailPage() {
         .sort((a: any, b: any) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()),
     [task?.activities]
   );
+
+  // Channel pills: All, then the task itself, then each subtask.
+  const channels = useMemo(() => {
+    const subtasks = task?.subtasks || [];
+    return [
+      { key: 'all' as ChannelKey, label: 'All', count: Object.values(commentCounts).reduce((a, b) => a + b, 0) },
+      { key: 'task' as ChannelKey, label: 'Task', count: commentCounts.task ?? 0 },
+      ...subtasks.map((s: any) => ({
+        key: s.id as ChannelKey,
+        label: s.title,
+        count: commentCounts[String(s.id)] ?? 0,
+      })),
+    ];
+  }, [task?.subtasks, commentCounts]);
+
+  const composerTargets: ComposerTarget[] = useMemo(
+    () => [
+      { subtaskId: null, label: 'Task — this task itself' },
+      ...(task?.subtasks || []).map((s: any) => ({ subtaskId: s.id as number, label: s.title })),
+    ],
+    [task?.subtasks]
+  );
+
+  const composerTargetLabel =
+    targetSubtaskId == null
+      ? 'the task'
+      : task?.subtasks?.find((s: any) => s.id === targetSubtaskId)?.title ?? `Subtask #${targetSubtaskId}`;
+
+  const subtaskProgress = useMemo(() => {
+    const subtasks = task?.subtasks || [];
+    const done = subtasks.filter((s: any) => s.status === 'done').length;
+    return { done, total: subtasks.length, pct: subtasks.length ? (done / subtasks.length) * 100 : 0 };
+  }, [task?.subtasks]);
+
+  const dueTone = useMemo(() => {
+    if (!task?.dueDate) return 'text-muted-foreground';
+    const due = new Date(task.dueDate).getTime();
+    const now = Date.now();
+    if (due < now) return 'text-destructive';
+    if (due - now < 3 * 24 * 60 * 60 * 1000) return 'text-amber-500';
+    return 'text-muted-foreground';
+  }, [task?.dueDate]);
+
+  // ── Early returns ─────────────────────────────────────────────────────────
 
   if (loading && !task) {
     return (
@@ -510,6 +667,9 @@ export function TaskDetailPage() {
   if (!task) return null;
 
   const assigneeStats = getAssigneeStats();
+  const currentPage = channelCache[channelKey(channel)];
+
+  // ── Render ────────────────────────────────────────────────────────────────
 
   return (
     <div className="animate-fade-in space-y-6">
@@ -526,9 +686,7 @@ export function TaskDetailPage() {
                 {project.name}
               </Link>
             )}
-            <Badge className={`border text-[11px] px-2 py-0.5 ${getPriorityColor(task.priority)}`} variant="outline">
-              {task.priority}
-            </Badge>
+            <StatusBadge domain="helpdeskPriority" value={task.priority} />
             {task.column && (
               <Badge variant="outline" className="text-[11px] px-2 py-0.5">{task.column.name}</Badge>
             )}
@@ -545,9 +703,40 @@ export function TaskDetailPage() {
                 {Number(task.loggedHours) % 1 === 0 ? Number(task.loggedHours) : Number(task.loggedHours).toFixed(2)}h logged
               </span>
             )}
+            {subtaskProgress.total > 0 && (
+              <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <Check className="h-3.5 w-3.5" />
+                {subtaskProgress.done}/{subtaskProgress.total}
+                <Progress value={subtaskProgress.pct} className="h-1.5 w-16" />
+              </span>
+            )}
+            {task.dueDate && (
+              <span className={cn('flex items-center gap-1 text-xs', dueTone)}>
+                <Calendar className="h-3.5 w-3.5" />
+                {new Date(task.dueDate).toLocaleDateString()}
+              </span>
+            )}
           </span>
         }
       >
+        {/* Who is on this, at a glance */}
+        {assigneeStats.length > 0 && (
+          <div className="flex items-center -space-x-2 mr-1">
+            {assigneeStats.slice(0, 3).map((a: any) => (
+              <UserAvatar
+                key={a.id}
+                user={a}
+                size="sm"
+                className="h-7 w-7 ring-2 ring-background"
+              />
+            ))}
+            {assigneeStats.length > 3 && (
+              <span className="flex h-7 w-7 items-center justify-center rounded-full bg-muted text-[10px] font-medium ring-2 ring-background">
+                +{assigneeStats.length - 3}
+              </span>
+            )}
+          </div>
+        )}
         <Button
           variant="outline"
           size="sm"
@@ -570,194 +759,69 @@ export function TaskDetailPage() {
         )}
       </PageHeader>
 
-      <div className="grid gap-6 lg:grid-cols-3">
-        {/* ── Main column ─────────────────────────────────────────────── */}
-        <div className="space-y-6 lg:col-span-2">
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(360px,440px)] lg:items-start">
+        {/* ── Work column ─────────────────────────────────────────────────── */}
+        <div className="min-w-0 space-y-6">
           {task.description && (
-            <div className="bg-muted/50 rounded-lg px-4 py-3">
+            <div className="rounded-lg bg-muted/50 px-4 py-3">
               <p className="text-sm leading-relaxed whitespace-pre-wrap">{task.description}</p>
             </div>
           )}
 
-          {/* Subtasks (2-level checklist) — the clock icon aims the sidebar
-              composer at that subtask; the chat icon opens its thread */}
+          {/* Subtasks — the clock icon aims the composer at that subtask; the
+              chat icon opens its channel in the Discussion pane. */}
           <div id="subtasks-section">
             <SubtaskChecklist
               taskId={task.id}
               subtasks={task.subtasks || []}
-              members={effectiveMembers}
+              members={teamMembers}
               timeEntries={task.timeEntries || []}
               onUpdate={fetchTask}
-              onLogWork={targetSubtask}
-              onDiscuss={discussSubtask}
+              onLogWork={(subtaskId) => {
+                setChannel(subtaskId);
+                setComposerMode('log');
+                // On narrow screens the pane sits below the work column, so a
+                // clock click must also bring it into view.
+                discussionPaneRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+              }}
+              onDiscuss={(subtaskId) => {
+                setChannel(subtaskId);
+                discussionPaneRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+              }}
             />
           </div>
 
-          {/* Discussion — chat-style, grouped by work item: the task thread
-              first, then one collapsible thread per subtask. The composer
-              posts to whichever thread is selected. */}
-          <div id="discussion-section" className="rounded-lg border dark:border-gray-800 bg-card p-4">
-            <div className="flex items-center justify-between gap-2 mb-3">
-              <h4 className="text-sm font-semibold flex items-center gap-2">
-                <MessageSquare className="h-4 w-4 text-muted-foreground" />
-                Discussion
-                <Badge variant="secondary" className="text-[10px]">{threads.total}</Badge>
-              </h4>
-            </div>
-
-            {/* Task thread */}
-            <ThreadSection
-              title="Task"
-              icon={<FolderKanban className="h-3.5 w-3.5" />}
-              messages={threads.taskThread}
-              count={threads.taskThread.length}
-              collapsed={!!collapsedThreads['task']}
-              onToggle={() => setCollapsedThreads((prev) => ({ ...prev, task: !prev.task }))}
-              onSelect={() => setThreadSubtaskId(null)}
-              selected={threadSubtaskId === null}
-              mine={user?.id}
-              onViewAttachment={setViewingAttachment}
-              getInitials={getInitials}
-            />
-
-            {/* One thread per subtask */}
-            {threads.subtaskThreads.map(({ subtask, messages }: any) => (
-              <ThreadSection
-                key={subtask.id}
-                title={subtask.title}
-                icon={<Check className="h-3.5 w-3.5" />}
-                messages={messages}
-                count={messages.length}
-                collapsed={!!collapsedThreads[String(subtask.id)]}
-                onToggle={() => setCollapsedThreads((prev) => ({ ...prev, [subtask.id]: !prev[String(subtask.id)] }))}
-                onSelect={() => setThreadSubtaskId(subtask.id)}
-                selected={threadSubtaskId === subtask.id}
-                mine={user?.id}
-                onViewAttachment={setViewingAttachment}
-                getInitials={getInitials}
-              />
-            ))}
-
-            {/* Chat composer — posts to the selected thread; hours live in the
-                sidebar's log-work form, this is for talking. */}
-            <div className="border-t border-border/50 pt-3 mt-3 space-y-2">
-              <div className="flex items-center gap-2">
-                <span className="text-[11px] text-muted-foreground">Posting to:</span>
-                <Select
-                  value={threadSubtaskId ? String(threadSubtaskId) : 'task'}
-                  onValueChange={(v) => setThreadSubtaskId(v === 'task' ? null : Number(v))}
-                >
-                  <SelectTrigger className="h-7 w-auto min-w-[200px] text-xs">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="task">Task — {task.title.length > 40 ? `${task.title.slice(0, 40)}…` : task.title}</SelectItem>
-                    {(task.subtasks || []).map((s: any) => (
-                      <SelectItem key={s.id} value={String(s.id)}>{s.title}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              {newFiles.length > 0 && (
-                <div className="flex flex-wrap gap-1.5">
-                  {newFiles.map((file, index) => (
-                    <span
-                      key={`${file.name}-${index}`}
-                      className="inline-flex max-w-[240px] items-center gap-1.5 rounded-full border border-border/60 bg-muted/40 py-1 pl-2.5 pr-1 text-xs"
-                    >
-                      <Paperclip className="h-3 w-3 shrink-0 text-muted-foreground" />
-                      <span className="truncate">{file.name}</span>
-                      <span className="shrink-0 text-muted-foreground">
-                        {Math.max(1, Math.round(file.size / 1024))} KB
-                      </span>
-                      <button
-                        type="button"
-                        className="rounded-full p-0.5 hover:bg-black/10"
-                        onClick={() => setNewFiles((prev) => prev.filter((_, i) => i !== index))}
-                        title={`Remove ${file.name}`}
-                      >
-                        <X className="h-3 w-3" />
-                      </button>
-                    </span>
-                  ))}
-                </div>
-              )}
-              <div className="flex items-end gap-2">
-                <label
-                  className="flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-md border border-border/60 text-muted-foreground hover:bg-muted/60"
-                  title={`Attach files — up to ${MAX_FILES} × ${MAX_FILE_MB}MB. ${ACCEPTED_LABEL}.`}
-                >
-                  <Paperclip className="h-4 w-4" />
-                  <input
-                    type="file"
-                    multiple
-                    className="hidden"
-                    onChange={(e) => {
-                      pickFiles(e.target.files);
-                      e.target.value = '';
-                    }}
-                  />
-                </label>
-                <Textarea
-                  value={comment}
-                  onChange={(e) => setComment(e.target.value)}
-                  placeholder={threadSubtaskId ? 'Reply on this subtask…' : 'Message the team…'}
-                  rows={2}
-                  className="flex-1 resize-none"
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !e.shiftKey) {
-                      e.preventDefault();
-                      handleSendMessage();
-                    }
-                  }}
-                />
-                <Button
-                  size="sm"
-                  className="h-9"
-                  onClick={handleSendMessage}
-                  disabled={!comment.trim() || sendingMessage}
-                >
-                  <Send className="h-4 w-4" />
-                </Button>
-              </div>
-              <p className="text-[11px] text-muted-foreground">
-                {ACCEPTED_LABEL} — up to {MAX_FILES} files, {MAX_FILE_MB}MB each. Hours go in the Log work form, not here.
-              </p>
-            </div>
-          </div>
-
-          {/* Activity Timeline — system events only; conversation lives above */}
-          <div>
+          {/* Activity History — system events only; conversation lives right */}
+          <div className="rounded-xl border border-border/60 bg-card">
             <button
               onClick={() => setActivityOpen(!activityOpen)}
-              className="w-full flex items-center gap-2 text-sm font-semibold text-foreground cursor-pointer hover:text-primary transition-colors"
+              className="flex w-full items-center gap-2 px-4 py-3 text-sm font-semibold transition-colors hover:text-primary"
             >
               {activityOpen ? <ChevronDown className="h-4 w-4 text-muted-foreground" /> : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
-              <Clock className="h-4 w-4 text-muted-foreground" />
+              <Activity className="h-4 w-4 text-muted-foreground" />
               Activity History
               <Badge variant="secondary" className="ml-auto text-[10px]">{activityItems.length}</Badge>
             </button>
             {activityOpen && (
-              <div className="space-y-0 max-h-[400px] overflow-y-auto pr-2 thin-scrollbar mt-3">
+              <div className="max-h-[420px] space-y-0 overflow-y-auto border-t border-border/40 px-4 py-3 pr-2 thin-scrollbar">
                 {activityItems.length === 0 && (
-                  <p className="text-xs text-muted-foreground text-center py-4">No activity yet</p>
+                  <p className="py-4 text-center text-xs text-muted-foreground">No activity yet</p>
                 )}
                 {activityItems.map((item: any, idx: number) => (
-                  <div key={item.id ?? idx} className="flex gap-3 group">
+                  <div key={item.id ?? idx} className="flex gap-3">
                     <div className="flex flex-col items-center">
-                      <div className="w-6 h-6 rounded-full bg-muted flex items-center justify-center shrink-0">
+                      <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-muted">
                         {getActivityIcon(item.action)}
                       </div>
                       {idx < activityItems.length - 1 && (
-                        <div className="w-px flex-1 bg-border min-h-[16px]" />
+                        <div className="min-h-[16px] w-px flex-1 bg-border" />
                       )}
                     </div>
-
-                    <div className="flex-1 pb-4 min-w-0">
+                    <div className="min-w-0 flex-1 pb-4">
                       <span className="text-[11px] text-muted-foreground/70">
                         {new Date(item.createdAt).toLocaleString()}
                       </span>
-                      <p className="text-xs mt-1 leading-relaxed">
+                      <p className="mt-1 text-xs leading-relaxed">
                         {getActivityDescription(item)}
                       </p>
                     </div>
@@ -766,225 +830,283 @@ export function TaskDetailPage() {
               </div>
             )}
           </div>
-        </div>
 
-        {/* ── Sidebar ─────────────────────────────────────────────────── */}
-        <div className="space-y-5">
-          {/* Work-log composer — the one and only. Subtask rows target it
-              via their clock icon; the target chip shows where hours land. */}
-          <div
-            id="log-work-composer"
-            className={`rounded-lg border bg-card p-4 space-y-3 transition-colors ${
-              logSubtaskId ? 'border-primary/50' : 'dark:border-gray-800'
-            }`}
-          >
-            <div className="flex items-center justify-between gap-2">
-              <h4 className="text-sm font-semibold flex items-center gap-2">
-                <Timer className="h-4 w-4 text-muted-foreground" /> Log work
-              </h4>
-              {logSubtaskId ? (
-                <button
-                  type="button"
-                  onClick={() => setLogSubtaskId(null)}
-                  className="flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary hover:bg-primary/20 transition-colors"
-                  title="Click to log against the task itself"
-                >
-                  {task.subtasks?.find((s: any) => s.id === logSubtaskId)?.title ?? `Subtask #${logSubtaskId}`}
-                  <X className="h-3 w-3" />
-                </button>
-              ) : null}
-            </div>
-            <div className="flex gap-2">
-              <div className="w-20 shrink-0">
-                <Label className="text-[11px] text-muted-foreground">Hrs</Label>
-                <Input
-                  type="number"
-                  min="0"
-                  max="24"
-                  step="0.25"
-                  value={workingHours}
-                  onChange={(e) => setWorkingHours(e.target.value)}
-                  placeholder="0.0"
-                  className="h-8 text-sm"
-                />
-              </div>
-              <div className="flex-1">
-                <Label className="text-[11px] text-muted-foreground">Work done</Label>
-                <Textarea
-                  value={comment}
-                  onChange={(e) => setComment(e.target.value)}
-                  placeholder="What did you work on?"
-                  rows={3}
-                  className="resize-none"
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-                      e.preventDefault();
-                      handleAddComment();
-                    }
-                  }}
-                />
-              </div>
-            </div>
-            <div className="flex justify-end">
-              <Button
-                type="button"
-                onClick={handleAddComment}
-                disabled={!comment.trim() || sendingComment}
-                size="sm"
-                className="gap-1.5"
-              >
-                <Send className="h-3.5 w-3.5" />
-                Log Work
-              </Button>
-            </div>
-            <p className="text-[11px] text-muted-foreground">
-              {logSubtaskId
-                ? 'Hours will be logged against the selected subtask — click its chip to log on the task instead.'
-                : 'Hours are saved to your timesheet as an entry on this task; leave hours empty to post a plain comment. Use the clock icon on a subtask to log against it.'}
-            </p>
-          </div>
+          {/* Details + assignees under the work column so the Discussion pane
+              stays the full height of the screen on the right. */}
+          <div className="grid gap-4 sm:grid-cols-2">
+            {/* Details: due date + scope */}
+            <div className="space-y-4 rounded-xl border border-border/60 bg-card p-4">
+              <h4 className="text-sm font-semibold">Details</h4>
 
-          {/* Details: due date + scope */}
-          <div className="rounded-lg border dark:border-gray-800 bg-card p-4 space-y-4">
-            <h4 className="text-sm font-semibold">Details</h4>
-
-            <div className="space-y-1.5">
-              <Label className="text-xs text-muted-foreground flex items-center gap-1">
-                <Calendar className="h-3.5 w-3.5" /> Due date
-              </Label>
-              {editingDueDate ? (
-                <div className="flex items-center gap-1.5">
-                  <DatePicker value={dueDateValue} onChange={setDueDateValue} />
-                  <Button size="icon" className="h-7 w-7" onClick={handleSaveDueDate}>
-                    <Check className="h-3.5 w-3.5" />
-                  </Button>
-                  <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => setEditingDueDate(false)}>
-                    <X className="h-3.5 w-3.5" />
-                  </Button>
-                </div>
-              ) : (
-                <button
-                  onClick={() => { setDueDateValue(task.dueDate ? new Date(task.dueDate).toISOString().split('T')[0] : ''); setEditingDueDate(true); }}
-                  disabled={!canEditTask}
-                  className="flex items-center gap-1.5 text-sm hover:text-primary transition-colors disabled:cursor-default"
-                >
-                  {task.dueDate ? new Date(task.dueDate).toLocaleDateString() : 'Set due date'}
-                </button>
-              )}
-            </div>
-
-            <Separator />
-
-            <div className="space-y-1.5">
-              <Label className="text-xs text-muted-foreground flex items-center gap-1">
-                <Link2 className="h-3.5 w-3.5" /> Scope item
-              </Label>
-              {editingScope ? (
-                <div className="flex items-center gap-1.5">
-                  <Select value={scopeValue || 'none'} onValueChange={setScopeValue}>
-                    <SelectTrigger className="h-8 text-xs">
-                      <SelectValue placeholder="No scope item" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">No scope item</SelectItem>
-                      {scopeLeafOptions.map((option: { value: string; label: string }) => (
-                        <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <Button size="icon" className="h-7 w-7" onClick={handleSaveScope} disabled={savingScope}>
-                    <Check className="h-3.5 w-3.5" />
-                  </Button>
-                  <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => setEditingScope(false)}>
-                    <X className="h-3.5 w-3.5" />
-                  </Button>
-                </div>
-              ) : task.scopeItem ? (
-                <button
-                  onClick={() => { if (!canEditTask || scopeLeafOptions.length === 0) return; setScopeValue(task.scopeItem?.id ? String(task.scopeItem.id) : ''); setEditingScope(true); }}
-                  disabled={!canEditTask || scopeLeafOptions.length === 0}
-                  className="flex items-center gap-1.5 text-sm hover:text-primary transition-colors disabled:cursor-default"
-                >
-                  <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">{task.scopeItem.wbsNumber}</span>
-                  <span className="truncate">{task.scopeItem.title}</span>
-                </button>
-              ) : (
-                <button
-                  onClick={() => { if (!canEditTask) return; setScopeValue(''); setEditingScope(true); }}
-                  disabled={!canEditTask}
-                  className="text-sm text-muted-foreground hover:text-primary transition-colors disabled:cursor-default"
-                >
-                  {scopeLeafOptions.length > 0 ? 'Link a scope item' : 'No scope items on this project'}
-                </button>
-              )}
-            </div>
-          </div>
-
-          {/* Assignees */}
-          <div className="rounded-lg border dark:border-gray-800 bg-card p-4 space-y-3">
-            <div className="flex items-center justify-between">
-              <h4 className="text-sm font-semibold flex items-center gap-2">
-                <UserPlus className="h-4 w-4 text-muted-foreground" /> Assignees
-              </h4>
-              {canEditTask && (
-                <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => setEditAssignees(!editAssignees)}>
-                  {editAssignees ? 'Cancel' : 'Edit'}
-                </Button>
-              )}
-            </div>
-
-            {editAssignees ? (
-              <div className="space-y-3">
-                <MultiSelect
-                  options={assigneeOptions}
-                  selected={selectedAssignees}
-                  onChange={setSelectedAssignees}
-                  placeholder="Select team members..."
-                />
-                <Button size="sm" onClick={handleSaveAssignees} disabled={savingAssignees}>
-                  {savingAssignees ? 'Saving...' : 'Save Changes'}
-                </Button>
-              </div>
-            ) : (
-              <div className="space-y-2">
-                {assigneeStats.length > 0 ? (
-                  assigneeStats.map((a: any) => (
-                    <div key={a.id} className="flex items-center gap-3 bg-muted/50 rounded-lg p-3">
-                      <Avatar className="h-9 w-9 shrink-0">
-                        <AvatarFallback className="text-xs bg-primary/10 text-primary">
-                          {getInitials(a.name)}
-                        </AvatarFallback>
-                      </Avatar>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium leading-tight">{a.name}</p>
-                        <p className="text-[11px] text-muted-foreground truncate mt-0.5">{a.email}</p>
-                        <div className="flex items-center gap-3 mt-1.5">
-                          <span className="text-[11px] text-muted-foreground flex items-center gap-1">
-                            <MessageSquare className="h-3 w-3" />
-                            {a.commentCount} updates
-                          </span>
-                          {a.totalHoursLogged > 0 && (
-                            <span className="text-[11px] text-primary font-medium flex items-center gap-1">
-                              <Timer className="h-3 w-3" />
-                              {a.totalHoursLogged}h logged
-                            </span>
-                          )}
-                          {a.assignedAt && (
-                            <span className="text-[11px] text-muted-foreground flex items-center gap-1">
-                              <Clock className="h-3 w-3" />
-                              {a.hoursActive < 1 ? '<1' : a.hoursActive}h active
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  ))
+              <div className="space-y-1.5">
+                <Label className="flex items-center gap-1 text-xs text-muted-foreground">
+                  <Calendar className="h-3.5 w-3.5" /> Due date
+                </Label>
+                {editingDueDate ? (
+                  <div className="flex items-center gap-1.5">
+                    <DatePicker value={dueDateValue} onChange={setDueDateValue} />
+                    <Button size="icon" className="h-7 w-7" onClick={handleSaveDueDate}>
+                      <Check className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => setEditingDueDate(false)}>
+                      <X className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
                 ) : (
-                  <p className="text-xs text-muted-foreground">No one assigned yet</p>
+                  <button
+                    onClick={() => { setDueDateValue(task.dueDate ? new Date(task.dueDate).toISOString().split('T')[0] : ''); setEditingDueDate(true); }}
+                    disabled={!canEditTask}
+                    className={cn('flex items-center gap-1.5 text-sm transition-colors hover:text-primary disabled:cursor-default', dueTone)}
+                  >
+                    {task.dueDate ? new Date(task.dueDate).toLocaleDateString() : 'Set due date'}
+                  </button>
                 )}
               </div>
-            )}
+
+              <Separator />
+
+              <div className="space-y-1.5">
+                <Label className="flex items-center gap-1 text-xs text-muted-foreground">
+                  <Link2 className="h-3.5 w-3.5" /> Scope item
+                </Label>
+                {editingScope ? (
+                  <div className="flex items-center gap-1.5">
+                    <Select value={scopeValue || 'none'} onValueChange={setScopeValue}>
+                      <SelectTrigger className="h-8 text-xs">
+                        <SelectValue placeholder="No scope item" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">No scope item</SelectItem>
+                        {scopeLeafOptions.map((option: { value: string; label: string }) => (
+                          <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Button size="icon" className="h-7 w-7" onClick={handleSaveScope} disabled={savingScope}>
+                      <Check className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => setEditingScope(false)}>
+                      <X className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                ) : task.scopeItem ? (
+                  <button
+                    onClick={() => { if (!canEditTask || scopeLeafOptions.length === 0) return; setScopeValue(task.scopeItem?.id ? String(task.scopeItem.id) : ''); setEditingScope(true); }}
+                    disabled={!canEditTask || scopeLeafOptions.length === 0}
+                    className="flex items-center gap-1.5 text-sm transition-colors hover:text-primary disabled:cursor-default"
+                  >
+                    <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">{task.scopeItem.wbsNumber}</span>
+                    <span className="truncate">{task.scopeItem.title}</span>
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => { if (!canEditTask) return; setScopeValue(''); setEditingScope(true); }}
+                    disabled={!canEditTask}
+                    className="text-sm text-muted-foreground transition-colors hover:text-primary disabled:cursor-default"
+                  >
+                    {scopeLeafOptions.length > 0 ? 'Link a scope item' : 'No scope items on this project'}
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Assignees — same edit flow, avatars from the shared component */}
+            <div className="space-y-3 rounded-xl border border-border/60 bg-card p-4">
+              <div className="flex items-center justify-between">
+                <h4 className="flex items-center gap-2 text-sm font-semibold">
+                  <UserPlus className="h-4 w-4 text-muted-foreground" /> Assignees
+                </h4>
+                {canEditTask && (
+                  <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => setEditAssignees(!editAssignees)}>
+                    {editAssignees ? 'Cancel' : 'Edit'}
+                  </Button>
+                )}
+              </div>
+
+              {editAssignees ? (
+                <div className="space-y-3">
+                  <MultiSelect
+                    options={assigneeOptions}
+                    selected={selectedAssignees}
+                    onChange={setSelectedAssignees}
+                    placeholder="Select team members..."
+                  />
+                  <Button size="sm" onClick={handleSaveAssignees} disabled={savingAssignees}>
+                    {savingAssignees ? 'Saving...' : 'Save Changes'}
+                  </Button>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {assigneeStats.length > 0 ? (
+                    assigneeStats.map((a: any) => (
+                      <div key={a.id} className="flex items-center gap-3 rounded-lg bg-muted/50 p-2.5">
+                        <UserAvatar user={a} size="md" className="shrink-0" />
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-medium leading-tight">{a.name}</p>
+                          <p className="mt-0.5 truncate text-[11px] text-muted-foreground">{a.email}</p>
+                          <div className="mt-1.5 flex flex-wrap items-center gap-3">
+                            <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                              <MessageSquare className="h-3 w-3" />
+                              {a.commentCount} updates
+                            </span>
+                            {a.totalHoursLogged > 0 && (
+                              <span className="flex items-center gap-1 text-[11px] font-medium text-primary">
+                                <Timer className="h-3 w-3" />
+                                {a.totalHoursLogged}h logged
+                              </span>
+                            )}
+                            {a.assignedAt && (
+                              <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                                <Clock className="h-3 w-3" />
+                                {a.hoursActive < 1 ? '<1' : a.hoursActive}h active
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="text-xs text-muted-foreground">No one assigned yet</p>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
+        </div>
+
+        {/* ── Discussion pane ─────────────────────────────────────────────── */}
+        <div
+          ref={discussionPaneRef}
+          className="flex h-[70vh] flex-col overflow-hidden rounded-xl border border-border/60 bg-card lg:sticky lg:top-0 lg:h-[calc(100vh-7.5rem)]"
+        >
+          {/* Header */}
+          <div className="flex items-center justify-between gap-2 border-b border-border/60 px-4 py-3">
+            <h4 className="flex items-center gap-2 text-sm font-semibold">
+              <MessageSquare className="h-4 w-4 text-muted-foreground" />
+              Discussion
+              <Badge variant="secondary" className="text-[10px]">{visibleThread.length}</Badge>
+            </h4>
+            <span className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+              <span className={cn('h-1.5 w-1.5 rounded-full', isConnected ? 'bg-emerald-500' : 'bg-muted-foreground/40')} />
+              {isConnected ? 'Live' : 'Offline'}
+            </span>
+          </div>
+
+          {/* Channel pills */}
+          <div className="flex gap-1 overflow-x-auto border-b border-border/40 px-3 py-2 scrollbar-none">
+            {channels.map((c) => {
+              const active = channelKey(channel) === channelKey(c.key);
+              const cacheKey = channelKey(c.key);
+              const unseen =
+                c.count > (seenChannels[cacheKey] ?? 0) && channelKey(channel) !== cacheKey && c.count > 0;
+              return (
+                <button
+                  key={cacheKey}
+                  type="button"
+                  onClick={() => setChannel(c.key)}
+                  className={cn(
+                    'inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors',
+                    active
+                      ? 'border-primary/40 bg-primary/10 text-primary'
+                      : 'border-transparent bg-muted/60 text-muted-foreground hover:bg-muted'
+                  )}
+                  title={c.label}
+                >
+                  <span className="max-w-[140px] truncate">{c.label}</span>
+                  <span className={cn('rounded-full px-1 text-[10px]', active ? 'bg-primary/15' : 'bg-background/70')}>
+                    {c.count}
+                  </span>
+                  {unseen && <span className="h-1.5 w-1.5 rounded-full bg-primary" />}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Messages */}
+          <div className="flex-1 space-y-3 overflow-y-auto px-4 py-3 thin-scrollbar">
+            {currentPage?.hasMore && (
+              <div className="flex justify-center">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 text-[11px] text-muted-foreground"
+                  disabled={loadingMessages}
+                  onClick={() =>
+                    fetchComments(channel, { before: currentPage.nextBefore ?? undefined, append: true })
+                  }
+                >
+                  {loadingMessages ? 'Loading…' : 'Load earlier messages'}
+                </Button>
+              </div>
+            )}
+
+            {loadingMessages && !currentPage && (
+              <div className="space-y-3">
+                <Skeleton className="h-16 w-3/4 rounded-lg" />
+                <Skeleton className="ml-auto h-16 w-2/3 rounded-lg" />
+              </div>
+            )}
+
+            {!loadingMessages && visibleThread.length === 0 && (
+              <div className="flex flex-col items-center justify-center py-10 text-center">
+                <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-full bg-muted">
+                  <MessageSquare className="h-5 w-5 text-muted-foreground" />
+                </div>
+                <p className="text-sm font-medium">No messages yet</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  Start the conversation{channel === 'all' ? '' : ' in this thread'} below.
+                </p>
+              </div>
+            )}
+
+            {visibleThread.map((m) => {
+              const isMine = m.user?.id === user?.id;
+              return (
+                <div key={m.id} className="space-y-1">
+                  <MessageBubble
+                    message={m}
+                    isMine={isMine}
+                    onViewAttachment={setViewingAttachment}
+                  />
+                  <div className={cn('text-[10px] text-muted-foreground', isMine ? 'pr-9 text-right' : 'pl-9')}>
+                    {formatRelativeTime(m.createdAt)}
+                    {channel === 'all' && m.subtaskId != null && (
+                      <>
+                        {' · '}
+                        <span className="text-primary/80">
+                          {task.subtasks?.find((s: any) => s.id === m.subtaskId)?.title ?? 'subtask'}
+                        </span>
+                      </>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+            <div ref={discussionEndRef} />
+          </div>
+
+          <ChatComposer
+            mode={composerMode}
+            onModeChange={setComposerMode}
+            target={{ subtaskId: targetSubtaskId, label: composerTargetLabel }}
+            onClearTarget={() => setChannel('task')}
+            targets={composerTargets}
+            onTargetChange={(subtaskId) => setChannel(subtaskId ?? 'task')}
+            messageDraft={messageDraft}
+            onMessageDraftChange={setMessageDraft}
+            logHours={logHours}
+            onLogHoursChange={setLogHours}
+            logDraft={logDraft}
+            onLogDraftChange={setLogDraft}
+            files={newFiles}
+            onPickFiles={pickFiles}
+            onRemoveFile={(index) => setNewFiles((prev) => prev.filter((_, i) => i !== index))}
+            maxFiles={MAX_FILES}
+            maxFileMb={MAX_FILE_MB}
+            acceptedLabel={ACCEPTED_LABEL}
+            onSubmit={submitComposer}
+            isSubmitting={posting}
+          />
         </div>
       </div>
 
@@ -1059,137 +1181,6 @@ export function TaskDetailPage() {
           ) : null}
         </DialogContent>
       </Dialog>
-    </div>
-  );
-}
-
-/**
- * One collapsible thread inside the Discussion — the task itself or a
- * subtask. Bubbles are helpdesk-style (own messages right in primary,
- * others left); the header row is also the composer target selector, so
- * clicking "Reply here" points the chat input at this thread.
- */
-function ThreadSection({
-  title,
-  icon,
-  messages,
-  count,
-  collapsed,
-  onToggle,
-  onSelect,
-  selected,
-  mine,
-  onViewAttachment,
-  getInitials,
-}: {
-  title: string;
-  icon: React.ReactNode;
-  messages: any[];
-  count: number;
-  collapsed: boolean;
-  onToggle: () => void;
-  onSelect: () => void;
-  selected: boolean;
-  mine?: number;
-  onViewAttachment: (a: any) => void;
-  getInitials: (name: string) => string;
-}) {
-  const last = messages[messages.length - 1];
-  return (
-    <div className={`rounded-lg border ${selected ? 'border-primary/40' : 'border-border/50'} mb-2`}>
-      <div className="flex items-center gap-2 px-3 py-2">
-        <button
-          type="button"
-          onClick={onToggle}
-          className="text-muted-foreground hover:text-foreground"
-          aria-label={collapsed ? 'Expand thread' : 'Collapse thread'}
-        >
-          {collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-        </button>
-        <span className="text-muted-foreground">{icon}</span>
-        <button
-          type="button"
-          onClick={onSelect}
-          className={`flex-1 min-w-0 text-left text-sm truncate ${selected ? 'font-semibold text-foreground' : 'hover:text-foreground'}`}
-          title="Send replies here"
-        >
-          {title}
-        </button>
-        {count > 0 && (
-          <Badge variant="secondary" className="text-[10px] shrink-0">{count}</Badge>
-        )}
-        {last && !collapsed && (
-          <span className="hidden sm:inline text-[10px] text-muted-foreground shrink-0">
-            {formatRelativeTime(last.createdAt)}
-          </span>
-        )}
-      </div>
-
-      {!collapsed && (
-        <div className="max-h-[280px] space-y-3 overflow-y-auto pr-1 thin-scrollbar border-t border-border/40 px-3 py-3">
-          {messages.length === 0 && (
-            <p className="text-xs text-muted-foreground text-center py-3">No messages yet.</p>
-          )}
-          {messages.map((m: any) => {
-            const isMine = m.user?.id === mine;
-            return (
-              <div key={m.id} className={`flex gap-2 ${isMine ? 'justify-end' : 'justify-start'}`}>
-                {!isMine && (
-                  <Avatar className="h-7 w-7 mt-1 shrink-0">
-                    <AvatarFallback className="text-xs bg-primary/10 text-primary">
-                      {getInitials(m.user?.name || '?')}
-                    </AvatarFallback>
-                  </Avatar>
-                )}
-                <div className={`max-w-[75%] space-y-1 ${isMine ? 'items-end text-right' : ''}`}>
-                  <div className={`flex items-center gap-2 text-xs text-muted-foreground ${isMine ? 'justify-end' : ''}`}>
-                    <span className="font-medium text-foreground">{isMine ? 'You' : m.user?.name ?? 'Unknown'}</span>
-                    <span>{formatRelativeTime(m.createdAt)}</span>
-                  </div>
-                  <div
-                    className={`inline-block rounded-2xl px-3.5 py-2.5 text-left text-sm whitespace-pre-wrap break-words ${
-                      m.isWorkLog
-                        ? // Work logs keep the timer treatment — hours are facts, not chat.
-                          'border border-primary/30 bg-primary/5 rounded-bl-md'
-                        : isMine
-                          ? 'bg-primary text-primary-foreground rounded-br-md'
-                          : 'bg-muted rounded-bl-md'
-                    }`}
-                  >
-                    {m.content}
-                  </div>
-                  {m.attachments?.length > 0 && (
-                    <div className={`flex flex-wrap gap-1.5 ${isMine ? 'justify-end' : ''}`}>
-                      {m.attachments.map((a: any) => (
-                        <button
-                          key={a.id}
-                          type="button"
-                          onClick={() => onViewAttachment(a)}
-                          className="inline-flex max-w-[220px] items-center gap-1.5 rounded-lg border border-border/60 bg-background px-2.5 py-1.5 text-xs hover:bg-muted/60"
-                          title={`${a.originalName} — click to view`}
-                        >
-                          <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                          <span className="truncate">{a.originalName}</span>
-                          <span className="shrink-0 text-muted-foreground">
-                            {Math.max(1, Math.round(a.size / 1024))} KB
-                          </span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-                {isMine && (
-                  <Avatar className="h-7 w-7 mt-1 shrink-0">
-                    <AvatarFallback className="text-xs bg-primary/10 text-primary">
-                      {getInitials(m.user?.name || '?')}
-                    </AvatarFallback>
-                  </Avatar>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      )}
     </div>
   );
 }

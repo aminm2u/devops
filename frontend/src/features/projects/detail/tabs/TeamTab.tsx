@@ -11,6 +11,7 @@ import { UserPlus, UserCheck, UserMinus } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import apiClient from '@/api/client';
 import { projectsApi } from '@/api/projects';
+import { ContributionPanel } from './team/ContributionPanel';
 import toast from '@/lib/toast';
 
 /**
@@ -25,6 +26,11 @@ import toast from '@/lib/toast';
  * The old "enroll self" path went through the manage endpoint with a
  * hard-coded `projectRoleId: 3`, which matched no row — so self-enrollment had
  * never actually worked.
+ *
+ * Below the roster sits the contribution panel. It needs the *Timesheet* read
+ * capability, not project membership: hours are personal data and opening a
+ * project must not reveal what each teammate logged. The panel is therefore
+ * mounted only for viewers who hold it; the server enforces the same rule.
  */
 export function TeamTab({ project, refetch }: { project: any; refetch: () => void }) {
   const { user, can } = useAuth();
@@ -41,6 +47,8 @@ export function TeamTab({ project, refetch }: { project: any; refetch: () => voi
 
   const canManageTeam = can('project.team.manage');
   const canSelfEnroll = can('project.team.enroll.self');
+  const canReadContribution =
+    can('timesheet.entry.read.team') || can('timesheet.entry.read.all');
   const isMember = members.some((m: any) => m.userId === user?.id);
 
   useEffect(() => {
@@ -246,6 +254,17 @@ export function TeamTab({ project, refetch }: { project: any; refetch: () => voi
         isConfirming={loading}
         onConfirm={handleRemove}
       />
+
+      {/* Hours are personal data: the panel appears only for viewers who may
+          read team timesheets, and the endpoint re-checks the same capability. */}
+      {canReadContribution ? (
+        <ContributionPanel project={project} />
+      ) : (
+        <p className="rounded-lg border dark:border-gray-800 bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
+          Team contribution is based on timesheet records. Ask an administrator for the team-hours
+          permission to see it.
+        </p>
+      )}
     </div>
   );
 }

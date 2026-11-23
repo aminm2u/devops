@@ -911,4 +911,381 @@ router.delete(
   }
 );
 
+// GET /api/projects/:id/contribution?from&to — team contribution to this project
+/**
+ * Hours in a standard working day, used to convert logged hours into "person
+ * days". The platform has no per-user capacity or contracted-hours setting, so
+ * this is a single documented convention rather than a per-row lookup: change
+ * it here and every contribution report follows.
+ *
+ * Distinct from `daysWorked`, which counts the calendar dates somebody touched
+ * the project. 2.5 hours on one afternoon is 1 day worked and 0.31 person-days;
+ * keeping both stops the table from implying four days of effort had happened.
+ */
+const HOURS_PER_WORKING_DAY = 8;
+
+/**
+ * Team contribution, by member, over a date range.
+ *
+ * Reads the same `TimeEntry` rows the Timesheet module writes — there is no
+ * second hours record — and rolls them up three ways: per member (the table),
+ * per bucket (the stacked column chart) and per category (the second chart).
+ *
+ * Visibility is the Timesheet capability, not project membership: hours are
+ * personal data, and being able to open a project does not mean being able to
+ * read what each teammate logged. `timesheet.entry.read.team` (or `.all`)
+ * therefore gates the whole endpoint, and the Team tab hides the panel for
+ * anyone without it rather than showing an empty chart.
+ *
+ * Rejected entries stay in `byStatus` — an approver needs to see they exist —
+ * but are excluded from `hours`, so the contribution total is not inflated by
+ * time somebody refused to accept.
+ */
+router.get(
+  "/:id/contribution",
+  authenticate,
+  requirePermission("timesheet.entry.read.team", "timesheet.entry.read.all"),
+  async (req: RequestWithUser, res: Response, next: NextFunction) => {
+    try {
+      const projectId = parseInt(String(req.params.id), 10);
+      if (!Number.isInteger(projectId) || projectId <= 0) {
+        throw new ValidationError({ id: ["Invalid project id"] });
+      }
+
+      const project = await prisma.project.findFirst({
+        where: { id: projectId, deletedAt: null },
+        select: {
+          id: true,
+          name: true,
+          ownerId: true,
+          startDate: true,
+          expectedEndDate: true,
+          teamAssignments: {
+            include: {
+              user: { select: { id: true, name: true, email: true } },
+              projectRole: { select: { id: true, name: true } },
+            },
+          },
+        },
+      });
+      if (!project) throw new NotFoundError("Project not found");
+
+      // ---- range -----------------------------------------------------------
+      const dateRe = /^\d{4}-\d{2}-\d{2}$/;
+      const isoDay = (d: Date) => d.toISOString().substring(0, 10);
+      const addDays = (d: Date, n: number) => new Date(d.getTime() + n * 86_400_000);
+      const today = isoDay(new Date());
+
+      const rawFrom = typeof req.query.from === "string" ? req.query.from : "";
+      const rawTo = typeof req.query.to === "string" ? req.query.to : "";
+      if ((rawFrom && !dateRe.test(rawFrom)) || (rawTo && !dateRe.test(rawTo))) {
+        throw new ValidationError({ range: ["Dates must be YYYY-MM-DD"] });
+      }
+
+      const to = rawTo || today;
+      // Default window: the project's own start when it is recent, otherwise
+      // the last 90 days. A project that began years ago still opens cleanly —
+      // the 2-year guard below only rejects a range the caller typed.
+      const ninetyDaysAgo = isoDay(addDays(new Date(`${today}T00:00:00.000Z`), -89));
+      const projectStart = project.startDate ? isoDay(project.startDate) : null;
+      const defaultFrom =
+        projectStart && projectStart > ninetyDaysAgo && projectStart <= to
+          ? projectStart
+          : ninetyDaysAgo;
+      const from = rawFrom || defaultFrom;
+      if (from > to) {
+        throw new ValidationError({ range: ["The start date must be on or before the end date"] });
+      }
+      // Guard against a runaway scan from a hand-edited URL.
+      const spanDays =
+        Math.floor(
+          (Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000
+        ) + 1;
+      if (spanDays > 731) {
+        throw new ValidationError({ range: ["Pick a range of two years or less"] });
+      }
+
+      const gte = new Date(`${from}T00:00:00.000Z`);
+      const lte = new Date(`${to}T00:00:00.000Z`);
+
+      // ---- entries ---------------------------------------------------------
+      // `projectId` is denormalised on the entry; the task relation catches
+      // rows written before that column was populated.
+      const entries = await prisma.timeEntry.findMany({
+        where: {
+          deletedAt: null,
+          workDate: { gte, lte },
+          OR: [{ projectId }, { task: { projectId } }],
+        },
+        select: {
+          id: true,
+          userId: true,
+          workDate: true,
+          hours: true,
+          status: true,
+          categoryValue: true,
+          taskId: true,
+          task: { select: { id: true, title: true } },
+          user: { select: { id: true, name: true, email: true } },
+        },
+        orderBy: { workDate: "asc" },
+      });
+
+      const categories = await prisma.referenceData.findMany({
+        where: { group: "timesheet_category" },
+        select: { value: true, label: true },
+      });
+      const categoryLabel = new Map(categories.map((c) => [c.value, c.label]));
+
+      // ---- buckets: daily ≤3 weeks, weekly up to 4 months, else monthly -----
+      // The chart must stay readable: 730 daily columns is a smear, not a
+      // chart, so the granularity follows the span.
+      const bucketDays = spanDays <= 21 ? 1 : spanDays <= 120 ? 7 : 0; // 0 = monthly
+      type Bucket = {
+        key: string;
+        label: string;
+        start: string;
+        end: string;
+        totalHours: number;
+        /** The part of `totalHours` already approved — the chart stacks on it. */
+        approvedHours: number;
+        byUser: Record<string, number>;
+      };
+      const buckets: Bucket[] = [];
+      /** day (YYYY-MM-DD) → bucket index, computed once. */
+      const dayToBucket = new Map<string, number>();
+      const monthToBucket = new Map<string, number>();
+
+      if (bucketDays > 0) {
+        for (let offset = 0; offset < spanDays; offset += bucketDays) {
+          const start = addDays(gte, offset);
+          const end = addDays(gte, Math.min(offset + bucketDays - 1, spanDays - 1));
+          const index = buckets.length;
+          buckets.push({
+            key: isoDay(start),
+            label: start.toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" }),
+            start: isoDay(start),
+            end: isoDay(end),
+            totalHours: 0,
+            approvedHours: 0,
+            byUser: {},
+          });
+          for (let d = 0; d < bucketDays && offset + d < spanDays; d += 1) {
+            dayToBucket.set(isoDay(addDays(start, d)), index);
+          }
+        }
+      } else {
+        const cursor = new Date(Date.UTC(gte.getUTCFullYear(), gte.getUTCMonth(), 1));
+        while (cursor <= lte) {
+          const index = buckets.length;
+          const monthStart = new Date(cursor);
+          const monthEnd = new Date(
+            Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth() + 1, 0)
+          );
+          // Clamp the first/last partial month to the requested range, so the
+          // table's "period start → end" never claims days outside it.
+          const clampStart = isoDay(monthStart) < from ? from : isoDay(monthStart);
+          const clampEnd = isoDay(monthEnd) > to ? to : isoDay(monthEnd);
+          buckets.push({
+            key: `${monthStart.getUTCFullYear()}-${String(monthStart.getUTCMonth() + 1).padStart(2, "0")}`,
+            label: monthStart.toLocaleDateString("en-GB", {
+              month: "short",
+              year: "2-digit",
+              timeZone: "UTC",
+            }),
+            start: clampStart,
+            end: clampEnd,
+            totalHours: 0,
+            approvedHours: 0,
+            byUser: {},
+          });
+          monthToBucket.set(
+            `${monthStart.getUTCFullYear()}-${String(monthStart.getUTCMonth() + 1).padStart(2, "0")}`,
+            index
+          );
+          cursor.setUTCMonth(cursor.getUTCMonth() + 1);
+        }
+      }
+
+      /** Which bucket a work day falls in — the lookup the aggregation uses. */
+      const bucketForDay = (day: string): Bucket | undefined => {
+        if (bucketDays > 0) return buckets[dayToBucket.get(day) ?? -1];
+        return buckets[monthToBucket.get(day.substring(0, 7)) ?? -1];
+      };
+
+      const hoursOf = (v: unknown) => Number(v ?? 0);
+      const memberAgg = new Map<
+        number,
+        {
+          userId: number;
+          name: string;
+          email: string;
+          totalHours: number;
+          approvedHours: number;
+          days: Set<string>;
+          tasks: Set<number>;
+          lastDate: string | null;
+          byStatus: { draft: number; submitted: number; approved: number; rejected: number };
+        }
+      >();
+      const statusTotals = { draft: 0, submitted: 0, approved: 0, rejected: 0 };
+      const categoryAgg = new Map<string, number>();
+      const taskAgg = new Map<number, { id: number; title: string; hours: number }>();
+
+      for (const entry of entries) {
+        const hours = hoursOf(entry.hours);
+        const day = isoDay(entry.workDate);
+        const status = (entry.status as keyof typeof statusTotals) ?? "draft";
+
+        // Every status is counted in the breakdown, so a reviewer sees rejects.
+        if (status in statusTotals) statusTotals[status] += hours;
+
+        const member = memberAgg.get(entry.userId) ?? {
+          userId: entry.userId,
+          name: entry.user?.name ?? `User #${entry.userId}`,
+          email: entry.user?.email ?? "",
+          totalHours: 0,
+          approvedHours: 0,
+          days: new Set<string>(),
+          tasks: new Set<number>(),
+          lastDate: null as string | null,
+          byStatus: { draft: 0, submitted: 0, approved: 0, rejected: 0 },
+        };
+        memberAgg.set(entry.userId, member);
+        if (entry.user && member.name.startsWith("User #")) {
+          member.name = entry.user.name;
+          member.email = entry.user.email;
+        }
+        if (status in member.byStatus) member.byStatus[status] += hours;
+        if (entry.taskId != null) member.tasks.add(entry.taskId);
+
+        // Rejected time is not contribution.
+        if (status === "rejected") continue;
+
+        member.totalHours += hours;
+        if (status === "approved") member.approvedHours += hours;
+        member.days.add(day);
+        if (!member.lastDate || day > member.lastDate) member.lastDate = day;
+
+        const bucket = bucketForDay(day);
+        if (bucket) {
+          bucket.totalHours += hours;
+          if (status === "approved") bucket.approvedHours += hours;
+          bucket.byUser[String(entry.userId)] = (bucket.byUser[String(entry.userId)] ?? 0) + hours;
+        }
+
+        categoryAgg.set(
+          entry.categoryValue,
+          (categoryAgg.get(entry.categoryValue) ?? 0) + hours
+        );
+
+        if (entry.task) {
+          const task = taskAgg.get(entry.task.id) ?? {
+            id: entry.task.id,
+            title: entry.task.title,
+            hours: 0,
+          };
+          task.hours += hours;
+          taskAgg.set(entry.task.id, task);
+        }
+      }
+
+      // ---- rows: live assignments, plus anyone who logged but has left -----
+      // A removed member earns a row only when they actually logged time here
+      // in range; otherwise the roster would read "Former member" beside 0h,
+      // which is noise. Active members always appear, so a zero is visible and
+      // the reader can see the whole team rather than only the contributors.
+      const rows = project.teamAssignments
+        .filter((assignment) => {
+          if (assignment.isActive) return true;
+          return (memberAgg.get(assignment.userId)?.totalHours ?? 0) > 0;
+        })
+        .map((assignment) => {
+          const agg = memberAgg.get(assignment.userId);
+          return {
+            userId: assignment.userId,
+            name: assignment.user.name,
+            email: assignment.user.email,
+            role: assignment.projectRole?.name ?? "Member",
+            isActive: assignment.isActive,
+            isOwner: assignment.userId === project.ownerId,
+            totalHours: agg?.totalHours ?? 0,
+            approvedHours: agg?.approvedHours ?? 0,
+            daysWorked: agg?.days.size ?? 0,
+            tasksTouched: agg?.tasks.size ?? 0,
+            lastLoggedDate: agg?.lastDate ?? null,
+            byStatus: agg?.byStatus ?? { draft: 0, submitted: 0, approved: 0, rejected: 0 },
+          };
+        });
+
+      const assigned = new Set(rows.map((row) => row.userId));
+      for (const [userId, agg] of memberAgg) {
+        if (assigned.has(userId)) continue;
+        rows.push({
+          userId,
+          name: agg.name,
+          email: agg.email,
+          role: "Former member",
+          isActive: false,
+          isOwner: false,
+          totalHours: agg.totalHours,
+          approvedHours: agg.approvedHours,
+          daysWorked: agg.days.size,
+          tasksTouched: agg.tasks.size,
+          lastLoggedDate: agg.lastDate,
+          byStatus: agg.byStatus,
+        });
+      }
+      rows.sort((a, b) => b.totalHours - a.totalHours || a.name.localeCompare(b.name));
+
+      const totalHours = rows.reduce((sum, row) => sum + row.totalHours, 0);
+      const approvedHours = rows.reduce((sum, row) => sum + row.approvedHours, 0);
+      const round2 = (n: number) => Math.round(n * 100) / 100;
+      for (const row of rows) {
+        (row as any).sharePercent =
+          totalHours > 0 ? Math.round((row.totalHours / totalHours) * 1000) / 10 : 0;
+        // Effort in 8-hour days, so "2.5h" reads as a third of a day rather
+        // than being silently rounded up to "1 day" by `daysWorked`.
+        (row as any).personDays = round2(row.totalHours / HOURS_PER_WORKING_DAY);
+      }
+
+      res.status(200).json({
+        success: true,
+        data: {
+          projectId: project.id,
+          projectName: project.name,
+          from,
+          to,
+          bucketDays,
+          granularity: bucketDays === 1 ? "day" : bucketDays === 7 ? "week" : "month",
+          hoursPerWorkingDay: HOURS_PER_WORKING_DAY,
+          members: rows,
+          buckets,
+          byCategory: [...categoryAgg]
+            .map(([value, hours]) => ({
+              value,
+              label: categoryLabel.get(value) ?? value,
+              hours: Math.round(hours * 100) / 100,
+            }))
+            .sort((a, b) => b.hours - a.hours),
+          byTask: [...taskAgg.values()]
+            .map((task) => ({ ...task, hours: Math.round(task.hours * 100) / 100 }))
+            .sort((a, b) => b.hours - a.hours)
+            .slice(0, 10),
+          totals: {
+            hours: Math.round(totalHours * 100) / 100,
+            approvedHours: Math.round(approvedHours * 100) / 100,
+            personDays: round2(totalHours / HOURS_PER_WORKING_DAY),
+            contributors: rows.filter((row) => row.totalHours > 0).length,
+            entries: entries.length,
+            byStatus: statusTotals,
+          },
+        },
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
 export default router;

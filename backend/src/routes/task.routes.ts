@@ -9,11 +9,46 @@ import { validate } from "../middleware/validate.js";
 import { RequestWithUser } from "../types/index.js";
 import { NotFoundError, ValidationError, AppError } from "../lib/errors.js";
 import prisma from "../config/database.js";
-import { getIO } from "../lib/socket.js";
+import { emitTaskEvent } from "../lib/socket.js";
 import { logTaskActivity } from "../lib/task-activity.js";
 import { recomputeScopeProgress } from "./scope.routes.js";
 
 const router = Router();
+
+/**
+ * Who may be assigned work on a project: its **active** team members.
+ *
+ * Removing someone from a project flips `TeamAssignment.isActive` rather than
+ * deleting the row, so an unfiltered read of `teamAssignments` still returns
+ * people who have left. Offering them in an assignee picker is wrong twice
+ * over — they no longer have access to the project, and hours logged against
+ * them would be attributed to somebody who cannot see the work.
+ *
+ * The client filters the same way; this is the authority, so a stale tab or a
+ * hand-rolled request cannot assign a departed member.
+ */
+async function assertAssigneesOnTeam(projectId: number, assigneeIds: number[]): Promise<void> {
+  if (assigneeIds.length === 0) return;
+  const unique = [...new Set(assigneeIds)];
+  const active = await prisma.teamAssignment.findMany({
+    where: { projectId, isActive: true, userId: { in: unique } },
+    select: { userId: true },
+  });
+  const allowed = new Set(active.map((a) => a.userId));
+  const rejected = unique.filter((id) => !allowed.has(id));
+  if (rejected.length > 0) {
+    const names = await prisma.user.findMany({
+      where: { id: { in: rejected } },
+      select: { id: true, name: true },
+    });
+    const byId = new Map(names.map((u) => [u.id, u.name]));
+    throw new ValidationError({
+      assignees: rejected.map(
+        (id) => `${byId.get(id) ?? `User ${id}`} is not an active member of this project`
+      ),
+    });
+  }
+}
 
 // ── Task attachments ─────────────────────────────────────────────────────────
 // Stored on disk under uploads/tasks/ — same pattern as the helpdesk's
@@ -114,12 +149,14 @@ async function assertScopeItem(projectId: number, scopeItemId?: number | null) {
 /** TaskActivity entry for a scope link/unlink, with the WBS label for the timeline. */
 async function logScopeActivity(
   taskId: number,
+  projectId: number | null | undefined,
   userId: number,
   action: "scope_linked" | "scope_unlinked",
   scope: { wbsNumber: string; title: string } | null
 ) {
   await logTaskActivity({
     taskId,
+    projectId,
     userId,
     action,
     details: scope
@@ -148,6 +185,19 @@ const createSubtaskSchema = z.object({
 });
 
 const updateSubtaskSchema = createSubtaskSchema.partial();
+
+/**
+ * Discussion paging. `channel` narrows to one thread (`task` = comments with
+ * no subtask; a number = that subtask; omitted/`all` = every thread merged).
+ * `before` is a comment id cursor — ids are monotonic with createdAt, so
+ * "older than this id" is the same as "earlier in the conversation" and needs
+ * only the existing `@@index([taskId])` scan.
+ */
+const listCommentsSchema = z.object({
+  channel: z.union([z.literal("all"), z.literal("task"), z.coerce.number().int().positive()]).optional(),
+  before: z.coerce.number().int().positive().optional(),
+  limit: z.coerce.number().int().min(1).max(100).optional(),
+});
 
 // POST /api/tasks/columns
 router.post(
@@ -198,6 +248,8 @@ router.post(
       // another project's WBS row would poison the progress rollup.
       const scopeItem = await assertScopeItem(data.projectId, data.scopeItemId);
 
+      await assertAssigneesOnTeam(data.projectId, data.assignees ?? []);
+
       const task = await prisma.projectTask.create({
         data: {
           projectId: data.projectId,
@@ -215,6 +267,7 @@ router.post(
       // Log activity: task created
       await logTaskActivity({
         taskId: task.id,
+        projectId: task.projectId,
         userId: req.user!.id,
         action: "created",
         details: {
@@ -225,7 +278,7 @@ router.post(
       });
 
       if (scopeItem) {
-        await logScopeActivity(task.id, req.user!.id, "scope_linked", scopeItem);
+        await logScopeActivity(task.id, task.projectId, req.user!.id, "scope_linked", scopeItem);
       }
 
       // Log assignment activities
@@ -234,6 +287,7 @@ router.post(
           const assignee = await prisma.user.findUnique({ where: { id: assigneeId }, select: { name: true } });
           await logTaskActivity({
             taskId: task.id,
+            projectId: task.projectId,
             userId: req.user!.id,
             action: "assigned",
             details: { assigneeId, assigneeName: assignee?.name || "Unknown" },
@@ -241,7 +295,7 @@ router.post(
         }
       }
 
-      try { getIO().emit('task-created', { task }); } catch (e) {}
+      try { emitTaskEvent(data.projectId, 'task-created', { task }); } catch (e) {}
 
       // New task on a scope item shifts that item's progress rollup.
       if (data.scopeItemId) {
@@ -274,6 +328,7 @@ router.put(
           const newCol = await prisma.taskColumn.findUnique({ where: { id: t.columnId } });
           await logTaskActivity({
             taskId: t.id,
+            projectId: existing.projectId,
             userId: req.user!.id,
             action: "moved",
             details: {
@@ -305,7 +360,11 @@ router.put(
         await recomputeScopeProgress(prisma, touchedProjectId);
       }
 
-      try { getIO().emit('tasks-reordered', { tasks }); } catch (e) {}
+      // One board = one project, but loop defensively in case a drag ever spans
+      // boards — each project's viewers get the frame.
+      for (const touchedProjectId of touchedProjects) {
+        try { emitTaskEvent(touchedProjectId, 'tasks-reordered', { tasks }); } catch (e) {}
+      }
 
       res.status(200).json({ success: true, message: "Tasks reordered" });
     } catch (error) {
@@ -398,7 +457,7 @@ router.post(
 
       // One event, not N — the board refetches from the payload anyway.
       if (created.length > 0) {
-        try { getIO().emit("tasks-generated", { projectId, count: created.length }); } catch (e) {}
+        try { emitTaskEvent(projectId, "tasks-generated", { projectId, count: created.length }); } catch (e) {}
         await recomputeScopeProgress(prisma, projectId);
       }
 
@@ -438,6 +497,11 @@ router.put(
         scopeItem = await assertScopeItem(existing.projectId, data.scopeItemId);
       }
 
+      // Assignees must be active on this task's project — see the helper.
+      if (data.assignees !== undefined) {
+        await assertAssigneesOnTeam(existing.projectId, data.assignees ?? []);
+      }
+
       const { scopeItemId: _incomingScopeItemId, ...updateData } = data;
       const task = await prisma.projectTask.update({
         where: { id: taskId! },
@@ -453,6 +517,7 @@ router.put(
       if (data.scopeItemId !== undefined && existing.scopeItemId !== task.scopeItemId) {
         await logScopeActivity(
           task.id,
+          existing.projectId,
           req.user!.id,
           task.scopeItemId ? "scope_linked" : "scope_unlinked",
           scopeItem
@@ -471,6 +536,7 @@ router.put(
           const user = await prisma.user.findUnique({ where: { id: assigneeId }, select: { name: true } });
           await logTaskActivity({
             taskId: taskId!,
+            projectId: existing.projectId,
             userId: req.user!.id,
             action: "assigned",
             details: { assigneeId, assigneeName: user?.name || "Unknown" },
@@ -480,6 +546,7 @@ router.put(
           const user = await prisma.user.findUnique({ where: { id: assigneeId }, select: { name: true } });
           await logTaskActivity({
             taskId: taskId!,
+            projectId: existing.projectId,
             userId: req.user!.id,
             action: "unassigned",
             details: { assigneeId, assigneeName: user?.name || "Unknown" },
@@ -497,13 +564,14 @@ router.put(
       if (changedFields.length > 0 && !data.assignees) {
         await logTaskActivity({
           taskId: taskId!,
+          projectId: existing.projectId,
           userId: req.user!.id,
           action: "updated",
           details: { fields: changedFields },
         });
       }
 
-      try { getIO().emit('task-updated', { task }); } catch (e) {}
+      try { emitTaskEvent(task.projectId, 'task-updated', { task }); } catch (e) {}
 
       // Link or column changes shift the scope progress rollup.
       if (
@@ -520,7 +588,10 @@ router.put(
   }
 );
 
-// GET /api/tasks/:id — task detail with comments and activities
+// GET /api/tasks/:id — task detail. Comments are NOT inlined any more: a
+// long-lived task accumulates threads without bound, so the conversation is
+// paged through GET /:id/comments and this payload carries only per-thread
+// counts (enough to render channel pills before any messages load).
 router.get(
   "/:id",
   authenticate,
@@ -532,17 +603,6 @@ router.get(
       const task = await prisma.projectTask.findUnique({
         where: { id: taskId },
         include: {
-          comments: {
-            include: {
-              user: { select: { id: true, name: true, email: true } },
-              // Files ride in the bubble, chat-style.
-              attachments: {
-                where: { isActive: true },
-                include: { uploader: { select: { id: true, name: true } } },
-              },
-            },
-            orderBy: { createdAt: "asc" },
-          },
           activities: {
             include: {
               user: { select: { id: true, name: true, email: true } },
@@ -580,6 +640,33 @@ router.get(
         _sum: { hours: true },
       });
 
+      // Per-thread message counts. One row per distinct subtaskId (null = the
+      // task's own thread), so the client can label every channel pill before
+      // it has fetched a single message.
+      const grouped = await prisma.taskComment.groupBy({
+        by: ["subtaskId"],
+        where: { taskId },
+        _count: { _all: true },
+      });
+      const commentCounts: Record<string, number> = { task: 0 };
+      for (const row of grouped) {
+        const key = row.subtaskId === null ? "task" : String(row.subtaskId);
+        commentCounts[key] = row._count._all;
+      }
+
+      // Message count per author. Until comments were paged the detail view
+      // counted them client-side; that is no longer possible, so the per-
+      // assignee "N updates" stat is served from here instead.
+      const byAuthor = await prisma.taskComment.groupBy({
+        by: ["userId"],
+        where: { taskId },
+        _count: { _all: true },
+      });
+      const commentUserCounts: Record<string, number> = {};
+      for (const row of byAuthor) {
+        commentUserCounts[String(row.userId)] = row._count._all;
+      }
+
       // Resolve assignee names
       const assigneeIds = (task.assignees as number[]) || [];
       const assignees = assigneeIds.length > 0
@@ -595,6 +682,77 @@ router.get(
           ...task,
           loggedHours: Number(loggedAgg._sum.hours ?? 0),
           assigneeDetails: assignees,
+          commentCounts,
+          commentUserCounts,
+        },
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+// GET /api/tasks/:id/comments — one page of the conversation, newest page
+// first internally but returned in reading order.
+//
+// `channel` selects a thread ('task' = no subtask, a number = that subtask,
+// omitted/'all' = every thread merged). `before` is a comment id cursor:
+// ids are monotonic with createdAt, so older-than is earlier-in-conversation.
+// Work logs are NOT paged here — they stay in full on GET /:id/timeEntries
+// because hours are low-volume and the feed interleaves them by timestamp.
+router.get(
+  "/:id/comments",
+  authenticate,
+  validate(listCommentsSchema, "query"),
+  async (req: RequestWithUser, res: Response, next: NextFunction) => {
+    try {
+      const taskId = await resolveTaskParam(String(req.params.id));
+      if (taskId === null) throw new NotFoundError("Task not found");
+
+      const { channel, before, limit: rawLimit } = req.query as {
+        channel?: "all" | "task" | number;
+        before?: number;
+        limit?: number;
+      };
+      const limit = rawLimit ?? 50;
+
+      const channelWhere =
+        channel === undefined || channel === "all"
+          ? {}
+          : channel === "task"
+            ? { subtaskId: null }
+            : { subtaskId: Number(channel) };
+
+      // Fetch one extra row to learn whether an older page exists without a
+      // second count query.
+      const rows = await prisma.taskComment.findMany({
+        where: {
+          taskId,
+          ...channelWhere,
+          ...(before ? { id: { lt: before } } : {}),
+        },
+        include: {
+          user: { select: { id: true, name: true, email: true } },
+          attachments: {
+            where: { isActive: true },
+            include: { uploader: { select: { id: true, name: true } } },
+          },
+        },
+        orderBy: { id: "desc" },
+        take: limit + 1,
+      });
+
+      const hasMore = rows.length > limit;
+      const page = hasMore ? rows.slice(0, limit) : rows;
+      // The query walked backwards; hand the client a chronological page.
+      const data = page.reverse();
+
+      res.status(200).json({
+        success: true,
+        data,
+        meta: {
+          hasMore,
+          nextBefore: hasMore && data.length > 0 ? data[0].id : null,
         },
       });
     } catch (error) {
@@ -691,6 +849,7 @@ router.post(
       // Log comment activity
       await logTaskActivity({
         taskId,
+        projectId: task.projectId,
         userId: req.user!.id,
         action: "commented",
         details: {
@@ -700,7 +859,7 @@ router.post(
         },
       });
 
-      try { getIO().emit('task-comment', { taskId, comment: withAttachments }); } catch (e) {}
+      try { emitTaskEvent(task.projectId, 'task-comment', { taskId, comment: withAttachments }); } catch (e) {}
 
       res.status(201).json({ success: true, data: withAttachments });
     } catch (error) {
@@ -767,6 +926,8 @@ router.post(
         ])
       );
 
+      await assertAssigneesOnTeam(task.projectId, mergedAssignees);
+
       const subtask = await prisma.taskSubtask.create({
         data: {
           taskId,
@@ -785,12 +946,13 @@ router.post(
 
       await logTaskActivity({
         taskId,
+        projectId: task.projectId,
         userId: req.user!.id,
         action: "subtask_created",
         details: { subtaskId: subtask.id, title: subtask.title },
       });
 
-      try { getIO().emit('task-updated', { taskId }); } catch (e) {}
+      try { emitTaskEvent(task.projectId, 'task-updated', { taskId }); } catch (e) {}
 
       res.status(201).json({ success: true, data: subtask });
     } catch (error) {
@@ -810,7 +972,10 @@ router.put(
       if (taskId === null) throw new NotFoundError("Task not found");
       const subtaskId = parseInt(req.params.subtaskId, 10);
 
-      const existing = await prisma.taskSubtask.findUnique({ where: { id: subtaskId } });
+      const existing = await prisma.taskSubtask.findUnique({
+        where: { id: subtaskId },
+        include: { task: { select: { projectId: true } } },
+      });
       if (!existing || existing.taskId !== taskId) throw new NotFoundError("Subtask not found");
 
       const data = req.body;
@@ -824,6 +989,7 @@ router.put(
             ...(data.assigneeId ? [data.assigneeId] : []),
           ])
         );
+        await assertAssigneesOnTeam(existing.task.projectId, nextAssignees);
       }
 
       const subtask = await prisma.taskSubtask.update({
@@ -846,6 +1012,7 @@ router.put(
 
       await logTaskActivity({
         taskId,
+        projectId: existing.task.projectId,
         userId: req.user!.id,
         action: "subtask_updated",
         details: {
@@ -856,7 +1023,7 @@ router.put(
         },
       });
 
-      try { getIO().emit('task-updated', { taskId }); } catch (e) {}
+      try { emitTaskEvent(existing.task.projectId, 'task-updated', { taskId }); } catch (e) {}
 
       res.status(200).json({ success: true, data: subtask });
     } catch (error) {
@@ -875,7 +1042,10 @@ router.delete(
       if (taskId === null) throw new NotFoundError("Task not found");
       const subtaskId = parseInt(req.params.subtaskId, 10);
 
-      const existing = await prisma.taskSubtask.findUnique({ where: { id: subtaskId } });
+      const existing = await prisma.taskSubtask.findUnique({
+        where: { id: subtaskId },
+        include: { task: { select: { projectId: true } } },
+      });
       if (!existing || existing.taskId !== taskId) throw new NotFoundError("Subtask not found");
 
       // Cascade removes the subtask's time entries (hours are removed with it)
@@ -883,12 +1053,13 @@ router.delete(
 
       await logTaskActivity({
         taskId,
+        projectId: existing.task.projectId,
         userId: req.user!.id,
         action: "subtask_deleted",
         details: { subtaskId, title: existing.title },
       });
 
-      try { getIO().emit('task-updated', { taskId }); } catch (e) {}
+      try { emitTaskEvent(existing.task.projectId, 'task-updated', { taskId }); } catch (e) {}
 
       res.status(204).send();
     } catch (error) {
@@ -917,7 +1088,7 @@ router.delete(
         await recomputeScopeProgress(prisma, existing.projectId);
       }
 
-      try { getIO().emit('task-deleted', { id: taskId! }); } catch (e) {}
+      try { emitTaskEvent(existing.projectId, 'task-deleted', { id: taskId! }); } catch (e) {}
 
       res.status(204).send();
     } catch (error) {
