@@ -1,11 +1,12 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { scopeApi, type ScopeItem, type ScopeItemPayload } from '@/api/scope';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { useAuth } from '@/hooks/useAuth';
 import toast from '@/lib/toast';
-import { buildScopeTree, moveWithinParent } from './scope/derive';
+import { buildScopeTree, moveWithinParent, summarizeScope } from './scope/derive';
 import { ScopeTree } from './scope/ScopeTree';
+import { ScopeSummary } from './scope/ScopeSummary';
 import { ScopeItemDialog } from './scope/ScopeItemDialog';
 
 /**
@@ -79,6 +80,7 @@ export function ScopeTab({ project }: { project: any }) {
 
   const items = data?.data ?? [];
   const tree = buildScopeTree(items);
+  const summary = useMemo(() => summarizeScope(items), [items]);
   const itemById = new Map(items.map((item) => [item.id, item]));
   const teamMembers = (project.teamAssignments ?? [])
     .filter((assignment: any) => assignment.isActive !== false)
@@ -88,7 +90,11 @@ export function ScopeTab({ project }: { project: any }) {
     }));
 
   return (
-    <>
+    <div className="space-y-4">
+      {/* Summary reads the same fetch the tree does, so the totals can never
+          disagree with the rows below them. */}
+      {!isLoading && items.length > 0 && <ScopeSummary summary={summary} />}
+
       <ScopeTree
         projectId={projectId}
         items={items}
@@ -149,6 +155,6 @@ export function ScopeTab({ project }: { project: any }) {
         onConfirm={() => deleting && deleteMutation.mutate(deleting.id)}
         isConfirming={deleteMutation.isPending}
       />
-    </>
+    </div>
   );
 }

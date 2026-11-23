@@ -423,7 +423,11 @@ export interface ScopeRollup {
   completed: number;
   inProgress: number;
   overdue: number;
-  /** Mean progress across root items (parents already average children). */
+  /**
+   * Share of work packages that are complete, 0–100. Null when there are no
+   * leaves. Deliberately the SAME definition the Scope tab's summary uses
+   * (`summarizeScope`) — the two tiles sit two tabs apart and must agree.
+   */
   progressPercent: number | null;
 }
 
@@ -439,14 +443,12 @@ export function rollupScope(project: any, now: Date = new Date()): ScopeRollup {
     (item) => item.endDate && item.status !== 'completed' && startOfDay(new Date(item.endDate)) < today
   ).length;
 
-  const roots = items.filter((item) => !item.parentId);
-  const progressValues = roots
-    .map((item) => item.progress)
-    .filter((value): value is number => value != null);
-  const progressPercent =
-    progressValues.length > 0
-      ? Math.round(progressValues.reduce((a, b) => a + b, 0) / progressValues.length)
-      : null;
+  // Completion is measured over the work packages, NOT by averaging root
+  // `progress` values. `progress` is null for any item with neither linked
+  // tasks nor children that have them, so a whole unstarted phase contributes
+  // nothing to the average — one finished phase then reads as 100% while the
+  // caption beside it correctly says "2/5 work packages done".
+  const progressPercent = leaves.length > 0 ? Math.round((completed / leaves.length) * 100) : null;
 
   return {
     total: items.length,

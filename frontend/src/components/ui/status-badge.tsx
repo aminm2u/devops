@@ -27,6 +27,7 @@ export type StatusDomain =
   | 'grn'
   | 'asset'
   | 'internalProject'
+  | 'projectScope'
   | 'requisition'
   | 'helpdeskStatus'
   | 'helpdeskPriority'
@@ -86,6 +87,13 @@ export const statusBadgeClasses: Record<StatusDomain, Record<string, string>> = 
     on_hold: amber,
     completed: green,
     cancelled: red,
+  },
+  /** Scope-of-work item status. Deliberately its own domain: these are WBS
+   *  states, not project states, and must not inherit `on_hold`/`cancelled`. */
+  projectScope: {
+    planned: gray,
+    in_progress: blue,
+    completed: green,
   },
   requisition: {
     draft: gray,

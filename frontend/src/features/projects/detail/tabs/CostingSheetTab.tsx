@@ -34,6 +34,8 @@ import { formatMYR } from '@/lib/format';
 import { CostItemDialog } from './costing/CostItemDialog';
 import { ResourceDialog } from './costing/ResourceDialog';
 import { SignOffPanel } from './costing/SignOffPanel';
+// Shared with the Scope tab — one definition of WBS depth and WBS ordering.
+import { compareWbs, wbsDepth } from './scope/derive';
 
 /**
  * The costing sheet, mirroring the workbook: cost categories (per-project
@@ -975,22 +977,6 @@ function ScopeTrackingRow({
       </TableCell>
     </TableRow>
   );
-}
-
-function wbsDepth(wbsNumber: string): number {
-  return wbsNumber.split('.').length - 1;
-}
-
-/** Tree order: compare WBS segment by numeric segment — "2" < "2.1" < "2.1.1" < "2.2". */
-function compareWbs(a: ScopeItem, b: ScopeItem): number {
-  const segsA = a.wbsNumber.split('.').map(Number);
-  const segsB = b.wbsNumber.split('.').map(Number);
-  const len = Math.max(segsA.length, segsB.length);
-  for (let i = 0; i < len; i += 1) {
-    const diff = (segsA[i] ?? 0) - (segsB[i] ?? 0);
-    if (diff !== 0) return diff;
-  }
-  return 0;
 }
 
 /** Tiny inline dialog for creating/renaming a cost category. */
